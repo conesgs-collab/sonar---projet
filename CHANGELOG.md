@@ -6,7 +6,37 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.5.0-hardware-risk-gate] — 2026-08-16
+## [3.6.0-hmac] — 2026-08-16
+
+### Contexte
+Dette technique documentée depuis v3.4.0 : la signature des jetons de rôle
+était un hachage à clé maison (`sha256(secret|identity|role|expiry)`), pas un
+HMAC formel — trade-off explicitement assumé faute d'`openssl` confirmé
+disponible. `openssl` s'est avéré présent ; plus de raison de garder la
+version plus faible.
+
+### Changé
+- `sonar_role_sign` utilise désormais un **vrai HMAC-SHA256** (RFC 2104, via
+  `openssl dgst -sha256 -hmac`) au lieu du hachage à clé maison.
+- Nouveau garde `sonar_require_openssl` : échec **net et explicite** si
+  `openssl` est absent au moment de signer/vérifier un jeton — jamais de
+  repli silencieux vers une construction plus faible. Le bootstrap du
+  secret n'en a pas besoin (généré via `sha256sum`, inchangé) ; seules
+  l'émission et la vérification de jeton l'exigent.
+- `openssl` ajouté à la liste vérifiée par `--dependencies-report`.
+
+### Testé
+- Signature vérifiée : 64 caractères hex (SHA-256), format HMAC standard.
+- Jeton légitime accordé, jeton avec signature falsifiée rejeté (motif
+  "signature invalide").
+- Absence d'`openssl` simulée par un `PATH` complet (1292 binaires du
+  système réel) reconstruit sans lui : `--role-bootstrap` fonctionne toujours
+  (n'en dépend pas), `--role-issue-token` échoue proprement avec message
+  explicite (pas de crash silencieux, pas de repli affaibli).
+- self-audit 11/11, self-test 0 erreur, pipeline `--disk --dry-run` sur
+  `/dev/loop` : EXIT 0.
+
+
 
 ### Contexte
 Aucun accès à du matériel physique pour valider un vrai boot Ventoy pour le
@@ -127,7 +157,7 @@ Ce qui manque encore pour que l'outil soit considéré mature — voir aussi
 
 - **Jamais testé sur du vrai matériel.** Tout ce qui est validé l'a été en
   `--dry-run` et sur `/dev/loop`, jamais un vrai boot Ventoy/Secure Boot.
-- Hachage à clé (SHA-256), pas un HMAC formel.
+- Hachage à clé (SHA-256), pas un HMAC formel. ~~Résolu en v3.6.0~~
 - Aucun audit de sécurité externe / pentest.
 - Fichier monolithique (~3800 lignes) — refactor modulaire à faire une fois
   la CI en place (jamais avant, pour garder un filet de sécurité).

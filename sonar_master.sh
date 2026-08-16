@@ -139,7 +139,7 @@ SONAR_AI_SECURITY_MODE="${SONAR_AI_SECURITY_MODE:-advisory}"
 # operator, with an expiry and individual revocability:
 #
 #   TOKEN = "<identity>:<role>:<expiry_epoch>:<signature>"
-#   SIGNATURE = keyed-hash(secret | identity | role | expiry_epoch)
+#   SIGNATURE = HMAC-SHA256(secret, identity | role | expiry_epoch)
 #
 # Per-identity: two technicians with the same role get different tokens, so
 # one leaked/compromised token can be revoked without rotating the secret or
@@ -149,11 +149,14 @@ SONAR_AI_SECURITY_MODE="${SONAR_AI_SECURITY_MODE:-advisory}"
 # secret needed to check membership), so revoking doesn't require re-issuing
 # everyone else's tokens.
 #
-# This remains a keyed SHA-256 hash, not a formal HMAC construction, and
-# sonar_const_time_eq is a best-effort constant-time compare, not a formally
-# verified one — both are accepted trade-offs for a local, single-host Bash
-# tool defending against casual privilege self-escalation, not a network
-# attacker with a timing oracle.
+# The signature is a real HMAC-SHA256 (RFC 2104, via `openssl dgst -hmac`),
+# not a bespoke keyed hash — openssl is a hard requirement for the role-lock
+# specifically (checked at first use, fails closed with a clear message if
+# missing, never silently falls back to a weaker construction). Comparison
+# still goes through sonar_const_time_eq, a best-effort constant-time
+# compare rather than a formally verified one — an accepted trade-off for a
+# local, single-host Bash tool defending against casual privilege
+# self-escalation, not a network attacker with a timing oracle.
 # ----------------------------------------------------------------------------
 SONAR_ROLE_SECRET_FILE="${SONAR_ROLE_SECRET_FILE:-${SONAR_SECURITY_DIR}/Keys/role_secret.key}"
 SONAR_ROLE_REVOKED_FILE="${SONAR_ROLE_REVOKED_FILE:-${SONAR_SECURITY_DIR}/Keys/revoked_tokens.tsv}"
@@ -224,12 +227,24 @@ sonar_role_bootstrap_secret() {
     echo "[SONAR] Émettez des jetons avec: --role-issue-token <ROLE> <IDENTITE> [JOURS_VALIDITE=30]."
 }
 
-# sonar_role_sign IDENTITY ROLE EXPIRY -> signature (requires the secret)
+# sonar_require_openssl: hard dependency for the role-lock's HMAC. Fails
+# closed with a clear message — never silently downgrades to a weaker
+# construction, consistent with the fail-safe posture of the rest of the
+# lock (an unclear failure mode here would be worse than a loud one).
+sonar_require_openssl() {
+    command -v openssl >/dev/null 2>&1 && return 0
+    echo "[SONAR] openssl est requis pour signer/vérifier les jetons de rôle (HMAC-SHA256)." >&2
+    echo "[SONAR] Installez-le (ex: apt install openssl) puis réessayez." >&2
+    return 1
+}
+
+# sonar_role_sign IDENTITY ROLE EXPIRY -> HMAC-SHA256(secret, "identity|role|expiry")
 sonar_role_sign() {
     local identity="$1" role="$2" expiry="$3" secret
+    sonar_require_openssl || return 1
     sonar_role_secret_exists || return 1
     secret="$(cat "${SONAR_ROLE_SECRET_FILE}")" || return 1
-    sonar_hash_str "${secret}|${identity}|${role}|${expiry}"
+    printf '%s' "${identity}|${role}|${expiry}" | openssl dgst -sha256 -hmac "${secret}" -r | awk '{print $1}'
 }
 
 # sonar_role_token_id IDENTITY ROLE EXPIRY -> revocation key (no secret needed:
@@ -2978,7 +2993,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.5.0-hardware-risk-gate"
+SONAR_VERSION="3.6.0-hmac"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -2998,7 +3013,7 @@ sonar_dependency_report() {
     sonar_report_init
     printf 'COMMAND\tSTATUS\tPATH\n' > "$out"
     local c path status
-    for c in bash awk sed grep find sort date python3 curl wget tar gzip sha256sum shasum lsblk blockdev mount umount dd mkfs.ext4; do
+    for c in bash awk sed grep find sort date python3 curl wget tar gzip sha256sum shasum lsblk blockdev mount umount dd mkfs.ext4 openssl; do
         path="$(command -v "$c" 2>/dev/null || true)"
         status=ABSENT; [[ -n "$path" ]] && status=OK
         printf '%s\t%s\t%s\n' "$c" "$status" "$path" >> "$out"

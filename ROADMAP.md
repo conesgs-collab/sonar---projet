@@ -58,8 +58,6 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
 
 ## Dette technique connue (voir aussi CHANGELOG.md)
 
-- Hachage à clé SHA-256 pour les signatures de jeton, pas un HMAC formel
-  (documenté comme compromis assumé pour une menace locale, pas réseau)
 - Comparaison "temps constant" best-effort, pas formellement vérifiée
 - Fichier monolithique en attendant P1
 - Aucune gestion multi-technicien concurrente sur le hashchain/audit partagé
