@@ -593,6 +593,41 @@ INCLUDE_LOGGING="${INCLUDE_LOGGING:-true}"
 GENERATE_README="${GENERATE_README:-true}"
 DRY_RUN="${DRY_RUN:-false}"
 YES="${YES:-false}"
+# This build has never been validated on a real physical boot (Ventoy install
+# + actual BIOS/UEFI boot). --dry-run and /dev/loop testing exercise the
+# script's own logic, not the resulting bootable media. SONAR_HARDWARE_RISK_ACK
+# (or --accept-hardware-risk) is a SEPARATE gate from --yes (disk-erase
+# confirmation) — deliberately so that scripting `--yes` alone for automation
+# can't silently skip acknowledging this specific, still-open risk.
+SONAR_HARDWARE_RISK_ACK="${SONAR_HARDWARE_RISK_ACK:-false}"
+
+# sonar_require_hardware_risk_ack: called once, only for a real (non
+# --dry-run) --disk deployment. Blocks with a loud warning unless the
+# operator already acknowledged via env var/flag, or types the exact phrase
+# interactively. This is a software mitigation for a risk that can only be
+# fully closed by an actual hardware/boot test matrix (tracked in
+# ROADMAP.md, P0) — it does not replace that testing, it makes sure nobody
+# hits the risk without having been told about it first.
+sonar_require_hardware_risk_ack() {
+    if [[ "${SONAR_HARDWARE_RISK_ACK}" == "true" ]]; then
+        sonar_audit "HARDWARE_RISK_ACKNOWLEDGED" "method=flag_or_env"
+        return 0
+    fi
+    echo "==============================================================" >&2
+    echo "[SONAR] AVERTISSEMENT: ce build n'a JAMAIS été validé sur un"    >&2
+    echo "[SONAR] démarrage physique réel (Ventoy + BIOS/UEFI). Seule la"  >&2
+    echo "[SONAR] logique d'écriture a été testée (--dry-run, /dev/loop)." >&2
+    echo "[SONAR] La clé produite peut échouer à démarrer sur du matériel"  >&2
+    echo "[SONAR] réel. Voir ROADMAP.md (section P0)."                      >&2
+    echo "==============================================================" >&2
+    echo "Tapez exactement: JE COMPRENDS LE RISQUE" >&2
+    read -r hw_ack
+    if [[ "${hw_ack}" != "JE COMPRENDS LE RISQUE" ]]; then
+        sonar_audit "HARDWARE_RISK_ACKNOWLEDGED" "method=refused"
+        error_exit "Acquiescement du risque matériel refusé."
+    fi
+    sonar_audit "HARDWARE_RISK_ACKNOWLEDGED" "method=interactive"
+}
 DOWNLOAD_VENTOY="${DOWNLOAD_VENTOY:-1}"
 SONAR_CA_CERT="${SONAR_CA_CERT:-}"
 SONAR_GPG_KEY="${SONAR_GPG_KEY:-}"
@@ -682,6 +717,9 @@ Déploiement:
   --disk DEV                 Disque USB cible (obligatoire)
   --source DIR               Racine SONAR_SOURCE (défaut: ./SONAR_SOURCE)
   --yes                      Confirmer l'effacement sans question
+  --accept-hardware-risk       Acquitte le risque "jamais testé sur matériel réel"
+                                sans invite (distinct de --yes ; les deux sont
+                                nécessaires pour un déploiement réel non interactif)
   --dry-run                  Simulation sans modification du disque
   --batch N                  Nombre de disques (défaut: 1)
   --persistence N            Nombre de fichiers de persistance (défaut: 5)
@@ -769,6 +807,7 @@ parse_final_args() {
                 MANIFEST_SOURCE="${SOURCE_DIR}/MANIFEST.tsv"
                 shift 2 ;;
             --yes) YES=true; shift ;;
+            --accept-hardware-risk) SONAR_HARDWARE_RISK_ACK=true; shift ;;
             --dry-run) DRY_RUN=true; shift ;;
             --batch) [[ $# -ge 2 ]] || error_exit "--batch nécessite une valeur."; BATCH_COUNT="$2"; shift 2 ;;
             --persistence) [[ $# -ge 2 ]] || error_exit "--persistence nécessite une valeur."; PERSISTENCE_COUNT="$2"; shift 2 ;;
@@ -1104,6 +1143,9 @@ preflight_final() {
     size_gib=$((size_bytes / 1024 / 1024 / 1024))
     (( size_gib >= MIN_DISK_GIB )) || error_exit "Disque trop petit: ${size_gib} GiB < ${MIN_DISK_GIB} GiB"
     log_ok "Disque cible: ${DISK} (${size_gib} GiB)"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+        sonar_require_hardware_risk_ack
+    fi
     if [[ "${DRY_RUN}" != "true" && "${YES}" != "true" ]]; then
         echo "ATTENTION: ${DISK} sera ENTIEREMENT EFFACE."
         echo "Tapez exactement: EFFACER ${DISK}"
@@ -2924,6 +2966,7 @@ sonar_structural_self_audit() {
     fi
     grep -q '^sonar_role_enforce_lock() {' "$self" && echo 'PASS: role lock present' || { echo 'FAIL: role lock missing'; errors=$((errors+1)); }
     grep -q '^sonar_role_revoke_token() {' "$self" && echo 'PASS: role token revocation present' || { echo 'FAIL: role token revocation missing'; errors=$((errors+1)); }
+    grep -q '^sonar_require_hardware_risk_ack() {' "$self" && echo 'PASS: hardware risk gate present' || { echo 'FAIL: hardware risk gate missing'; errors=$((errors+1)); }
     return "$errors"
 }
 
@@ -2935,7 +2978,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.4.0-role-lock-identity"
+SONAR_VERSION="3.5.0-hardware-risk-gate"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

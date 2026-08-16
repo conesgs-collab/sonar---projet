@@ -6,7 +6,37 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.4.0-role-lock-identity] — 2026-08-16
+## [3.5.0-hardware-risk-gate] — 2026-08-16
+
+### Contexte
+Aucun accès à du matériel physique pour valider un vrai boot Ventoy pour le
+moment (bloqué côté opérateur, pas résolu). En attendant, il fallait combler
+un vrai trou : rien n'avertissait l'opérateur d'un **vrai** déploiement
+(`--disk` sans `--dry-run`) que ce build n'a jamais été validé sur du
+matériel réel — le statut `NOT_TESTED` n'apparaissait que dans des rapports
+consultés à part (`--self-test`, `--release-report`), jamais au moment où ça
+compte : au moment d'écrire sur un vrai périphérique.
+
+### Ajouté
+- Garde-fou runtime `sonar_require_hardware_risk_ack` : tout déploiement réel
+  affiche un avertissement explicite et exige soit la phrase tapée
+  `JE COMPRENDS LE RISQUE`, soit `--accept-hardware-risk` /
+  `SONAR_HARDWARE_RISK_ACK=true` pour l'automatisation.
+- **Séparé de `--yes`** volontairement : scripter `--yes` seul (confirmation
+  d'effacement) ne suffit plus à sauter cet acquiescement précis — les deux
+  gardes sont indépendants et tous deux nécessaires pour un déploiement réel
+  entièrement non interactif.
+- Entrée d'audit `HARDWARE_RISK_ACKNOWLEDGED` (méthode : flag/env, interactif,
+  ou refusé).
+- Testé en conditions réelles sur `/dev/loop` (déploiement non-dry-run) :
+  refus par défaut confirmé, acceptation par phrase tapée confirmée,
+  acceptation par flag confirmée, traçabilité dans l'audit confirmée.
+
+### Non résolu
+Ceci est un **filet logiciel**, pas un remplacement du test matériel réel —
+voir `ROADMAP.md` (P0, toujours ouvert, en attente d'accès à du matériel).
+
+
 
 ### Ajouté
 - Jetons de rôle **par identité** (`identity:role:expiry:signature`) au lieu

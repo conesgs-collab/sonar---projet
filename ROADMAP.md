@@ -5,6 +5,11 @@ Priorisée pour un développeur solo. Règle d'ordre : **P0 avant P1, toujours**
 la CI (P0) soit en place et verte. Sans elle, un refactor qui casse quelque
 chose silencieusement ne sera détecté que par hasard.
 
+Précision : le blocage matériel (P0, ci-dessous) est **indépendant** de la
+CI. Le refactor P1 peut démarrer dès que la CI est verte, même si l'accès à
+du matériel physique reste indisponible — la validation matérielle reste un
+P0 ouvert en parallèle, pas une condition bloquante pour le reste.
+
 ## P0 — Filet de sécurité (à faire en premier, sans exception)
 
 - [x] Dépôt Git initialisé, script versionné
@@ -12,13 +17,21 @@ chose silencieusement ne sera détecté que par hasard.
 - [x] Hook pre-commit local (self-audit/self-test avant tout commit touchant
       le script) — testé en conditions réelles (bloque un commit cassé,
       laisse passer un commit sain)
+- [x] Tag `v3.4.0` créé sur le commit d'initialisation
 - [ ] CI (`.github/workflows/ci.yml`) branchée sur un vrai remote (GitHub/GitLab/etc.)
-      et vérifiée verte au moins une fois
-- [ ] Premier tag `v3.4.0` pointant sur le commit actuel
-- [ ] Validation matérielle réelle : au moins un déploiement complet sur une
-      vraie clé USB jetable, avec boot effectif testé sur 2-3 machines
-      différentes (BIOS legacy + UEFI). C'est un test physique, pas quelque
-      chose qu'une session de chat peut faire à votre place.
+      et vérifiée verte au moins une fois — **indépendant du point matériel
+      ci-dessous**, peut avancer dès accès à une machine avec Git/réseau,
+      même sans matériel de test physique
+- [ ] **BLOQUÉ (côté opérateur, pas résolu) — Validation matérielle réelle** :
+      au moins un déploiement complet sur une vraie clé USB jetable, avec
+      boot effectif testé sur 2-3 machines différentes (BIOS legacy + UEFI).
+      Nécessite un accès physique à du matériel, indisponible pour le moment.
+      **Mitigation logicielle ajoutée en attendant (v3.5.0)** : tout
+      déploiement réel (`--disk` sans `--dry-run`) affiche désormais un
+      avertissement explicite et exige un acquiescement séparé
+      (`JE COMPRENDS LE RISQUE` ou `--accept-hardware-risk`), tracé dans
+      l'audit. Ça ne remplace pas le test réel — ça empêche seulement que
+      quelqu'un s'y expose sans le savoir.
 
 ## P1 — Une fois le filet en place
 
