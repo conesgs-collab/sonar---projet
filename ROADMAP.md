@@ -9,6 +9,9 @@ chose silencieusement ne sera détecté que par hasard.
 
 - [x] Dépôt Git initialisé, script versionné
 - [x] CHANGELOG.md extrait de l'historique
+- [x] Hook pre-commit local (self-audit/self-test avant tout commit touchant
+      le script) — testé en conditions réelles (bloque un commit cassé,
+      laisse passer un commit sain)
 - [ ] CI (`.github/workflows/ci.yml`) branchée sur un vrai remote (GitHub/GitLab/etc.)
       et vérifiée verte au moins une fois
 - [ ] Premier tag `v3.4.0` pointant sur le commit actuel

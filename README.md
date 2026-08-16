@@ -15,6 +15,9 @@ script Bash auto-vérifiable.
 ```bash
 chmod +x sonar_master.sh
 
+# Activer le filet de sécurité local (bloque un commit si self-audit/self-test échoue)
+git config core.hooksPath hooks/
+
 # Vérifier que le script est structurellement sain
 ./sonar_master.sh --self-audit
 
