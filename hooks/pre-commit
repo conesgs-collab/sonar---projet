@@ -1,0 +1,67 @@
+#!/bin/bash
+# Pre-commit hook — SONAR
+#
+# Ce fichier vit dans hooks/ (versionné), PAS dans .git/hooks/ (jamais
+# versionné par Git). Pour l'activer une fois le dépôt cloné :
+#
+#   git config core.hooksPath hooks/
+#   chmod +x hooks/pre-commit
+#
+# But : ne jamais laisser un commit partir si le script est structurellement
+# cassé ou si un test fonctionnel échoue — même en solo, même pressé.
+# Bloquant par défaut ; SONAR_SKIP_HOOK=1 permet de forcer un commit en cas
+# d'urgence (à utiliser avec parcimonie, et à corriger au commit suivant).
+
+set -euo pipefail
+
+if [[ "${SONAR_SKIP_HOOK:-0}" == "1" ]]; then
+    echo "[hook] SONAR_SKIP_HOOK=1 — vérifications sautées (à corriger au prochain commit)." >&2
+    exit 0
+fi
+
+SCRIPT="sonar_master.sh"
+
+if [[ ! -f "$SCRIPT" ]]; then
+    echo "[hook] ${SCRIPT} introuvable à la racine du dépôt — hook ignoré." >&2
+    exit 0
+fi
+
+# Ne se déclenche que si sonar_master.sh fait partie du commit — pas la peine
+# de relancer toute la suite pour un commit qui ne touche que la doc.
+if ! git diff --cached --name-only | grep -qx "$SCRIPT"; then
+    exit 0
+fi
+
+echo "[hook] ${SCRIPT} modifié — vérification avant commit..." >&2
+chmod +x "$SCRIPT"
+
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+
+fail() {
+    echo "[hook] ÉCHEC: $1" >&2
+    echo "[hook] Commit bloqué. Corrigez, ou SONAR_SKIP_HOOK=1 git commit ... pour forcer (déconseillé)." >&2
+    exit 1
+}
+
+bash -n "$SCRIPT" || fail "bash -n a détecté une erreur de syntaxe"
+
+if ! SONAR_ROOT="${TMP_ROOT}/audit" ./"$SCRIPT" --self-audit > "${TMP_ROOT}/audit.log" 2>&1; then
+    cat "${TMP_ROOT}/audit.log" >&2
+    fail "--self-audit a échoué"
+fi
+if grep -q '^FAIL' "${TMP_ROOT}/audit.log"; then
+    cat "${TMP_ROOT}/audit.log" >&2
+    fail "--self-audit contient au moins un FAIL"
+fi
+
+if ! SONAR_ROOT="${TMP_ROOT}/test" ./"$SCRIPT" --self-test > "${TMP_ROOT}/test.log" 2>&1; then
+    tail -30 "${TMP_ROOT}/test.log" >&2
+    fail "--self-test a échoué"
+fi
+if grep -q '^ERRORS=' "${TMP_ROOT}/test.log" && ! grep -q '^ERRORS=0$' "${TMP_ROOT}/test.log"; then
+    tail -30 "${TMP_ROOT}/test.log" >&2
+    fail "--self-test rapporte des erreurs (voir ERRORS= ci-dessus)"
+fi
+
+echo "[hook] OK — self-audit et self-test passent, commit autorisé." >&2
