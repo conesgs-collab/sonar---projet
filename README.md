@@ -33,6 +33,9 @@ git config core.hooksPath hooks/
 # Analyse croisée de l'état du système (dépendances, intégrité, couverture)
 ./sonar_master.sh --smart-advisor
 
+# Après une acquisition forensique, générer la chaîne de possession
+./sonar_master.sh --forensic-chain-of-custody <DOSSIER_PREUVES> "DOSSIER-2026-042"
+
 # Voir toutes les commandes disponibles
 ./sonar_master.sh --help
 ```

@@ -789,6 +789,10 @@ Couche opérationnelle V2:
   --recovery-plan             Générer le plan Recovery Windows/Linux/macOS
   --backup-plan               Générer le plan Backup/Clone sécurisé
   --forensic-workspace        Créer un espace forensic contrôlé
+  --forensic-acquire SRC DST   Acquérir des preuves (copie + hachage SHA-256)
+  --forensic-chain-of-custody <DOSSIER_PREUVES> [N_DOSSIER]
+                                Génère la chaîne de possession pour une
+                                acquisition (croise l'audit et le hashchain)
   --network-diagnostic        Rapport réseau non intrusif
   --builder [PROFILE]         Construire un support logiciel local
   --release-report            Générer le rapport de release
@@ -2990,6 +2994,7 @@ sonar_structural_self_audit() {
     grep -q '^sonar_role_enforce_lock() {' "$self" && echo 'PASS: role lock present' || { echo 'FAIL: role lock missing'; errors=$((errors+1)); }
     grep -q '^sonar_role_revoke_token() {' "$self" && echo 'PASS: role token revocation present' || { echo 'FAIL: role token revocation missing'; errors=$((errors+1)); }
     grep -q '^sonar_require_hardware_risk_ack() {' "$self" && echo 'PASS: hardware risk gate present' || { echo 'FAIL: hardware risk gate missing'; errors=$((errors+1)); }
+    grep -q '^sonar_forensic_chain_of_custody() {' "$self" && echo 'PASS: chain-of-custody present' || { echo 'FAIL: chain-of-custody missing'; errors=$((errors+1)); }
     return "$errors"
 }
 
@@ -3001,7 +3006,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.7.0-identity-trace"
+SONAR_VERSION="3.8.0-chain-of-custody"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3195,6 +3200,25 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tIdentity did NOT propagate to non-lock audit events\n'; errors=$((errors+1))
         fi
+        grep -q '^sonar_forensic_chain_of_custody() {' "$self" && printf 'PASS\tChain-of-custody module present\n' || { printf 'FAIL\tChain-of-custody module missing\n'; errors=$((errors+1)); }
+        local _coc_src _coc_dst _coc_token _coc_evroot _coc_doc
+        _coc_src="$(mktemp -d)"; _coc_dst="$(mktemp -d)"
+        echo "piece" > "${_coc_src}/exhibit.txt"
+        _coc_token="$(SONAR_ROOT="${_rt_root}" "$self" --role-issue-token Forensic coc.trace.bot 1 2>/dev/null)"
+        SONAR_ROOT="${_rt_root}" SONAR_ROLE=Forensic SONAR_ROLE_TOKEN="${_coc_token}" "$self" --forensic-acquire "${_coc_src}" "${_coc_dst}" >/dev/null 2>&1
+        _coc_evroot="$(find "${_coc_dst}" -maxdepth 1 -name 'SONAR_EVIDENCE_*' | head -n1)"
+        if [[ -n "${_coc_evroot}" ]]; then
+            SONAR_ROOT="${_rt_root}" "$self" --forensic-chain-of-custody "${_coc_evroot}" 'SELFTEST-CASE' >/dev/null 2>&1
+            _coc_doc="${_coc_evroot}/reports/CHAIN_OF_CUSTODY.txt"
+            if [[ -s "${_coc_doc}" ]] && grep -q 'identity=coc.trace.bot' "${_coc_doc}" && grep -q 'INTACT' "${_coc_doc}"; then
+                printf 'PASS\tChain-of-custody links operator identity + hashchain status\n'
+            else
+                printf 'FAIL\tChain-of-custody document incomplete or missing identity/hashchain link\n'; errors=$((errors+1))
+            fi
+        else
+            printf 'FAIL\tForensic acquisition for chain-of-custody smoke test did not produce evidence\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_coc_src}" "${_coc_dst}"
         rm -rf "${_rt_root}"
         echo
         echo "ERRORS=$errors"
@@ -3600,6 +3624,7 @@ sonar_launcher_v2() {
 16) Vérifier le hashchain d'audit
 17) Sceller / vérifier le catalogue embarqué
 18) Verrou de rôle (bootstrap / émettre un jeton)
+19) Chaîne de possession forensique
 0) Quitter
 ============================================================
 MENU
@@ -3643,6 +3668,11 @@ MENU
                     *) echo 'Choix invalide.' ;;
                 esac
                 ;;
+            19)
+                read -r -p 'Dossier de preuves (sortie de --forensic-acquire) : ' cocroot
+                read -r -p "N° de dossier [NON_SPECIFIE] : " cocid
+                sonar_forensic_chain_of_custody "$cocroot" "${cocid:-NON_SPECIFIE}"
+                ;;
             0) return 0 ;;
             *) echo 'Choix invalide.' ;;
         esac
@@ -3684,6 +3714,75 @@ sonar_forensic_acquire() {
   printf 'SONAR FORENSIC ACQUISITION\n==========================\nDate: %s\nSource: %s\nDestination: %s\nHash file: %s\n\nNo block-device imaging was performed.\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$source" "$root" "$hashfile" > "$root/reports/ACQUISITION.txt"; sonar_audit 'FORENSIC_ACQUIRE' "source=${source};destination=${root}"; echo "[SONAR] Forensic acquisition: $root"
 }
 sonar_clone_guarded() { echo '[SONAR][ERROR] Raw block-device cloning is intentionally disabled in V2.3.'; echo '[SONAR] Use the planning layer until a dedicated physical test matrix is approved.'; return 126; }
+
+# sonar_forensic_chain_of_custody EVIDENCE_ROOT [CASE_ID]: turns a raw
+# sonar_forensic_acquire output (evidence copy + SHA-256 hash list) into a
+# formal chain-of-custody record. Cross-references the audit log for the
+# original FORENSIC_ACQUIRE entry (operator identity, timestamp) and the
+# hashchain's integrity status at generation time, so the record's own
+# trustworthiness is itself verifiable, not just asserted. Later custody
+# transfers (courier, storage, handoff to a third party) happen outside
+# SONAR's control — the template leaves blank rows for those, anchored to
+# the cryptographic evidence this tool CAN attest to.
+sonar_forensic_chain_of_custody() {
+    local root="${1:-}" case_id="${2:-NON_SPECIFIE}" hashfile out audit_line identity_field operator ts_acquired file_count meta_hash chain_status
+    [[ -n "$root" && -d "$root" ]] || { echo 'Usage: --forensic-chain-of-custody EVIDENCE_ROOT [CASE_ID]' >&2; return 2; }
+    hashfile="${root%/}/hashes/SHA256.txt"
+    [[ -s "$hashfile" ]] || { echo "[SONAR][ERROR] ${hashfile} introuvable — ${root} n'est pas un dossier d'acquisition SONAR valide." >&2; return 2; }
+    mkdir -p "${root%/}/reports"
+    out="${root%/}/reports/CHAIN_OF_CUSTODY.txt"
+
+    audit_line="$(grep "FORENSIC_ACQUIRE" "${SONAR_AUDIT_LOG}" 2>/dev/null | grep -F "destination=${root%/}" | tail -n1)"
+    if [[ -n "$audit_line" ]]; then
+        ts_acquired="$(awk -F '\t' '{print $1}' <<< "$audit_line")"
+        operator="$(awk -F '\t' '{print $2}' <<< "$audit_line")"
+        identity_field="$(grep -oE 'identity=[^;[:space:]]+' <<< "$audit_line" | head -n1)"
+        [[ -n "$identity_field" ]] && operator="${operator} (${identity_field})"
+    else
+        ts_acquired="INCONNU"
+        operator="INCONNU — entrée d'audit d'acquisition introuvable pour ce chemin"
+    fi
+
+    file_count="$(wc -l < "$hashfile" | tr -d ' ')"
+    meta_hash="$(sha256sum "$hashfile" 2>/dev/null | awk '{print $1}')"
+    [[ -z "$meta_hash" ]] && meta_hash="$(shasum -a 256 "$hashfile" 2>/dev/null | awk '{print $1}')"
+
+    if sonar_verify_hashchain >/dev/null 2>&1; then chain_status="INTACT"; else chain_status="COMPROMIS — voir --verify-hashchain"; fi
+
+    {
+        echo "SONAR — CHAINE DE POSSESSION (CHAIN OF CUSTODY)"
+        echo "================================================"
+        echo "Dossier n: ${case_id}"
+        echo "Genere le: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo
+        echo "--- Acquisition ---"
+        echo "Horodatage de l'acquisition: ${ts_acquired}"
+        echo "Operateur: ${operator}"
+        echo "Dossier de preuves: ${root}"
+        echo "Fichiers acquis (comptes dans la liste de hachage): ${file_count}"
+        echo
+        echo "--- Integrite cryptographique ---"
+        echo "Liste de hachage: ${hashfile}"
+        echo "Empreinte SHA-256 de la liste de hachage elle-meme (meta-integrite): ${meta_hash}"
+        echo "Statut du hashchain d'audit au moment de la generation: ${chain_status}"
+        echo
+        echo "AVERTISSEMENT: SONAR atteste de ce qui precede (qui, quand, quels"
+        echo "fichiers, avec quelles empreintes) via son propre journal d'audit"
+        echo "chaine. Il n'atteste PAS des transferts de possession ulterieurs"
+        echo "(transport, stockage, remise a un tiers) -- ceux-ci doivent etre"
+        echo "consignes manuellement ci-dessous."
+        echo
+        echo "--- Transferts de possession (a completer manuellement) ---"
+        printf '%-20s %-20s %-20s %-30s %-15s\n' "Date" "De" "A" "Motif" "Signature"
+        printf '%s\n' "--------------------------------------------------------------------------------------------------"
+        for _ in 1 2 3 4 5; do
+            printf '%-20s %-20s %-20s %-30s %-15s\n' "" "" "" "" ""
+        done
+    } > "$out"
+
+    sonar_audit "CHAIN_OF_CUSTODY_GENERATED" "case_id=${case_id};evidence_root=${root};hashchain_status=${chain_status}"
+    echo "[SONAR] Chaine de possession: ${out}"
+}
 sonar_module_status_v23() { cat <<'EOF'
 SONAR V2.4 RELEASE CANDIDATE MODULE STATUS
 ==================================
@@ -3693,7 +3792,9 @@ Diagnostic              READY
 Recovery                EXECUTABLE: collect, verify
 Backup                  EXECUTABLE: guarded file/directory copy
 Clone                   GUARDED: raw block clone disabled
-Forensic                EXECUTABLE: file/directory acquisition + SHA-256
+Forensic                EXECUTABLE: file/directory acquisition + SHA-256,
+                          chain-of-custody generation (cross-references audit
+                          identity + hashchain status)
 Network                 READY / diagnostic only
 Builder                 READY / build candidate
 AI                      ADVISORY ONLY
@@ -3836,6 +3937,7 @@ case "${1:-}" in
     --recovery-execute) shift; sonar_recovery_execute "${1:-collect}"; exit $? ;;
     --backup-execute) shift; sonar_backup_execute "${1:-}" "${2:-}" "${3:-copy}"; exit $? ;;
     --forensic-acquire) shift; sonar_forensic_acquire "${1:-}" "${2:-}"; exit $? ;;
+    --forensic-chain-of-custody) shift; sonar_forensic_chain_of_custody "${1:-}" "${2:-}"; exit $? ;;
     --clone-execute) sonar_clone_guarded; exit $? ;;
     --diagnostic) sonar_diagnostic_report; exit $? ;;
     --self-test) sonar_self_test_v2; exit $? ;;

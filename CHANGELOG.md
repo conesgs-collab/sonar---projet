@@ -6,7 +6,47 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.7.0-identity-trace] — 2026-08-16
+## [3.8.0-chain-of-custody] — 2026-08-16
+
+### Contexte
+Dette connue depuis le début du module forensique : `sonar_forensic_acquire`
+copie les preuves et calcule les SHA-256, mais rien ne formalisait ça en
+document de chaîne de possession exploitable — la dette explicitement notée
+dans la roadmap ("pas de modèle de chaîne de possession"). Devenu réalisable
+proprement maintenant que l'identité de l'opérateur se propage à tout
+l'audit (v3.7.0) et que le hashchain est vérifiable à la demande (v3.2.0).
+
+### Ajouté
+- `--forensic-chain-of-custody <DOSSIER_PREUVES> [N_DOSSIER]` : génère un
+  document de chaîne de possession à partir d'une acquisition existante.
+  Croise automatiquement :
+  - l'entrée d'audit `FORENSIC_ACQUIRE` correspondante (opérateur, identité,
+    horodatage) ;
+  - une empreinte SHA-256 de méta-intégrité sur la liste de hachage
+    elle-même (détecte une modification de la liste après coup) ;
+  - le statut du hashchain d'audit au moment de la génération (INTACT /
+    COMPROMIS).
+  Laisse un tableau à compléter manuellement pour les transferts de
+  possession ultérieurs (transport, stockage, remise à un tiers) — hors du
+  contrôle de SONAR par nature, mais ancré aux preuves cryptographiques que
+  l'outil peut effectivement attester.
+- Accessible aussi via le launcher interactif (option 19).
+- Nouveau test fonctionnel bout-en-bout dans `--self-test` : émet un jeton
+  Forensic nominatif, effectue une acquisition, génère la chaîne de
+  possession, vérifie que le document lie bien l'identité de l'opérateur et
+  le statut du hashchain.
+
+### Testé
+- Flux complet manuel : jeton `e.legrand` (rôle Forensic) → acquisition de 2
+  fichiers → génération avec numéro de dossier `DOSSIER-2026-042` → document
+  vérifié contenant `Operateur: Forensic (identity=e.legrand)`, empreinte de
+  méta-intégrité, statut `INTACT`.
+- Dossier invalide (pas une acquisition SONAR) → rejeté proprement, message
+  clair, hashchain resté intact après l'échec.
+- self-audit 12/12, self-test 0 erreur (9 tests fonctionnels sur le verrou
+  de rôle et la chaîne de possession).
+
+
 
 ### Contexte
 Depuis v3.4.0, l'identité authentifiée (`SONAR_ROLE_IDENTITY`) n'apparaissait

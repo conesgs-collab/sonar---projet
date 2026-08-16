@@ -50,8 +50,12 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
 
 - [ ] Signature GPG des releases + page de release officielle
 - [ ] Documentation utilisateur complète (au-delà du `--help` intégré)
-- [ ] Modèle de chaîne de possession (chain of custody) formalisé pour le
-      module forensique, si un usage réellement judiciaire est envisagé
+- [x] Modèle de chaîne de possession (chain of custody) formalisé pour le
+      module forensique — `--forensic-chain-of-custody` (v3.8.0), croise
+      identité opérateur (audit) + statut hashchain. Reste manuel : les
+      transferts de possession après l'acquisition (hors du contrôle de
+      l'outil par nature) ; usage judiciaire réel encore à valider avec un
+      juriste si ce cas se présente.
 - [ ] Vrai support Windows natif (au-delà des mentions PowerShell dans le
       catalogue — un pipeline de test qui tourne réellement sous Windows)
 - [ ] Choix et ajout d'une licence
