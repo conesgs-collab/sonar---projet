@@ -1,0 +1,10 @@
+# Artefacts de test générés localement (jamais versionnés)
+*.img
+sonar-test-root/
+sonar_test_root/
+SONAR_REPORTS/
+Secure/
+
+# Fichiers temporaires
+*.log
+*.tmp

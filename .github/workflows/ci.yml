@@ -1,0 +1,38 @@
+name: SONAR CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rendre le script exécutable
+        run: chmod +x sonar_master.sh
+
+      - name: Vérification syntaxique (bash -n)
+        run: bash -n sonar_master.sh
+
+      - name: Self-audit structurel
+        run: |
+          export SONAR_ROOT="${RUNNER_TEMP}/sonar-ci-root"
+          ./sonar_master.sh --self-audit
+
+      - name: Self-test fonctionnel
+        run: |
+          export SONAR_ROOT="${RUNNER_TEMP}/sonar-ci-root"
+          ./sonar_master.sh --self-test
+
+      - name: Pipeline --disk --dry-run sur périphérique loop réel
+        run: |
+          export SONAR_ROOT="${RUNNER_TEMP}/sonar-ci-disk-root"
+          mkdir -p "${SONAR_ROOT}/SONAR_SOURCE"/{ISO,Portable,Scripts,Drivers,macOS}
+          truncate -s 200M "${RUNNER_TEMP}/disk.img"
+          LOOPDEV=$(sudo losetup -f --show "${RUNNER_TEMP}/disk.img")
+          MIN_DISK_GIB=0 SONAR_ROOT="${SONAR_ROOT}" \
+            ./sonar_master.sh --disk "${LOOPDEV}" --dry-run \
+            --source "${SONAR_ROOT}/SONAR_SOURCE" --yes
+          sudo losetup -d "${LOOPDEV}"
