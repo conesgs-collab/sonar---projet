@@ -6,7 +6,38 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.6.0-hmac] — 2026-08-16
+## [3.7.0-identity-trace] — 2026-08-16
+
+### Contexte
+Depuis v3.4.0, l'identité authentifiée (`SONAR_ROLE_IDENTITY`) n'apparaissait
+que dans les événements du verrou de rôle lui-même
+(`ROLE_ELEVATION_GRANTED`). Toute action effectuée *ensuite* sous ce rôle —
+un diagnostic, une sauvegarde, une acquisition forensique, un vrai
+déploiement `--disk` — ne traçait que le rôle, pas la personne. Ça limitait
+la valeur réelle des jetons nominatifs pour la traçabilité d'ensemble.
+
+### Changé
+- `sonar_audit` ajoute désormais automatiquement `identity=<nom>` à *toute*
+  entrée d'audit dès qu'une identité authentifiée est active pour la
+  session — pas seulement aux événements de verrou. Source unique de
+  vérité : les appelants n'ont plus besoin (et ne doivent plus) l'inclure
+  manuellement.
+- Suppression de la duplication manuelle dans `ROLE_ELEVATION_GRANTED`
+  (redondante avec le nouveau comportement automatique).
+- Nouveau test fonctionnel dans `--self-test` : émet un jeton, exécute une
+  action sans rapport avec le verrou de rôle (`--diagnostic`), vérifie que
+  l'entrée d'audit résultante porte bien `identity=`.
+
+### Testé
+- Confirmé manuellement : un jeton émis pour `j.dupont`, utilisé pour lancer
+  `--diagnostic`, produit une entrée `DIAGNOSTIC_REPORT` portant
+  `identity=j.dupont` dans le journal d'audit.
+- Hashchain vérifié intact malgré le changement de format des `details`
+  (4 entrées, aucune rupture).
+- self-audit 11/11, self-test 0 erreur (7 tests fonctionnels sur le verrou
+  de rôle, dont le nouveau).
+
+
 
 ### Contexte
 Dette technique documentée depuis v3.4.0 : la signature des jetons de rôle

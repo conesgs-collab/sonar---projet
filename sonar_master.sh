@@ -361,7 +361,7 @@ sonar_role_enforce_lock() {
         provided="$(tr -d ' \t\r\n' < "${SONAR_ROLE_TOKEN_FILE}")"
     fi
     if sonar_role_verify_token_string "${provided}" "${SONAR_ROLE}"; then
-        sonar_audit "ROLE_ELEVATION_GRANTED" "role=${SONAR_ROLE};identity=${SONAR_ROLE_IDENTITY}"
+        sonar_audit "ROLE_ELEVATION_GRANTED" "role=${SONAR_ROLE}"
         return 0
     fi
     echo "[SECURITY] Rôle '${SONAR_ROLE}' refusé (${SONAR_ROLE_DENY_REASON})." >&2
@@ -421,6 +421,14 @@ sonar_audit() {
     local details="${2:-}"
     local ts prev hash
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    # Fold the authenticated identity into every audit entry, not just the
+    # role-lock's own events — so a backup, forensic acquisition, or real
+    # --disk deployment run under an elevated token is attributable to the
+    # named operator, not just to the role. Single source of truth here:
+    # callers must not embed "identity=" themselves (see sonar_role_enforce_lock).
+    if [[ -n "${SONAR_ROLE_IDENTITY:-}" ]]; then
+        details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY}"
+    fi
     printf '%s\t%s\t%s\t%s\n' "$ts" "${SONAR_ROLE}" "$event" "$details" >> "${SONAR_AUDIT_LOG}"
 
     prev="$(tail -n 1 "${SONAR_HASHCHAIN_LOG}" 2>/dev/null | awk -F '\t' '{print $NF}')"
@@ -2993,7 +3001,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.6.0-hmac"
+SONAR_VERSION="3.7.0-identity-trace"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3178,6 +3186,14 @@ sonar_self_test_v2() {
             printf 'PASS\tExpired token is rejected\n'
         else
             printf 'FAIL\tExpired token was NOT rejected\n'; errors=$((errors+1))
+        fi
+        local _it_token
+        _it_token="$(SONAR_ROOT="${_rt_root}" "$self" --role-issue-token Admin identity.trace.bot 1 2>/dev/null)"
+        SONAR_ROOT="${_rt_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_it_token}" "$self" --diagnostic >/dev/null 2>&1
+        if grep -q $'\tDIAGNOSTIC_REPORT\t.*identity=identity.trace.bot' "${_rt_root}/Secure/Logs/audit.log" 2>/dev/null; then
+            printf 'PASS\tIdentity propagates to non-lock audit events\n'
+        else
+            printf 'FAIL\tIdentity did NOT propagate to non-lock audit events\n'; errors=$((errors+1))
         fi
         rm -rf "${_rt_root}"
         echo
