@@ -72,9 +72,11 @@ mais l'authenticité n'est pas confirmable.
 
 ## Avant tout déploiement réel sur disque
 
+Guide détaillé, étape par étape : [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 ```bash
 # TOUJOURS tester en dry-run d'abord
-./sonar_master.sh --disk /dev/sdX --dry-run --source ./NEXUS_SOURCE --yes
+./sonar_master.sh --disk /dev/sdX --dry-run --source ./SONAR_SOURCE --yes
 ```
 
 `--disk` **écrit sur le périphérique cible** (Ventoy + payload). Le script
