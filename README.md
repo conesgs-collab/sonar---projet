@@ -40,6 +40,19 @@ git config core.hooksPath hooks/
 ./sonar_master.sh --help
 ```
 
+## Coffre chiffré autonome (sur le terrain)
+
+Chaque clé déployée embarque `Scripts/sonar-vault.sh` — un coffre chiffré
+gpg AES-256 exécuté **sur le terrain** par le technicien, pour ses propres
+données sensibles. Complètement indépendant de la persistance Ventoy (qui
+n'est **jamais** chiffrée par SONAR — voir `CHANGELOG.md` v3.9.0 pour le
+raisonnement). Désactivable au build avec `--no-veracrypt`.
+
+```bash
+./sonar-vault.sh create <source> <coffre.enc>
+./sonar-vault.sh open   <coffre.enc> <sortie>
+```
+
 ## Avant tout déploiement réel sur disque
 
 ```bash

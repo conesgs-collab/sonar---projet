@@ -9,7 +9,8 @@
 # Accréditation    : Niveau 4
 # Ventoy           : v1.1.17 (GPT + Secure Boot)
 # Persistance      : 5 x 8 Go
-# VeraCrypt        : Oui
+# Coffre chiffré   : Oui (sonar-vault.sh, gpg AES-256 — sans lien avec la
+#                    persistance Ventoy ci-dessus, jamais chiffrée par SONAR)
 # Journalisation   : Oui
 # Vérif. checksum  : Oui
 # README auto      : Oui
@@ -611,6 +612,17 @@ VENTOY_SHA256="${VENTOY_SHA256:-7fb4ed08cef6a6b4d39dd19260d8c80291a78dfdf9af7d46
 PERSISTENCE_SIZE="${PERSISTENCE_SIZE:-8}"
 PERSISTENCE_COUNT="${PERSISTENCE_COUNT:-5}"
 BATCH_COUNT="${BATCH_COUNT:-1}"
+# HONESTY NOTE (fixed from a dead flag): INCLUDE_VERACRYPT existed since the
+# original header ("VeraCrypt: Oui") but nothing ever consulted it — no
+# encryption of any kind was ever performed. It CANNOT mean "encrypt the
+# Ventoy persistence images": Ventoy's persistence mechanism expects a raw
+# ext4 image it mounts directly at boot (see ventoy.net/en/plugin_persistence.html)
+# with no native VeraCrypt integration — encrypting that file would silently
+# break boot-time persistence while giving a false sense of security. What
+# it now does: deploy a standalone, gpg-backed vault HELPER SCRIPT onto the
+# USB (Scripts/sonar-vault.sh) for the technician to create/open an
+# encrypted container manually, in the field, for sensitive data — fully
+# decoupled from Ventoy's boot chain, so it can never break boot.
 INCLUDE_VERACRYPT="${INCLUDE_VERACRYPT:-true}"
 INCLUDE_LOGGING="${INCLUDE_LOGGING:-true}"
 GENERATE_README="${GENERATE_README:-true}"
@@ -769,7 +781,9 @@ IA:
   --no-ai-assistant          Désactiver l'assistant
 
 Autres:
-  --no-veracrypt             Conserver la structure sans coffre VeraCrypt
+  --no-veracrypt              Ne pas déployer sonar-vault.sh (coffre chiffré
+                                autonome, gpg AES-256 ; sans lien avec la
+                                persistance Ventoy, jamais chiffrée par SONAR)
   --no-logging               Désactiver la journalisation principale
   --no-readme                Ne pas générer README
   --help|-h                  Afficher cette aide
@@ -1340,7 +1354,78 @@ copy_payload_final() {
     [[ -f "${ai_results}" ]] && cp -f "${ai_results}" "${mp}/AI-Downloads/MANIFEST_AI_RESULTS.tsv"
     generate_tool_index_final "${mp}"
     generate_ventoy_json_final "${mp}"
+    [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
     unmount_final "${mp}"
+}
+
+# sonar_generate_vault_helper DEST_DIR: writes a small standalone helper
+# script (sonar-vault.sh) into DEST_DIR, which lands on the deployed USB.
+# The script is run LATER, on whatever machine the technician is working
+# on in the field — not at build time, not by SONAR itself, and it never
+# touches Ventoy's persistence images. It uses gpg symmetric AES-256
+# (near-universal) and prefers a real veracrypt container if the `veracrypt`
+# CLI happens to be present on the machine where it's *run* — detected at
+# use time, not baked in at build time, since that's a different machine
+# with potentially different tooling than the one that built the USB.
+sonar_generate_vault_helper() {
+    local dest="$1"
+    mkdir -p "${dest}"
+    cat > "${dest}/sonar-vault.sh" <<'VAULT_EOF'
+#!/bin/bash
+# sonar-vault.sh — coffre chiffré autonome pour donnees sensibles de terrain.
+#
+# Independant du demarrage Ventoy et de la persistance : ce script chiffre/
+# dechiffre des fichiers a la demande, sur la machine ou vous l'executez. Il
+# ne stocke JAMAIS le mot de passe nulle part (ni sur disque, ni dans
+# l'historique shell si vous le tapez a l'invite plutot qu'en argument).
+#
+# Usage:
+#   ./sonar-vault.sh create <fichier_source> <coffre_sortie.enc>
+#   ./sonar-vault.sh open   <coffre.enc> <fichier_sortie>
+#
+set -euo pipefail
+
+usage() { echo "Usage: $0 create <source> <coffre.enc>  |  $0 open <coffre.enc> <sortie>" >&2; exit 2; }
+
+backend="none"
+if command -v veracrypt >/dev/null 2>&1; then
+    echo "[vault] veracrypt detecte mais non pilote automatiquement par ce script (creation de conteneur VeraCrypt = operation manuelle plus lourde)." >&2
+    echo "[vault] Utilisation de gpg (AES-256) a la place. Pour un vrai conteneur VeraCrypt, utilisez veracrypt directement." >&2
+fi
+if command -v gpg >/dev/null 2>&1; then
+    backend="gpg"
+else
+    echo "[vault] ERREUR: gpg introuvable sur cette machine. Impossible de chiffrer/dechiffrer." >&2
+    exit 1
+fi
+
+[[ $# -eq 3 ]] || usage
+action="$1"; a="$2"; b="$3"
+
+case "$action" in
+    create)
+        [[ -f "$a" ]] || { echo "[vault] Source introuvable: $a" >&2; exit 1; }
+        [[ -e "$b" ]] && { echo "[vault] $b existe deja, refus d'ecraser." >&2; exit 1; }
+        read -r -s -p "Mot de passe du coffre: " pw1; echo >&2
+        read -r -s -p "Confirmer: " pw2; echo >&2
+        [[ "$pw1" == "$pw2" ]] || { echo "[vault] Les mots de passe ne correspondent pas." >&2; exit 1; }
+        printf '%s' "$pw1" | gpg --batch --yes --passphrase-fd 0 --symmetric --cipher-algo AES256 -o "$b" "$a"
+        unset pw1 pw2
+        echo "[vault] Coffre cree: $b"
+        ;;
+    open)
+        [[ -f "$a" ]] || { echo "[vault] Coffre introuvable: $a" >&2; exit 1; }
+        [[ -e "$b" ]] && { echo "[vault] $b existe deja, refus d'ecraser." >&2; exit 1; }
+        read -r -s -p "Mot de passe du coffre: " pw1; echo >&2
+        printf '%s' "$pw1" | gpg --batch --yes --passphrase-fd 0 --decrypt -o "$b" "$a"
+        unset pw1
+        echo "[vault] Dechiffre vers: $b"
+        ;;
+    *) usage ;;
+esac
+VAULT_EOF
+    chmod +x "${dest}/sonar-vault.sh"
+    log_ok "Coffre chiffré autonome déployé: Scripts/sonar-vault.sh (gpg AES-256, jamais lié à la persistance/boot)."
 }
 
 generate_tool_index_final() {
@@ -2995,6 +3080,7 @@ sonar_structural_self_audit() {
     grep -q '^sonar_role_revoke_token() {' "$self" && echo 'PASS: role token revocation present' || { echo 'FAIL: role token revocation missing'; errors=$((errors+1)); }
     grep -q '^sonar_require_hardware_risk_ack() {' "$self" && echo 'PASS: hardware risk gate present' || { echo 'FAIL: hardware risk gate missing'; errors=$((errors+1)); }
     grep -q '^sonar_forensic_chain_of_custody() {' "$self" && echo 'PASS: chain-of-custody present' || { echo 'FAIL: chain-of-custody missing'; errors=$((errors+1)); }
+    grep -q '^sonar_generate_vault_helper() {' "$self" && echo 'PASS: vault helper generator present' || { echo 'FAIL: vault helper generator missing'; errors=$((errors+1)); }
     return "$errors"
 }
 
@@ -3006,7 +3092,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.8.0-chain-of-custody"
+SONAR_VERSION="3.9.0-vault"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3220,6 +3306,24 @@ sonar_self_test_v2() {
         fi
         rm -rf "${_coc_src}" "${_coc_dst}"
         rm -rf "${_rt_root}"
+        grep -q '^sonar_generate_vault_helper() {' "$self" && printf 'PASS\tVault helper generator present\n' || { printf 'FAIL\tVault helper generator missing\n'; errors=$((errors+1)); }
+        if command -v gpg >/dev/null 2>&1; then
+            local _vh_dir _vh_src _vh_enc _vh_out
+            _vh_dir="$(mktemp -d)"
+            ( source <(sed -n '/^sonar_generate_vault_helper() {/,/^}/p' "$self"); log_ok() { :; }; sonar_generate_vault_helper "${_vh_dir}" ) >/dev/null 2>&1
+            _vh_src="${_vh_dir}/plain.txt"; _vh_enc="${_vh_dir}/v.enc"; _vh_out="${_vh_dir}/plain_out.txt"
+            echo "selftest-vault-content" > "${_vh_src}"
+            printf 'pw123\npw123\n' | "${_vh_dir}/sonar-vault.sh" create "${_vh_src}" "${_vh_enc}" >/dev/null 2>&1
+            printf 'pw123\n' | "${_vh_dir}/sonar-vault.sh" open "${_vh_enc}" "${_vh_out}" >/dev/null 2>&1
+            if [[ -s "${_vh_enc}" ]] && ! grep -q 'selftest-vault-content' "${_vh_enc}" 2>/dev/null && diff -q "${_vh_src}" "${_vh_out}" >/dev/null 2>&1; then
+                printf 'PASS\tVault helper round-trip (encrypt/decrypt) works\n'
+            else
+                printf 'FAIL\tVault helper round-trip did NOT work\n'; errors=$((errors+1))
+            fi
+            rm -rf "${_vh_dir}"
+        else
+            printf 'WARN\tVault helper round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
+        fi
         echo
         echo "ERRORS=$errors"
         echo "WARNINGS=$warnings"

@@ -6,7 +6,47 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.8.0-chain-of-custody] — 2026-08-16
+## [3.9.0-vault] — 2026-08-16
+
+### Contexte
+`INCLUDE_VERACRYPT` existait depuis l'en-tête d'origine ("VeraCrypt: Oui")
+mais **n'était consulté nulle part** — un drapeau mort, comme le statut
+"Physical disk deployment NOT TOUCHED" corrigé en v3.2.1. Avant de coder un
+correctif, vérification du fonctionnement réel de la persistance Ventoy :
+elle attend un fichier ext4 brut monté directement au démarrage (aucune
+intégration VeraCrypt native — voir ventoy.net/en/plugin_persistence.html).
+**Chiffrer ce fichier aurait cassé le démarrage de la persistance tout en
+donnant une fausse impression de sécurité** — un correctif pire que le bug.
+
+### Ajouté
+- `sonar_generate_vault_helper` : déploie `Scripts/sonar-vault.sh` sur la clé
+  — un coffre chiffré autonome (gpg AES-256), exécuté plus tard sur le
+  terrain par le technicien, **totalement indépendant** de la chaîne de
+  démarrage/persistance Ventoy. Ne peut donc jamais casser le boot.
+  - `sonar-vault.sh create <source> <coffre.enc>` / `open <coffre.enc> <sortie>`
+  - Mot de passe jamais stocké, jamais écrit sur disque, saisie masquée
+  - Refuse d'écraser un fichier existant ; refuse si confirmation ≠ mot de
+    passe initial
+  - Détecte `veracrypt` s'il est présent sur la machine où le script est
+    *exécuté* (pas celle qui a construit la clé) et prévient clairement
+    que ce script ne le pilote pas automatiquement, en repli sur gpg
+- En-tête et aide corrigés : plus aucune mention de "VeraCrypt: Oui" pour
+  quelque chose qui n'existe pas.
+
+### Testé
+- Round-trip réel : création d'un coffre, vérification par `file` que le
+  contenu est bien `AES with 256-bit key salted & iterated`, contenu en
+  clair absent du blob, ouverture avec le bon mot de passe restitue le
+  contenu exact.
+- Mauvais mot de passe → échec de déchiffrement confirmé.
+- Refus d'écraser un coffre existant → confirmé.
+- Mots de passe non concordants à la création → rejeté.
+- Nouveau test fonctionnel automatisé dans `--self-test` : génère le script,
+  fait un vrai aller-retour chiffrement/déchiffrement, compare le fichier
+  récupéré à l'original (`diff`).
+- self-audit 13/13, self-test 0 erreur.
+
+
 
 ### Contexte
 Dette connue depuis le début du module forensique : `sonar_forensic_acquire`
