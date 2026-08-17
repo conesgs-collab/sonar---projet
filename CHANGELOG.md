@@ -6,7 +6,39 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.10.0-build-watermark] — 2026-08-17
+## [3.10.1-dep-guard] — 2026-08-17
+
+### Contexte
+Suite aux deux drapeaux morts trouvés ce soir (module status, VeraCrypt),
+audit systématique du fichier entier : toutes les variables assignées par
+un flag CLI vérifiées référencées ailleurs (aucune autre trouvée), puis
+recherche des fonctions définies mais jamais appelées. Une seule trouvée :
+`sonar_require_cmd` — contrairement aux deux bugs précédents, ce n'est pas
+un mensonge (rien n'affirmait qu'elle s'exécutait), juste du code orphelin
+laissé par une convention de nommage plus ancienne (`require_cmd_final`
+existe déjà et fait le même travail, en version "fatale" pour le préflight).
+
+### Corrigé
+- `sonar_require_cmd` (variante non-fatale, retourne un code au lieu de
+  tuer tout le script — le même style que `sonar_require_openssl`) câblée
+  en vérification amont dans `sonar_backup_execute` et
+  `sonar_forensic_acquire`, avant toute copie de données.
+- Avant : ces fonctions présumaient silencieusement `cp`/`find`/`sort`
+  disponibles ; un outil manquant aurait produit un échec confus **après**
+  avoir déjà copié des données (potentiellement des gigaoctets de preuves
+  forensiques), pas avant.
+- Après : échec nét et explicite avant toute écriture si un outil critique
+  manque.
+
+### Testé
+- Cas normal : `--forensic-acquire` fonctionne toujours identiquement.
+- `find` masqué du `PATH` (1292 binaires réels reconstruits, `find` exclu) :
+  échec propre avec message clair (`Required command not found: find`),
+  code 127, **et confirmation qu'aucun dossier `SONAR_EVIDENCE_*` n'a été
+  créé** — la copie n'a jamais commencé.
+- self-audit et self-test inchangés (aucune régression).
+
+
 
 ### Contexte
 Suite à la question sur les mécanismes anti-copie : rappel honnête d'abord —

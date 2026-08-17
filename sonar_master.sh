@@ -3099,7 +3099,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.10.0-build-watermark"
+SONAR_VERSION="3.10.1-dep-guard"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3850,6 +3850,8 @@ sonar_backup_execute() {
   sonar_report_init; local source="${1:-}" destination="${2:-}" mode="${3:-copy}" ts out
   [[ -n "$source" && -n "$destination" ]] || { echo 'Usage: --backup-execute SOURCE DESTINATION [copy]' >&2; return 2; }
   [[ -e "$source" ]] || { echo "[SONAR][ERROR] Source does not exist: $source" >&2; return 2; }; [[ "$source" != "$destination" ]] || { echo '[SONAR][ERROR] Source and destination are identical.' >&2; return 2; }
+  sonar_require_cmd cp || return 127
+  sonar_require_cmd mkdir || return 127
   ts="$(sonar_timestamp)"; out="${SONAR_REPORT_DIR}/recovery/SONAR_BACKUP_EXEC_${ts}.txt"; echo "[SONAR] Backup source: $source"; echo "[SONAR] Backup destination: $destination"
   case "$mode" in copy) sonar_confirm_phrase "BACKUP-$(basename "$source")" "Type BACKUP-$(basename "$source") to confirm: " || { echo '[SONAR] Cancelled.'; return 1; }; mkdir -p "$destination"; if [[ -d "$source" ]]; then cp -a "$source"/. "$destination"/; else cp -a "$source" "$destination"/; fi;; *) echo "[SONAR][ERROR] Unsupported backup mode: $mode" >&2; return 2;; esac
   { echo 'SONAR BACKUP EXECUTION'; echo '======================'; echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"; echo "Source: $source"; echo "Destination: $destination"; echo "Mode: $mode"; echo 'Status: COMPLETED'; [[ -f "$source" ]] && { echo 'Source SHA-256:'; sonar_hash "$source" || true; }; } > "$out"; sonar_audit 'BACKUP_EXECUTE' "source=${source};destination=${destination};mode=${mode}"; echo "[SONAR] Backup completed: $out"
@@ -3857,6 +3859,13 @@ sonar_backup_execute() {
 sonar_forensic_acquire() {
   sonar_report_init; local source="${1:-}" destination="${2:-}" ts root hashfile
   [[ -n "$source" && -n "$destination" ]] || { echo 'Usage: --forensic-acquire SOURCE DESTINATION' >&2; return 2; }; [[ -e "$source" ]] || { echo '[SONAR][ERROR] Evidence source does not exist.' >&2; return 2; }; [[ "$source" != "$destination" ]] || { echo '[SONAR][ERROR] Source and destination are identical.' >&2; return 2; }
+  sonar_require_cmd cp || return 127
+  sonar_require_cmd find || return 127
+  sonar_require_cmd sort || return 127
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    echo '[SONAR][ERROR] Ni sha256sum ni shasum disponible — acquisition impossible sans moteur de hachage.' >&2
+    return 127
+  fi
   ts="$(sonar_timestamp)"; root="${destination%/}/SONAR_EVIDENCE_${ts}"; mkdir -p "$root/evidence" "$root/hashes" "$root/logs" "$root/reports"
   if [[ -d "$source" ]]; then cp -a "$source"/. "$root/evidence"/; else cp -a "$source" "$root/evidence"/; fi
   hashfile="$root/hashes/SHA256.txt"; if command -v sha256sum >/dev/null 2>&1; then (cd "$root/evidence" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$hashfile"; else (cd "$root/evidence" && find . -type f -print0 | sort -z | while IFS= read -r -d '' f; do shasum -a 256 "$f"; done) > "$hashfile"; fi
