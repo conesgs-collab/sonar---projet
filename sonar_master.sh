@@ -106,7 +106,7 @@
 # AVERTISSEMENT : Ce script formate le disque cible. Toutes les données seront
 # effacées. Vérifiez le périphérique avant de continuer.
 #===============================================================================
-# Copyright 2026 [REMPLACER PAR VOTRE NOM OU ORGANISATION]
+# Copyright 2026 Sékou SANOU
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

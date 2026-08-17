@@ -103,8 +103,10 @@ Le RBAC (`Viewer/Technician/Senior/Forensic/Admin/Expert`) est verrouillé :
 un jeton nominatif signé, avec expiration et révocation individuelle. Voir
 `--help` (section "Verrou de rôle") pour le détail des commandes.
 
+## Auteur
+
+**Sékou SANOU** — maintenance informatique, Burkina Faso.
+
 ## Licence
 
-Apache License 2.0 — voir `LICENSE`. Pensez à remplacer le placeholder
-`[REMPLACER PAR VOTRE NOM OU ORGANISATION]` dans l'en-tête de
-`sonar_master.sh` par votre nom ou celui de votre organisation.
+Apache License 2.0 — voir `LICENSE`.

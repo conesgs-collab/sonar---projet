@@ -60,8 +60,8 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
       catalogue — un pipeline de test qui tourne réellement sous Windows)
 - [x] Choix et ajout d'une licence — Apache 2.0 (recommandation motivée :
       standard pour l'outillage d'infrastructure en entreprise, clause de
-      brevet, largement accepté par les services juridiques). Placeholder
-      de copyright à personnaliser dans l'en-tête de `sonar_master.sh`.
+      brevet, largement accepté par les services juridiques). Copyright
+      attribué à Sékou SANOU.
 
 ## Dette technique connue (voir aussi CHANGELOG.md)
 
