@@ -103,4 +103,6 @@ un jeton nominatif signé, avec expiration et révocation individuelle. Voir
 
 ## Licence
 
-Non définie pour l'instant — voir `ROADMAP.md`.
+Apache License 2.0 — voir `LICENSE`. Pensez à remplacer le placeholder
+`[REMPLACER PAR VOTRE NOM OU ORGANISATION]` dans l'en-tête de
+`sonar_master.sh` par votre nom ou celui de votre organisation.
