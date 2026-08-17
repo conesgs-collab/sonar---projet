@@ -6,7 +6,55 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.9.0-vault] — 2026-08-16
+## [3.10.0-build-watermark] — 2026-08-17
+
+### Contexte
+Suite à la question sur les mécanismes anti-copie : rappel honnête d'abord —
+rien en logiciel pur n'empêche un `dd` bit-à-bit d'une clé USB une fois
+qu'elle existe (aucune puce sécurisée sur un support USB grand public). Ce
+qui est réellement faisable : rendre une copie **traçable** jusqu'à son
+build d'origine, pas l'empêcher.
+
+### Ajouté
+- Filigrane de build signé (`sonar_generate_build_watermark`), déposé sur
+  chaque clé réellement déployée dans `MANIFEST/BUILD_WATERMARK.txt` :
+  identifiant de build aléatoire, horodatage, identité de l'opérateur
+  (si authentifié via le verrou de rôle), label du disque, signature
+  HMAC-SHA256.
+- **Secret de signature dédié**, volontairement séparé de celui du verrou de
+  rôle (`SONAR_BUILD_SECRET_FILE` ≠ `SONAR_ROLE_SECRET_FILE`) — deux domaines
+  de sécurité différents (qui peut agir vs. quel build est-ce), ne doivent
+  jamais partager la même clé.
+- `--verify-watermark <FICHIER|DOSSIER>` : recalcule la signature contre le
+  secret local, confirme ou infirme l'authenticité, et croise un registre
+  local (jamais copié sur la clé) pour retrouver le contexte du build.
+- Registre local `Secure/Keys/build_registry.tsv` (horodatage, build id,
+  opérateur, label) — reste uniquement sur la machine de l'admin.
+
+### Corrigé (trouvé en écrivant le test, pas en l'écrivant puis en le lisant)
+En écrivant le test fonctionnel de détection de falsification, un appel à
+`sonar_verify_build_watermark` sur un filigrane volontairement corrompu
+(censé échouer — c'est le test) était placé en instruction nue sous
+`set -e`, ce qui faisait avorter tout le sous-shell de test **avant** de
+pouvoir capturer son code de sortie — répétition, dans le code de test
+cette fois, du même piège traqué plusieurs fois dans le script lui-même
+depuis v3.2.1. Corrigé avec l'idiome sûr `if CMD; then rc=0; else rc=$?; fi`
+au lieu d'un `$?` nu ou d'un `|| true` (qui aurait aussi perdu le vrai code
+de sortie, `true` devenant la dernière commande de la liste).
+
+### Testé
+- Génération réelle d'un filigrane, contenu vérifié (build id, opérateur,
+  label, signature).
+- Vérification authentique → confirmée, registre local retrouvé.
+- Filigrane falsifié (label modifié après coup) → authenticité rejetée,
+  détecté correctement.
+- Vérification sur une "machine" sans le secret local (cas réaliste : la
+  clé retrouvée par quelqu'un d'autre) → métadonnées lisibles, authenticité
+  explicitement non vérifiable, pas de fausse confirmation.
+- self-audit 14/14, self-test 0 erreur, stable sur deux exécutions
+  indépendantes consécutives.
+
+
 
 ### Contexte
 `INCLUDE_VERACRYPT` existait depuis l'en-tête d'origine ("VeraCrypt: Oui")

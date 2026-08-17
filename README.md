@@ -53,6 +53,23 @@ raisonnement). Désactivable au build avec `--no-veracrypt`.
 ./sonar-vault.sh open   <coffre.enc> <sortie>
 ```
 
+## Filigrane de build (traçabilité, pas prévention)
+
+Rien en logiciel n'empêche un `dd` bit-à-bit d'une clé USB déployée — c'est
+une limite physique, pas un manque d'effort. Ce qui est réellement faisable :
+chaque déploiement réel embarque un filigrane signé (HMAC-SHA256, secret
+dédié, distinct de celui du verrou de rôle) dans
+`MANIFEST/BUILD_WATERMARK.txt`. Si une copie non autorisée refait surface,
+on peut prouver de quel build authentique elle provient.
+
+```bash
+./sonar_master.sh --verify-watermark <FICHIER_OU_DOSSIER>
+```
+
+Ne fonctionne que sur la machine possédant le secret de watermark local —
+c'est le point : sur une autre machine, les métadonnées restent lisibles
+mais l'authenticité n'est pas confirmable.
+
 ## Avant tout déploiement réel sur disque
 
 ```bash

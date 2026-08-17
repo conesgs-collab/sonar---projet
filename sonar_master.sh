@@ -827,6 +827,11 @@ Verrou de rôle (empêche SONAR_ROLE=Admin sans autorisation):
   --role-revoke-token <JETON>           Révoque un jeton précis (n'affecte pas les autres)
   --role-token <JETON>                  Fournit le jeton pour la session courante (avec --role)
   (env: SONAR_ROLE_TOKEN / SONAR_ROLE_TOKEN_FILE — utilisables sans --disk)
+
+Filigrane de build (traçabilité, pas prévention — voir --help "matériel"):
+  --verify-watermark <FICHIER|DOSSIER>  Vérifie l'authenticité d'un filigrane
+                                          de build (MANIFEST/BUILD_WATERMARK.txt)
+                                          contre le secret local de cette machine
 EOF
 }
 
@@ -1355,6 +1360,7 @@ copy_payload_final() {
     generate_tool_index_final "${mp}"
     generate_ventoy_json_final "${mp}"
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
+    sonar_generate_build_watermark "${mp}"
     unmount_final "${mp}"
 }
 
@@ -3081,6 +3087,7 @@ sonar_structural_self_audit() {
     grep -q '^sonar_require_hardware_risk_ack() {' "$self" && echo 'PASS: hardware risk gate present' || { echo 'FAIL: hardware risk gate missing'; errors=$((errors+1)); }
     grep -q '^sonar_forensic_chain_of_custody() {' "$self" && echo 'PASS: chain-of-custody present' || { echo 'FAIL: chain-of-custody missing'; errors=$((errors+1)); }
     grep -q '^sonar_generate_vault_helper() {' "$self" && echo 'PASS: vault helper generator present' || { echo 'FAIL: vault helper generator missing'; errors=$((errors+1)); }
+    grep -q '^sonar_generate_build_watermark() {' "$self" && echo 'PASS: build watermark present' || { echo 'FAIL: build watermark missing'; errors=$((errors+1)); }
     return "$errors"
 }
 
@@ -3092,7 +3099,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.9.0-vault"
+SONAR_VERSION="3.10.0-build-watermark"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3324,6 +3331,44 @@ sonar_self_test_v2() {
         else
             printf 'WARN\tVault helper round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
         fi
+        grep -q '^sonar_generate_build_watermark() {' "$self" && printf 'PASS\tBuild watermark module present\n' || { printf 'FAIL\tBuild watermark module missing\n'; errors=$((errors+1)); }
+        local _wm_root _wm_mp
+        _wm_root="$(mktemp -d)"; _wm_mp="$(mktemp -d)"
+        ( export SONAR_ROOT="${_wm_root}"
+          SONAR_SECURITY_DIR="${_wm_root}/Secure"
+          SONAR_BUILD_SECRET_FILE="${SONAR_SECURITY_DIR}/Keys/build_secret.key"
+          SONAR_BUILD_REGISTRY_FILE="${SONAR_SECURITY_DIR}/Keys/build_registry.tsv"
+          SONAR_AUDIT_LOG="${SONAR_SECURITY_DIR}/Logs/audit.log"
+          SONAR_HASHCHAIN_LOG="${SONAR_SECURITY_DIR}/Logs/hashchain.log"
+          mkdir -p "${SONAR_SECURITY_DIR}/Logs"
+          SONAR_ROLE="Technician"; SONAR_ROLE_IDENTITY="wm.trace.bot"; VOL="SELFTEST-USB"
+          source <(sed -n '/^sonar_hash_str() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_require_openssl() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_const_time_eq() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_audit() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_build_secret_exists() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_ensure_build_secret() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_build_sign() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_generate_build_watermark() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_verify_build_watermark() {/,/^}/p' "$self")
+          log() { :; }; log_ok() { :; }
+          local _rc
+          if sonar_generate_build_watermark "${_wm_mp}" >/dev/null 2>&1; then :; fi
+          if sonar_verify_build_watermark "${_wm_mp}" > "${_wm_root}/verify_ok.txt" 2>&1; then _rc=0; else _rc=$?; fi
+          echo "${_rc}" > "${_wm_root}/verify_ok.rc"
+          sed 's/SELFTEST-USB/FORGED-LABEL/' "${_wm_mp}/MANIFEST/BUILD_WATERMARK.txt" > "${_wm_root}/forged.txt"
+          if sonar_verify_build_watermark "${_wm_root}/forged.txt" > "${_wm_root}/verify_forged.txt" 2>&1; then _rc=0; else _rc=$?; fi
+          echo "${_rc}" > "${_wm_root}/verify_forged.rc"
+        ) 2>/dev/null
+        if [[ -s "${_wm_mp}/MANIFEST/BUILD_WATERMARK.txt" ]] \
+           && grep -q '^0$' "${_wm_root}/verify_ok.rc" 2>/dev/null \
+           && grep -q 'identity=wm.trace.bot' "${_wm_root}/Secure/Logs/audit.log" 2>/dev/null \
+           && ! grep -q '^0$' "${_wm_root}/verify_forged.rc" 2>/dev/null; then
+            printf 'PASS\tBuild watermark: generated, verified authentic, tampering detected\n'
+        else
+            printf 'FAIL\tBuild watermark generation/verification/tamper-detection did not behave as expected\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_wm_root}" "${_wm_mp}"
         echo
         echo "ERRORS=$errors"
         echo "WARNINGS=$warnings"
@@ -3887,6 +3932,138 @@ sonar_forensic_chain_of_custody() {
     sonar_audit "CHAIN_OF_CUSTODY_GENERATED" "case_id=${case_id};evidence_root=${root};hashchain_status=${chain_status}"
     echo "[SONAR] Chaine de possession: ${out}"
 }
+
+# ----------------------------------------------------------------------------
+# BUILD WATERMARKING — traceability, not prevention.
+# ----------------------------------------------------------------------------
+# Nothing software-only can stop a bit-for-bit `dd` clone of a finished USB
+# stick — that requires a secure element on the medium itself, which
+# consumer USB drives essentially never have. What IS achievable: every real
+# --disk deployment embeds a unique, HMAC-signed watermark on the medium
+# (build id, timestamp, operator identity, disk label). If a copy ever
+# surfaces where it shouldn't, the watermark proves which specific,
+# authorized build it came from — deterrence and forensic attribution, not
+# a lock. The watermark's own signing secret is DELIBERATELY separate from
+# the role-lock secret (SONAR_ROLE_SECRET_FILE): they protect different
+# things (who can act vs. which build this medium came from), and mixing
+# them would let anyone able to verify a watermark also derive role tokens.
+SONAR_BUILD_SECRET_FILE="${SONAR_BUILD_SECRET_FILE:-${SONAR_SECURITY_DIR}/Keys/build_secret.key}"
+SONAR_BUILD_REGISTRY_FILE="${SONAR_BUILD_REGISTRY_FILE:-${SONAR_SECURITY_DIR}/Keys/build_registry.tsv}"
+
+sonar_build_secret_exists() { [[ -s "${SONAR_BUILD_SECRET_FILE}" ]]; }
+
+# Not privilege-granting (unlike the role-lock secret), so it's created
+# transparently on first real use rather than requiring an explicit
+# bootstrap step — the worst case of a missing secret is "no watermark
+# gets signed on this build", not a security regression of anything else.
+sonar_ensure_build_secret() {
+    sonar_build_secret_exists && return 0
+    mkdir -p "$(dirname "${SONAR_BUILD_SECRET_FILE}")"
+    chmod 700 "$(dirname "${SONAR_BUILD_SECRET_FILE}")" 2>/dev/null || true
+    local secret
+    if command -v sha256sum >/dev/null 2>&1; then
+        secret="$(head -c 32 /dev/urandom | sha256sum | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        secret="$(head -c 32 /dev/urandom | shasum -a 256 | awk '{print $1}')"
+    else
+        return 1
+    fi
+    [[ -n "$secret" ]] || return 1
+    printf '%s' "$secret" > "${SONAR_BUILD_SECRET_FILE}"
+    chmod 600 "${SONAR_BUILD_SECRET_FILE}"
+    sonar_audit "BUILD_SECRET_CREATED" "file=${SONAR_BUILD_SECRET_FILE}"
+}
+
+# sonar_build_sign BUILD_ID TS OPERATOR LABEL -> HMAC-SHA256
+sonar_build_sign() {
+    local build_id="$1" ts="$2" operator="$3" label="$4" secret
+    sonar_require_openssl || return 1
+    sonar_build_secret_exists || return 1
+    secret="$(cat "${SONAR_BUILD_SECRET_FILE}")" || return 1
+    printf '%s' "${build_id}|${ts}|${operator}|${label}" | openssl dgst -sha256 -hmac "${secret}" -r | awk '{print $1}'
+}
+
+# sonar_generate_build_watermark MOUNT_POINT: writes a signed watermark file
+# onto the deployed medium (MANIFEST/BUILD_WATERMARK.txt — not secret, just
+# an attestation) and records the same build id in a LOCAL registry that
+# never leaves the admin's own machine (never copied to the target disk),
+# so a later lookup can attach real-world context (job/client name) to a
+# build id recovered from a watermark.
+sonar_generate_build_watermark() {
+    local mp="$1" build_id ts operator label sig
+    sonar_ensure_build_secret || { log "[WATERMARK] Secret indisponible — build non filigrané."; return 0; }
+    build_id="$(head -c 16 /dev/urandom | sha256sum 2>/dev/null | awk '{print $1}')"
+    [[ -z "$build_id" ]] && build_id="$(head -c 16 /dev/urandom | shasum -a 256 | awk '{print $1}')"
+    ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    operator="${SONAR_ROLE_IDENTITY:-${SONAR_ROLE}}"
+    label="${VOL:-${DISK_LABEL:-INCONNU}}"
+    sig="$(sonar_build_sign "$build_id" "$ts" "$operator" "$label")" || { log "[WATERMARK] Échec de signature — build non filigrané."; return 0; }
+
+    mkdir -p "${mp}/MANIFEST"
+    {
+        echo "SONAR_BUILD_ID=${build_id}"
+        echo "SONAR_BUILD_TIMESTAMP=${ts}"
+        echo "SONAR_BUILD_OPERATOR=${operator}"
+        echo "SONAR_BUILD_LABEL=${label}"
+        echo "SONAR_BUILD_SIGNATURE=${sig}"
+    } > "${mp}/MANIFEST/BUILD_WATERMARK.txt"
+
+    mkdir -p "$(dirname "${SONAR_BUILD_REGISTRY_FILE}")"
+    printf '%s\t%s\t%s\t%s\n' "$ts" "$build_id" "$operator" "$label" >> "${SONAR_BUILD_REGISTRY_FILE}"
+    chmod 600 "${SONAR_BUILD_REGISTRY_FILE}" 2>/dev/null || true
+
+    sonar_audit "BUILD_WATERMARKED" "build_id=${build_id};label=${label}"
+    log_ok "Build filigrané: ${build_id} (registre local: ${SONAR_BUILD_REGISTRY_FILE})"
+}
+
+# sonar_verify_build_watermark PATH: PATH may be the watermark file itself
+# or a directory containing MANIFEST/BUILD_WATERMARK.txt (e.g. a mounted
+# suspect USB, or an extracted copy). Recomputes the signature from the
+# LOCAL build secret — this only succeeds on the machine that holds that
+# secret, i.e. typically the one that originally built (or could have
+# built) the medium. Cross-references the local registry if the build id
+# is found there.
+sonar_verify_build_watermark() {
+    local path="${1:-}" wm identity build_id ts operator label sig expected
+    [[ -n "$path" ]] || { echo 'Usage: --verify-watermark <fichier_ou_dossier>' >&2; return 2; }
+    if [[ -d "$path" ]]; then wm="${path%/}/MANIFEST/BUILD_WATERMARK.txt"; else wm="$path"; fi
+    [[ -s "$wm" ]] || { echo "[SONAR] Filigrane introuvable: ${wm}" >&2; return 2; }
+
+    build_id="$(awk -F= '/^SONAR_BUILD_ID=/{print $2}' "$wm")"
+    ts="$(awk -F= '/^SONAR_BUILD_TIMESTAMP=/{print $2}' "$wm")"
+    operator="$(awk -F= '/^SONAR_BUILD_OPERATOR=/{print $2}' "$wm")"
+    label="$(awk -F= '/^SONAR_BUILD_LABEL=/{print $2}' "$wm")"
+    sig="$(awk -F= '/^SONAR_BUILD_SIGNATURE=/{print $2}' "$wm")"
+    if [[ -z "$build_id" || -z "$sig" ]]; then
+        echo "[SONAR] Filigrane illisible ou incomplet: ${wm}" >&2
+        return 2
+    fi
+
+    echo "Build ID   : ${build_id}"
+    echo "Horodatage : ${ts}"
+    echo "Opérateur  : ${operator}"
+    echo "Label disque: ${label}"
+
+    if ! sonar_build_secret_exists; then
+        echo "[SONAR] Aucun secret local de watermark — authenticité NON vérifiable sur cette machine." >&2
+        return 1
+    fi
+    expected="$(sonar_build_sign "$build_id" "$ts" "$operator" "$label")" || { echo "[SONAR] Échec du calcul de signature." >&2; return 1; }
+    if sonar_const_time_eq "$sig" "$expected"; then
+        echo "Authenticité: CONFIRMÉE (signature valide contre le secret local)"
+    else
+        echo "Authenticité: ÉCHEC — signature invalide (build non reconnu, ou filigrane altéré)" >&2
+        sonar_audit "BUILD_WATERMARK_VERIFY_FAILED" "build_id=${build_id}"
+        return 1
+    fi
+
+    if [[ -s "${SONAR_BUILD_REGISTRY_FILE}" ]] && grep -qF "$build_id" "${SONAR_BUILD_REGISTRY_FILE}"; then
+        echo "Registre local: trouvé — $(grep -F "$build_id" "${SONAR_BUILD_REGISTRY_FILE}" | head -n1)"
+    else
+        echo "Registre local: build id non trouvé (normal si vérifié sur une autre machine que celle du build)."
+    fi
+    sonar_audit "BUILD_WATERMARK_VERIFIED" "build_id=${build_id}"
+}
 sonar_module_status_v23() { cat <<'EOF'
 SONAR V2.4 RELEASE CANDIDATE MODULE STATUS
 ==================================
@@ -4085,6 +4262,7 @@ case "${1:-}" in
     --role-bootstrap) sonar_role_bootstrap_secret; exit $? ;;
     --role-issue-token) shift; sonar_role_issue_token "${1:-}" "${2:-}" "${3:-30}"; exit $? ;;
     --role-revoke-token) shift; sonar_role_revoke_token "${1:-}"; exit $? ;;
+    --verify-watermark) shift; sonar_verify_build_watermark "${1:-}"; exit $? ;;
 
 esac
 
