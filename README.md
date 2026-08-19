@@ -73,6 +73,8 @@ mais l'authenticité n'est pas confirmable.
 ## Avant tout déploiement réel sur disque
 
 Guide détaillé, étape par étape : [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Liste complète des 936 outils couverts (69 domaines) :
+[`docs/CATALOG.md`](docs/CATALOG.md).
 
 ```bash
 # TOUJOURS tester en dry-run d'abord
