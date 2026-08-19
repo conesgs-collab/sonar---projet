@@ -436,11 +436,18 @@ sonar_audit() {
     local details="${2:-}"
     local ts prev hash
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    # Fold the authenticated identity into every audit entry, not just the
-    # role-lock's own events — so a backup, forensic acquisition, or real
-    # --disk deployment run under an elevated token is attributable to the
-    # named operator, not just to the role. Single source of truth here:
-    # callers must not embed "identity=" themselves (see sonar_role_enforce_lock).
+    # audit.log and hashchain.log are tab-separated, newline-terminated.
+    # Several callers pass caller/user-supplied free text into `details`
+    # (forensic case ids, disk labels, etc.) — without this, an embedded
+    # literal tab or newline corrupts the log's column structure, or (with
+    # a newline) can make a single logical entry LOOK like a separate,
+    # plausible-but-fake log line to anyone reading the raw file. The
+    # hashchain still catches this as tampering on --verify-hashchain
+    # (the hash covers the untouched string), but a naive `cat`/`awk` read
+    # would be misled in the meantime. Sanitize centrally here so every
+    # current and future caller is covered, not just the ones that remember.
+    event="${event//$'\t'/ }"; event="${event//$'\n'/ }"
+    details="${details//$'\t'/ }"; details="${details//$'\n'/ }"
     if [[ -n "${SONAR_ROLE_IDENTITY:-}" ]]; then
         details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY}"
     fi
@@ -3113,7 +3120,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.10.1-dep-guard"
+SONAR_VERSION="3.10.2-audit-integrity"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3326,6 +3333,42 @@ sonar_self_test_v2() {
             printf 'FAIL\tForensic acquisition for chain-of-custody smoke test did not produce evidence\n'; errors=$((errors+1))
         fi
         rm -rf "${_coc_src}" "${_coc_dst}"
+
+        # Regression test: the smoke test above always used an identity-
+        # carrying token. A real bug (v3.10.2) only manifested for the more
+        # common case — acquisition under the default self-service role,
+        # no token, no identity — where the audit-line lookup pipeline
+        # returned non-zero (grep found no "identity=" field) and crashed
+        # the whole function silently under set -e + pipefail.
+        local _coc2_src _coc2_dst _coc2_evroot _coc2_doc
+        _coc2_src="$(mktemp -d)"; _coc2_dst="$(mktemp -d)"
+        echo "piece" > "${_coc2_src}/exhibit.txt"
+        SONAR_ROOT="${_rt_root}" "$self" --forensic-acquire "${_coc2_src}" "${_coc2_dst}" >/dev/null 2>&1
+        _coc2_evroot="$(find "${_coc2_dst}" -maxdepth 1 -name 'SONAR_EVIDENCE_*' | head -n1)"
+        if [[ -n "${_coc2_evroot}" ]] && SONAR_ROOT="${_rt_root}" "$self" --forensic-chain-of-custody "${_coc2_evroot}" 'NOIDENT-CASE' >/dev/null 2>&1; then
+            printf 'PASS\tChain-of-custody works for acquisition without an authenticated identity\n'
+        else
+            printf 'FAIL\tChain-of-custody crashed for acquisition without an authenticated identity\n'; errors=$((errors+1))
+        fi
+
+        # Regression test: a case id containing embedded tab/newline
+        # characters must not corrupt audit.log's tab-separated structure
+        # or masquerade as a separate fake log entry.
+        local _inj_case _inj_before _inj_after
+        _inj_case="$(printf 'X\nFAKE\tINJECTED\tROW')"
+        _inj_before="$(wc -l < "${_rt_root}/Secure/Logs/audit.log" 2>/dev/null || echo 0)"
+        if [[ -n "${_coc2_evroot}" ]]; then
+            SONAR_ROOT="${_rt_root}" "$self" --forensic-chain-of-custody "${_coc2_evroot}" "${_inj_case}" >/dev/null 2>&1
+        fi
+        _inj_after="$(wc -l < "${_rt_root}/Secure/Logs/audit.log" 2>/dev/null || echo 0)"
+        if (( _inj_after == _inj_before + 2 )) \
+           && [[ "$(tail -n1 "${_rt_root}/Secure/Logs/audit.log")" != *$'\n'* ]] \
+           && [[ "$(tail -n1 "${_rt_root}/Secure/Logs/audit.log" | awk -F'\t' '{print NF}')" == "4" ]]; then
+            printf 'PASS\tAudit log rejects tab/newline injection in caller-supplied text\n'
+        else
+            printf 'FAIL\tAudit log structure was corrupted by injected tab/newline\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_coc2_src}" "${_coc2_dst}"
         rm -rf "${_rt_root}"
         grep -q '^sonar_generate_vault_helper() {' "$self" && printf 'PASS\tVault helper generator present\n' || { printf 'FAIL\tVault helper generator missing\n'; errors=$((errors+1)); }
         if command -v gpg >/dev/null 2>&1; then
@@ -3904,11 +3947,11 @@ sonar_forensic_chain_of_custody() {
     mkdir -p "${root%/}/reports"
     out="${root%/}/reports/CHAIN_OF_CUSTODY.txt"
 
-    audit_line="$(grep "FORENSIC_ACQUIRE" "${SONAR_AUDIT_LOG}" 2>/dev/null | grep -F "destination=${root%/}" | tail -n1)"
+    audit_line="$(grep "FORENSIC_ACQUIRE" "${SONAR_AUDIT_LOG}" 2>/dev/null | grep -F "destination=${root%/}" | tail -n1 || true)"
     if [[ -n "$audit_line" ]]; then
         ts_acquired="$(awk -F '\t' '{print $1}' <<< "$audit_line")"
         operator="$(awk -F '\t' '{print $2}' <<< "$audit_line")"
-        identity_field="$(grep -oE 'identity=[^;[:space:]]+' <<< "$audit_line" | head -n1)"
+        identity_field="$(grep -oE 'identity=[^;[:space:]]+' <<< "$audit_line" | head -n1 || true)"
         [[ -n "$identity_field" ]] && operator="${operator} (${identity_field})"
     else
         ts_acquired="INCONNU"

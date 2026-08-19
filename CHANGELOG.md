@@ -6,7 +6,70 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.10.1-dep-guard] — 2026-08-17
+## [3.10.2-audit-integrity] — 2026-08-18
+
+### Contexte
+En poursuivant l'audit systématique (cette fois côté sécurité plutôt que
+"drapeaux morts"), test d'une hypothèse : les champs texte libre fournis
+par l'opérateur (`case_id` de `--forensic-chain-of-custody`, notamment)
+finissent-ils sans validation dans le journal d'audit tabulé ? Un jeton de
+rôle a déjà cette protection (liste de caractères autorisés validée à
+l'émission) — mais `case_id` n'en avait aucune.
+
+### Bug fonctionnel trouvé en premier (pas celui qu'on cherchait)
+En préparant le test d'injection, `--forensic-chain-of-custody` a planté
+**silencieusement** (aucun message, code de sortie 1) sur le cas le plus
+courant : une acquisition faite sous le rôle `Technician` par défaut, sans
+jeton, donc sans identité associée. Cause : deux pipelines
+`grep ... | ... | tail`/`head` retournaient un code non-nul quand `grep` ne
+trouvait rien (cas normal — pas d'entrée "identity=" à trouver), et sous
+`set -e` + `pipefail`, une assignation nue `var="$(...)"` sur un tel
+pipeline fait avorter toute la fonction — **avant même** d'atteindre le
+`if [[ -n "$audit_line" ]]` censé gérer gracieusement ce cas (`INCONNU`).
+Même piège traqué plusieurs fois ce soir, cette fois dans une fonction
+jamais testée sans identité jusqu'ici (le test automatisé de v3.8.0
+utilisait toujours un jeton nominatif). Corrigé (`|| true` sur les deux
+pipelines concernés).
+
+### Vulnérabilité réelle confirmée ensuite
+Une fois ce bug corrigé, l'injection a bien fonctionné : un `case_id`
+contenant des tabulations/retours à la ligne littéraux se retrouvait tel
+quel dans `audit.log`, cassant la structure à 4 colonnes attendue, et
+**avec un retour à la ligne, créait une ligne entièrement séparée qui
+ressemblait à une entrée d'audit distincte et plausible** (ex:
+`2099-01-01T00:00:00Z	Admin	FAKE_ENTRY	injected=true`).
+
+**Bonne nouvelle en testant plus loin** : `--verify-hashchain` a
+immédiatement détecté la falsification (4 ruptures identifiées, dont la
+ligne injectée) — le hashchain n'est pas contourné, car il calcule
+l'empreinte sur la chaîne `details` complète, non tronquée. Mais un
+`cat`/`awk` naïf du journal brut, avant de penser à lancer la
+vérification, aurait été trompé.
+
+### Corrigé
+- `sonar_audit` neutralise désormais **centralement** toute tabulation ou
+  retour à la ligne dans `event` et `details` (remplacés par un espace)
+  avant écriture dans `audit.log` ET `hashchain.log` — protection
+  automatique pour tout appelant actuel ou futur, pas seulement
+  `case_id` (couvre aussi, par exemple, le label disque du filigrane de
+  build).
+- Deux nouveaux tests fonctionnels dans `--self-test` : chaîne de
+  possession sur une acquisition sans identité (le vrai bug), et
+  neutralisation d'une tentative d'injection tab/newline (structure à 4
+  colonnes préservée, hashchain intact).
+
+### Testé
+- Acquisition sans identité → chaîne de possession fonctionne
+  normalement (confirmé, alors qu'elle plantait silencieusement avant).
+- Injection avec tabulations seules → contenu neutralisé en une ligne
+  propre à 4 colonnes.
+- Injection avec retour à la ligne → confirmé qu'avant le correctif, une
+  ligne factice séparée était bien créée ; après le correctif, tout reste
+  sur une seule ligne, structure intacte.
+- self-audit et self-test : aucune régression, 2 nouveaux tests PASS dès
+  le premier lancement.
+
+
 
 ### Contexte
 Suite aux deux drapeaux morts trouvés ce soir (module status, VeraCrypt),
