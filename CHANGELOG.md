@@ -6,6 +6,60 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.11.0-ventoy-branding] — 2026-09-14
+
+### Contexte
+À la demande de l'auteur : personnaliser le fond d'écran du menu de
+démarrage Ventoy avec un visuel fourni, et y faire apparaître le nom du
+projet (« SONAR - SE ») et le crédit développeur (Sékou SANOU — Burkina
+Faso).
+
+### Ajouté
+- **`sonar_prepare_ventoy_theme(MOUNTPOINT)`** — nouvelle fonction,
+  appelée depuis `copy_payload_final` juste avant
+  `generate_ventoy_json_final`. Cherche
+  `SOURCE_DIR/Branding/background.{png,jpg,jpeg}` (fourni localement par
+  l'opérateur — jamais embarqué en binaire dans ce script ou son
+  historique Git, même logique que l'archive Ventoy elle-même) :
+  - Absent → ne fait rien, comportement Ventoy par défaut inchangé.
+  - Présent + `convert` (ImageMagick) disponible sur la machine de build →
+    incruste `SONAR_VENTOY_TITLE`/`SONAR_VENTOY_CREDIT` (variables
+    d'environnement, défaut `SONAR - SE` / `Sekou SANOU - Burkina Faso`)
+    sur un bandeau semi-transparent en bas de l'image, copie le résultat
+    vers `ventoy/theme/background.png` sur la clé.
+  - Présent + `convert` absent ou échoue → copie l'image telle quelle
+    (sans texte), journalise une note. Jamais bloquant : GRUB n'a de toute
+    façon aucune notion de « texte à superposer » via `ventoy.json` — le
+    titre/crédit ne peuvent exister que comme pixels de l'image elle-même,
+    donc dans le pire cas on perd juste l'incrustation, jamais le build.
+- `generate_ventoy_json_final` : ajoute désormais un bloc `"theme"` à
+  `ventoy.json` si `ventoy/theme/background.png` existe — clés officielles
+  du plugin thème Ventoy (`file`, `gfxmode`, `boot_menu_language`,
+  `ventoy_left`, `ventoy_top`, `ventoy_color`).
+- `--no-ventoy-theme` : nouveau flag pour désactiver complètement l'étape
+  (cohérent avec `--no-veracrypt`/`--no-logging`/`--no-readme`).
+- `SOURCE_DIR/Branding/` ajouté à la création automatique des
+  sous-dossiers source (comme ISO/Portable/Scripts/Drivers/macOS).
+- `docs/DEPLOYMENT.md` : nouvelle sous-section « Personnaliser le fond
+  d'écran Ventoy », liste de dépendances et sous-dossiers mis à jour
+  (incluait déjà `cp` en pratique depuis le correctif RBAC du
+  2026-09-14 plus tôt, jamais documenté jusqu'ici — corrigé au passage).
+
+### Limite connue
+**Non testé sur un vrai démarrage physique** — même réserve P0 que le
+reste du projet (`ROADMAP.md`). Le rendu exact du bandeau de texte dépend
+des polices disponibles sur la machine de build au moment de l'exécution
+d'ImageMagick ; aucune police n'est imposée explicitement pour rester
+portable (voir le code pour le détail).
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14).
+Logique de `sonar_prepare_ventoy_theme`/`generate_ventoy_json_final`
+validée en isolation (4 scénarios : image+ImageMagick OK, pas d'image,
+`--no-ventoy-theme`, ImageMagick absent/échoue) — le chemin réel
+`--disk` complet reste non exerçable par `--self-test` (nécessite un
+périphérique bloc réel, même limite que le reste du déploiement).
+
 ## [3.10.5-forensic-policy-decision] — 2026-09-14
 
 ### Note

@@ -34,9 +34,11 @@ s'attendre et où se trouve chaque garde-fou.
    étape n'est pas obligatoire — elle ne devient nécessaire que si vous
    comptez utiliser un rôle élevé (Senior/Forensic/Admin/Expert).
 4. Préparez l'arborescence source (`ISO/`, `Portable/`, `Scripts/`,
-   `Drivers/`, `macOS/`) à l'emplacement que vous passerez en `--source`.
-   Le script la crée automatiquement si elle n'existe pas encore, mais un
-   `ISO/` vide donnera un `--self-test` avec des avertissements.
+   `Drivers/`, `macOS/`, `Branding/`) à l'emplacement que vous passerez en
+   `--source`. Le script la crée automatiquement si elle n'existe pas
+   encore, mais un `ISO/` vide donnera un `--self-test` avec des
+   avertissements. `Branding/background.png` (ou `.jpg`/`.jpeg`) est
+   optionnel — voir « Personnaliser le fond d'écran Ventoy » plus bas.
 
 ---
 
@@ -86,10 +88,10 @@ des vérifications, dans le code :
 2. **Vérification de toutes les dépendances système** : `awk`, `basename`,
    `blockdev`, `findmnt`, `lsblk`, `mount`, `umount`, `sync`, `dd`,
    `mkfs.ext4`, `sha256sum`, `tar`, `gzip`, `sed`, `grep`, `find`, `sort`,
-   `date`, `head`, `python3`, `wget`, `curl` — chacune vérifiée
+   `date`, `head`, `python3`, `wget`, `curl`, `cp` — chacune vérifiée
    individuellement, arrêt net et nommé si l'une manque.
 3. **Vérification du dossier source** (`--source`), création des
-   sous-dossiers manquants (`ISO/Portable/Scripts/Drivers/macOS`).
+   sous-dossiers manquants (`ISO/Portable/Scripts/Drivers/macOS/Branding`).
 4. **Garde-fou anti-disque-système** : compare le disque parent de `/`
    (racine du système en cours d'exécution) au disque ciblé — refus net
    si vous pointez accidentellement sur le disque de démarrage de la
@@ -215,6 +217,32 @@ copie :
 - **`MANIFEST/BUILD_WATERMARK.txt`** — filigrane de build signé
   (HMAC-SHA256), horodaté, avec l'identité de l'opérateur si authentifié
   (voir v3.10.0)
+- Le fond d'écran Ventoy personnalisé, s'il y en a un — voir ci-dessous.
+
+### Personnaliser le fond d'écran Ventoy
+
+Optionnel, purement cosmétique. Déposez votre image dans
+`SOURCE_DIR/Branding/background.png` (`.jpg`/`.jpeg` acceptés aussi) avant
+de lancer `--disk`. `sonar_prepare_ventoy_theme` la reprend automatiquement :
+
+- Si `convert` (ImageMagick) est installé sur la machine de build, le
+  titre et le crédit (`SONAR_VENTOY_TITLE`/`SONAR_VENTOY_CREDIT`,
+  personnalisables par variable d'environnement — par défaut
+  `SONAR - SE` / `Sekou SANOU - Burkina Faso`) sont incrustés en bas de
+  l'image sur un bandeau semi-transparent, puis le résultat est copié vers
+  `ventoy/theme/background.png` sur la clé et référencé dans
+  `ventoy/ventoy.json` (champs officiels du plugin thème de Ventoy :
+  `file`, `gfxmode`, `boot_menu_language`, `ventoy_left/top/color`).
+- Sans ImageMagick, l'image est copiée telle quelle (sans texte incrusté)
+  — jamais bloquant.
+- Sans image dans `Branding/`, rien ne se passe — comportement Ventoy par
+  défaut inchangé.
+- `--no-ventoy-theme` désactive complètement cette étape.
+
+**Non testé sur un vrai démarrage physique** (même réserve que le reste du
+projet — voir `ROADMAP.md`). GRUB affiche l'image telle quelle ; en cas de
+doute sur le rendu, testez d'abord sans texte incrusté (désinstallez
+ImageMagick temporairement, ou utilisez une image déjà finalisée).
 
 ---
 
@@ -318,7 +346,7 @@ download_ventoy_final (local ou téléchargement + SHA-256 + GPG optionnel)
 install_ventoy_final  ◄── PREMIÈRE ÉCRITURE RÉELLE SUR LE DISQUE
     │
     ▼
-copy_payload_final (ISO/Portable/Scripts/Drivers/macOS + vault + watermark)
+copy_payload_final (ISO/Portable/Scripts/Drivers/macOS + vault + thème + watermark)
     │
     ▼
 create_persistence_final (persistance ext4, jamais chiffrée)

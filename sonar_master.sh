@@ -713,6 +713,16 @@ BATCH_COUNT="${BATCH_COUNT:-1}"
 INCLUDE_VERACRYPT="${INCLUDE_VERACRYPT:-true}"
 INCLUDE_LOGGING="${INCLUDE_LOGGING:-true}"
 GENERATE_README="${GENERATE_README:-true}"
+# Ventoy boot-menu background/branding: purely cosmetic (GRUB-level PNG
+# background via Ventoy's own theme plugin), never required for boot to
+# work. Source image is supplied locally by the operator in
+# SOURCE_DIR/Branding/ (never embedded as a binary blob in this script or
+# its git history — same reasoning as Ventoy's own archive being
+# downloaded/locally-supplied rather than embedded). Silently skipped if
+# absent; never blocks a deploy.
+INCLUDE_VENTOY_THEME="${INCLUDE_VENTOY_THEME:-true}"
+SONAR_VENTOY_TITLE="${SONAR_VENTOY_TITLE:-SONAR - SE}"
+SONAR_VENTOY_CREDIT="${SONAR_VENTOY_CREDIT:-Sekou SANOU - Burkina Faso}"
 DRY_RUN="${DRY_RUN:-false}"
 YES="${YES:-false}"
 # This build has never been validated on a real physical boot (Ventoy install
@@ -873,6 +883,9 @@ Autres:
                                 persistance Ventoy, jamais chiffrée par SONAR)
   --no-logging               Désactiver la journalisation principale
   --no-readme                Ne pas générer README
+  --no-ventoy-theme          Ne pas personnaliser le fond d'écran Ventoy
+                                (voir SOURCE_DIR/Branding/) ; sans effet si
+                                aucune image n'est fournie de toute façon
   --help|-h                  Afficher cette aide
 
 Commandes indépendantes (à la place de --disk):
@@ -952,6 +965,7 @@ parse_final_args() {
             --no-veracrypt) INCLUDE_VERACRYPT=false; shift ;;
             --no-logging) INCLUDE_LOGGING=false; shift ;;
             --no-readme) GENERATE_README=false; shift ;;
+            --no-ventoy-theme) INCLUDE_VENTOY_THEME=false; shift ;;
             --role) [[ $# -ge 2 ]] || error_exit "--role nécessite une valeur."; SONAR_ROLE="$2"; sonar_validate_role "$SONAR_ROLE"; shift 2 ;;
             --role-token) [[ $# -ge 2 ]] || error_exit "--role-token nécessite une valeur."; SONAR_ROLE_TOKEN="$2"; shift 2 ;;
             --security-status) SONAR_COMMAND="security-status"; shift ;;
@@ -1265,7 +1279,7 @@ preflight_final() {
         require_cmd_final "$c"
     done
     [[ -d "${SOURCE_DIR}" ]] || error_exit "Source absente: ${SOURCE_DIR}"
-    mkdir -p "${SOURCE_DIR}"/{ISO,Portable,Scripts,Drivers,macOS}
+    mkdir -p "${SOURCE_DIR}"/{ISO,Portable,Scripts,Drivers,macOS,Branding}
     local rootpk targetpk
     rootpk="$(lsblk -no PKNAME "$(findmnt -no SOURCE /)" 2>/dev/null | head -n1 || true)"
     targetpk="$(lsblk -no PKNAME "${DISK}" 2>/dev/null | head -n1 || true)"
@@ -1399,6 +1413,53 @@ create_persistence_final() {
     log_ok "Persistance créée: ${PERSISTENCE_COUNT} x ${PERSISTENCE_SIZE} GiB."
 }
 
+# sonar_prepare_ventoy_theme MOUNTPOINT: installs an optional custom
+# background for Ventoy's boot menu (a GRUB-level PNG, via Ventoy's own
+# documented theme plugin keys: file/gfxmode/boot_menu_language/
+# ventoy_left/ventoy_top/ventoy_color in ventoy.json). Purely cosmetic —
+# never required for boot, never blocks the deploy if anything here
+# fails or the source image is simply absent (the common case).
+#
+# Source image: SOURCE_DIR/Branding/background.{png,jpg,jpeg}, supplied
+# locally by the operator. Never embedded in this script or its git
+# history, for the same reason Ventoy's own archive is downloaded/
+# locally-supplied rather than embedded — this script stays a single
+# self-verifiable text file, no binary blobs in its own repo.
+#
+# GRUB only ever displays a flat PNG — ventoy.json has no "overlay this
+# text" field, so SONAR_VENTOY_TITLE/SONAR_VENTOY_CREDIT are burned into
+# the pixels via ImageMagick (`convert`) when it's available; otherwise
+# the image is used as-is (no text) and a note is logged, never a hard
+# failure over a cosmetic feature.
+sonar_prepare_ventoy_theme() {
+    local mp="$1" src="" cand out_dir out w
+    [[ "${INCLUDE_VENTOY_THEME}" == "true" ]] || return 0
+    for cand in "${SOURCE_DIR}/Branding/background.png" \
+                "${SOURCE_DIR}/Branding/background.jpg" \
+                "${SOURCE_DIR}/Branding/background.jpeg"; do
+        [[ -s "$cand" ]] && { src="$cand"; break; }
+    done
+    [[ -n "$src" ]] || return 0
+    out_dir="${mp}/ventoy/theme"
+    mkdir -p "${out_dir}"
+    out="${out_dir}/background.png"
+    if command -v convert >/dev/null 2>&1; then
+        w="$(identify -format '%w' "$src" 2>/dev/null || echo 1024)"
+        if ! convert "$src" \
+                \( -size "${w}x110" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
+                -gravity south -fill white -pointsize 34 -annotate +0+58 "${SONAR_VENTOY_TITLE}" \
+                -gravity south -fill '#cccccc' -pointsize 18 -annotate +0+20 "${SONAR_VENTOY_CREDIT}" \
+                "${out}" 2>/dev/null; then
+            log "[SONAR] Filigrane du fond Ventoy : échec ImageMagick, copie de l'image telle quelle."
+            cp -f "$src" "${out}"
+        fi
+    else
+        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés."
+        cp -f "$src" "${out}"
+    fi
+    sonar_audit "VENTOY_THEME_INSTALLED" "source=${src}"
+}
+
 generate_ventoy_json_final() {
     local mp="$1"
     python3 - "$mp" "$PERSISTENCE_COUNT" <<'PY'
@@ -1418,6 +1479,21 @@ cfg={"control":[
  "persistence":[]}
 for i,img in enumerate(ubuntu[:n],1):
     cfg["persistence"].append({"image":img,"backend":[f"/persistence/env{i}.dat"]})
+theme_png = os.path.join(mp, "ventoy", "theme", "background.png")
+if os.path.isfile(theme_png):
+    # Keys per Ventoy's own documented theme plugin (ventoy.net) — file is
+    # relative to the Ventoy data partition root, same convention as ISO
+    # paths above. sonar_prepare_ventoy_theme() is what actually put the
+    # PNG there (and burned the title/credit into it, if ImageMagick was
+    # available); this only wires it into ventoy.json.
+    cfg["theme"] = {
+        "file": "/ventoy/theme/background.png",
+        "gfxmode": "1920x1080,1024x768,800x600",
+        "boot_menu_language": "fr",
+        "ventoy_left": "10%",
+        "ventoy_top": "38%",
+        "ventoy_color": "#66ccff",
+    }
 os.makedirs(os.path.join(mp,"ventoy"),exist_ok=True)
 with open(os.path.join(mp,"ventoy","ventoy.json"),"w",encoding="utf-8") as f:
     json.dump(cfg,f,indent=2)
@@ -1445,6 +1521,7 @@ copy_payload_final() {
     fi
     [[ -f "${ai_results}" ]] && cp -f "${ai_results}" "${mp}/AI-Downloads/MANIFEST_AI_RESULTS.tsv"
     generate_tool_index_final "${mp}"
+    sonar_prepare_ventoy_theme "${mp}"
     generate_ventoy_json_final "${mp}"
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
     sonar_generate_build_watermark "${mp}"
@@ -3225,7 +3302,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.10.5-forensic-policy-decision"
+SONAR_VERSION="3.11.0-ventoy-branding"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
