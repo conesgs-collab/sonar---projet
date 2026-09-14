@@ -6,6 +6,42 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.11.1-ventoy-default-background] — 2026-09-14
+
+### Contexte
+Suite à v3.11.0 : l'auteur a fourni un visuel de référence (dashboard
+sombre façon carte du monde/instrument radar) directement dans la
+conversation, sans possibilité pour moi de récupérer les octets de
+l'image (aucun outil ne me permet de sauvegarder une image collée dans
+le chat vers un fichier). Plutôt que bloquer sur cette limite, génération
+d'un fond par défaut dans le même esprit (Python/Pillow), livré tel
+quel avec le dépôt.
+
+### Ajouté
+- **`Branding/default_background.png`** (1920x1080) — premier et seul
+  actif binaire du dépôt (le script lui-même reste texte pur,
+  auto-vérifiable ; ceci est un fond d'écran GRUB inerte, pas du code).
+  Anneaux façon radar, nœuds lumineux reliés (thème réseau/monde),
+  bandeau semi-transparent en bas avec « SONAR - SE » et « Sékou SANOU —
+  Burkina Faso » déjà incrustés à la génération.
+- `sonar_prepare_ventoy_theme` : deuxième source, utilisée quand
+  l'opérateur n'a rien fourni dans `SOURCE_DIR/Branding/` — copie ce
+  fichier tel quel (déjà finalisé, pas de retraitement ImageMagick).
+  L'image fournie par l'opérateur reste toujours prioritaire si présente.
+
+### Limite assumée
+Ce n'est **pas** une reproduction du visuel montré par l'auteur — une
+recréation dans le même esprit, avec les outils réellement disponibles.
+Si l'auteur enregistre son image d'origine dans
+`SOURCE_DIR/Branding/background.png`, elle prend le dessus automatiquement
+sans aucun changement de configuration.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
+`--self-test` (0 FAIL). Chemin de repli vers l'image par défaut du dépôt
+validé en isolation (copie verbatim, sans retraitement).
+son propre historique en commentaire.
+
 ## [3.11.0-ventoy-branding] — 2026-09-14
 
 ### Contexte

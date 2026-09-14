@@ -1413,37 +1413,49 @@ create_persistence_final() {
     log_ok "Persistance créée: ${PERSISTENCE_COUNT} x ${PERSISTENCE_SIZE} GiB."
 }
 
-# sonar_prepare_ventoy_theme MOUNTPOINT: installs an optional custom
-# background for Ventoy's boot menu (a GRUB-level PNG, via Ventoy's own
-# documented theme plugin keys: file/gfxmode/boot_menu_language/
-# ventoy_left/ventoy_top/ventoy_color in ventoy.json). Purely cosmetic —
-# never required for boot, never blocks the deploy if anything here
-# fails or the source image is simply absent (the common case).
+# sonar_prepare_ventoy_theme MOUNTPOINT: installs a background for
+# Ventoy's boot menu (a GRUB-level PNG, via Ventoy's own documented theme
+# plugin keys: file/gfxmode/boot_menu_language/ventoy_left/ventoy_top/
+# ventoy_color in ventoy.json). Purely cosmetic — never required for
+# boot, never blocks the deploy if anything here fails.
 #
-# Source image: SOURCE_DIR/Branding/background.{png,jpg,jpeg}, supplied
-# locally by the operator. Never embedded in this script or its git
-# history, for the same reason Ventoy's own archive is downloaded/
-# locally-supplied rather than embedded — this script stays a single
-# self-verifiable text file, no binary blobs in its own repo.
-#
-# GRUB only ever displays a flat PNG — ventoy.json has no "overlay this
-# text" field, so SONAR_VENTOY_TITLE/SONAR_VENTOY_CREDIT are burned into
-# the pixels via ImageMagick (`convert`) when it's available; otherwise
-# the image is used as-is (no text) and a note is logged, never a hard
-# failure over a cosmetic feature.
+# Two sources, in priority order:
+#   1. SOURCE_DIR/Branding/background.{png,jpg,jpeg} — supplied locally
+#      by the operator at build time (never embedded in this script or
+#      its git history, same reasoning as Ventoy's own archive being
+#      downloaded/locally-supplied rather than embedded). If present,
+#      SONAR_VENTOY_TITLE/SONAR_VENTOY_CREDIT are burned into it via
+#      ImageMagick (`convert`) when available — GRUB only ever displays
+#      a flat PNG, ventoy.json has no "overlay this text" field, so any
+#      title/credit has to be part of the pixels. Without ImageMagick,
+#      the operator's image is used as-is (no text), logged, never fatal.
+#   2. Branding/default_background.png — shipped in this repo (the one
+#      binary asset it carries; unlike the script itself, this doesn't
+#      need to be text/self-auditable, it's inert boot-menu wallpaper).
+#      Generated once, title/credit already baked in, used verbatim with
+#      no further processing — this is the out-of-the-box look when the
+#      operator hasn't supplied anything of their own.
+# Neither present (e.g. repo asset removed) → silently does nothing,
+# stock Ventoy behavior.
 sonar_prepare_ventoy_theme() {
-    local mp="$1" src="" cand out_dir out w
+    local mp="$1" src="" cand out_dir out w prebaked=false
     [[ "${INCLUDE_VENTOY_THEME}" == "true" ]] || return 0
     for cand in "${SOURCE_DIR}/Branding/background.png" \
                 "${SOURCE_DIR}/Branding/background.jpg" \
                 "${SOURCE_DIR}/Branding/background.jpeg"; do
         [[ -s "$cand" ]] && { src="$cand"; break; }
     done
+    if [[ -z "$src" && -s "${SONAR_ROOT}/Branding/default_background.png" ]]; then
+        src="${SONAR_ROOT}/Branding/default_background.png"
+        prebaked=true
+    fi
     [[ -n "$src" ]] || return 0
     out_dir="${mp}/ventoy/theme"
     mkdir -p "${out_dir}"
     out="${out_dir}/background.png"
-    if command -v convert >/dev/null 2>&1; then
+    if [[ "$prebaked" == "true" ]]; then
+        cp -f "$src" "${out}"
+    elif command -v convert >/dev/null 2>&1; then
         w="$(identify -format '%w' "$src" 2>/dev/null || echo 1024)"
         if ! convert "$src" \
                 \( -size "${w}x110" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
@@ -3302,7 +3314,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.11.0-ventoy-branding"
+SONAR_VERSION="3.11.1-ventoy-default-background"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
