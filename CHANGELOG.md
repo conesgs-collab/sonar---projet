@@ -6,6 +6,52 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.10.4-catalog-expansion] — 2026-09-14
+
+### Contexte
+À la demande de l'auteur : ajout de CAINE (et distributions forensiques
+apparentées) au catalogue de référence, puis élargissement à quatre
+domaines jusqu'ici absents — vidéosurveillance/CCTV et téléphonie mobile
+étaient explicitement listés « hors périmètre » dans docs/CATALOG.md ;
+imprimantes et administration matérielle de serveurs n'étaient couverts
+par aucun domaine dédié.
+
+### Ajouté (catalogue de référence, `SONAR_CATALOGUE_EMBEDDED` dans
+sonar_master.sh — pas le catalogue structurel `SONAR_EMBEDDED_CATALOG_TSV`
+utilisé par `--catalog-seal`/`--catalog-validate-embedded`, resté
+inchangé)
+- **Domaine 58 (Forensic disque)** : CAINE, DEFT Linux, Tsurugi Linux, SIFT
+  Workstation, Guymager, Bulk Extractor.
+- **Domaine 70 (nouveau) — Vidéosurveillance / CCTV** : ONVIF Device
+  Manager, ZoneMinder, Shinobi, Blue Iris, Agent DVR (iSpy), Synology
+  Surveillance Station, Milestone XProtect, Hikvision SADP Tool, Dahua
+  ConfigTool, Dahua SmartPSS.
+- **Domaine 71 (nouveau) — Téléphonie mobile** : ADB, Fastboot, Android SDK
+  Platform Tools, Odin, Heimdall, SP Flash Tool, Apple Configurator 2,
+  libimobiledevice, 3uTools, scrcpy, Cellebrite UFED, MSAB XRY.
+- **Domaine 72 (nouveau) — Imprimantes** : CUPS, Windows Print Management
+  Console, HP Smart, Epson Connect, Brother iPrint&Scan, Canon IJ Network
+  Tool, PaperCut, PrinterLogic, Ghostscript.
+- **Domaine 73 (nouveau) — Serveurs (matériel & admin distante)** : Dell
+  iDRAC, HPE iLO, Lenovo XClarity, ipmitool, Supermicro IPMI/BMC, Redfish
+  API tools, Dell Update Package, HPE Service Pack for ProLiant.
+- Total : 936 → **981 outils**, 69 → **73 domaines**. `docs/CATALOG.md` et
+  `README.md` régénérés/mis à jour en conséquence.
+
+### Précision de portée
+Cet ajout est purement documentaire — une liste de référence, pas de
+nouveau code exécutable. Il ne modifie ni le module forensique
+(`--forensic-acquire`, `--forensic-chain-of-custody`), ni le RBAC, ni
+aucun comportement du script. Les outils listés (gestion de flotte
+mobile, administration de caméras IP/NVR, impression, hors-bande serveur)
+sont ceux d'un technicien IT en contexte autorisé (parc dont il a la
+charge) — cohérent avec le positionnement du projet depuis le début
+(« maintenance informatique », cf. README).
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
+`--self-test` (0 FAIL).
+
 ## [3.10.3-role-lock-hardening] — 2026-09-14
 
 ### Contexte

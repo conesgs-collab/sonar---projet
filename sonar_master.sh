@@ -2803,6 +2803,12 @@ DOMAIN	SUBDOMAIN	NAME
 58. Forensic disque		TestDisk
 58. Forensic disque		PhotoRec
 58. Forensic disque		Sleuth Kit
+58. Forensic disque		CAINE
+58. Forensic disque		DEFT Linux
+58. Forensic disque		Tsurugi Linux
+58. Forensic disque		SIFT Workstation
+58. Forensic disque		Guymager
+58. Forensic disque		Bulk Extractor
 59. Récupération de données		TestDisk
 59. Récupération de données		PhotoRec
 59. Récupération de données		R-Studio
@@ -2946,6 +2952,45 @@ DOMAIN	SUBDOMAIN	NAME
 69. Outils de productivité développeur		Chocolatey
 69. Outils de productivité développeur		Make
 69. Outils de productivité développeur		CMake
+70. Vidéosurveillance / CCTV		ONVIF Device Manager
+70. Vidéosurveillance / CCTV		ZoneMinder
+70. Vidéosurveillance / CCTV		Shinobi
+70. Vidéosurveillance / CCTV		Blue Iris
+70. Vidéosurveillance / CCTV		Agent DVR (iSpy)
+70. Vidéosurveillance / CCTV		Synology Surveillance Station
+70. Vidéosurveillance / CCTV		Milestone XProtect
+70. Vidéosurveillance / CCTV		Hikvision SADP Tool
+70. Vidéosurveillance / CCTV		Dahua ConfigTool
+70. Vidéosurveillance / CCTV		Dahua SmartPSS
+71. Téléphonie mobile		ADB (Android Debug Bridge)
+71. Téléphonie mobile		Fastboot
+71. Téléphonie mobile		Android SDK Platform Tools
+71. Téléphonie mobile		Odin (Samsung)
+71. Téléphonie mobile		Heimdall
+71. Téléphonie mobile		SP Flash Tool (MediaTek)
+71. Téléphonie mobile		Apple Configurator 2
+71. Téléphonie mobile		libimobiledevice
+71. Téléphonie mobile		3uTools
+71. Téléphonie mobile		scrcpy
+71. Téléphonie mobile		Cellebrite UFED
+71. Téléphonie mobile		MSAB XRY
+72. Imprimantes		CUPS
+72. Imprimantes		Windows Print Management Console
+72. Imprimantes		HP Smart
+72. Imprimantes		Epson Connect
+72. Imprimantes		Brother iPrint&Scan
+72. Imprimantes		Canon IJ Network Tool
+72. Imprimantes		PaperCut
+72. Imprimantes		PrinterLogic
+72. Imprimantes		Ghostscript
+73. Serveurs (matériel & admin distante)		Dell iDRAC
+73. Serveurs (matériel & admin distante)		HPE iLO
+73. Serveurs (matériel & admin distante)		Lenovo XClarity
+73. Serveurs (matériel & admin distante)		ipmitool
+73. Serveurs (matériel & admin distante)		Supermicro IPMI/BMC
+73. Serveurs (matériel & admin distante)		Redfish API tools
+73. Serveurs (matériel & admin distante)		Dell Update Package (DUP)
+73. Serveurs (matériel & admin distante)		HPE Service Pack for ProLiant
 SONAR_CATALOGUE_EOF
     echo "[SONAR] Catalogue par défaut installé (première utilisation): $SONAR_CATALOGUE_EMBEDDED"
 }

@@ -15,14 +15,19 @@ binaire sur la clé par défaut, ni que chacun a été validé sur matériel ré
 statut réel de chaque composant SONAR lui-même, et `ROADMAP.md` pour l'état
 global de validation matérielle du projet.
 
-**Domaines explicitement hors périmètre** (voir aussi la conversation) :
-téléphonie mobile (pas d'ADB/Fastboot/JTAG), vidéosurveillance/CCTV (pas
-d'ONVIF/RTSP dédié à ce jour).
+**Anciennement hors périmètre, désormais couverts** (2026-09-14) :
+téléphonie mobile (ADB/Fastboot/JTAG et assimilés) et vidéosurveillance/CCTV
+(ONVIF/gestion NVR) ont leurs propres domaines dédiés — voir la table
+ci-dessous. Imprimantes et administration matérielle de serveurs (iDRAC/
+iLO/IPMI) ont été ajoutés dans la même passe. Le module forensique
+(`--forensic-acquire`, `--forensic-chain-of-custody`) reste indépendant de
+ce catalogue de référence — l'ajout de CAINE/DEFT/Tsurugi/SIFT au domaine
+« Forensic disque » ne change rien à ce que SONAR embarque par défaut.
 
 ## Statistiques
 
-- **69 domaines**
-- **936 outils/composants** recensés au total
+- **73 domaines**
+- **981 outils/composants** recensés au total
 
 ## Résumé par domaine (nombre d'outils)
 
@@ -96,6 +101,10 @@ d'ONVIF/RTSP dédié à ce jour).
 67. 67. Sécurité des postes                                13 outils
 68. 68. Gestion des licences                                  7 outils
 69. 69. Outils de productivité développeur                 15 outils
+70. 70. Vidéosurveillance / CCTV                            10 outils
+71. 71. Téléphonie mobile                                   12 outils
+72. 72. Imprimantes                                          9 outils
+73. 73. Serveurs (matériel & admin distante)                 8 outils
 ```
 
 ---
@@ -1068,6 +1077,12 @@ d'ONVIF/RTSP dédié à ce jour).
 - TestDisk
 - PhotoRec
 - Sleuth Kit
+- CAINE
+- DEFT Linux
+- Tsurugi Linux
+- SIFT Workstation
+- Guymager
+- Bulk Extractor
 
 ## 59. Récupération de données
 
@@ -1244,6 +1259,57 @@ d'ONVIF/RTSP dédié à ce jour).
 - Chocolatey
 - Make
 - CMake
+
+## 70. Vidéosurveillance / CCTV
+
+- ONVIF Device Manager
+- ZoneMinder
+- Shinobi
+- Blue Iris
+- Agent DVR (iSpy)
+- Synology Surveillance Station
+- Milestone XProtect
+- Hikvision SADP Tool
+- Dahua ConfigTool
+- Dahua SmartPSS
+
+## 71. Téléphonie mobile
+
+- ADB (Android Debug Bridge)
+- Fastboot
+- Android SDK Platform Tools
+- Odin (Samsung)
+- Heimdall
+- SP Flash Tool (MediaTek)
+- Apple Configurator 2
+- libimobiledevice
+- 3uTools
+- scrcpy
+- Cellebrite UFED
+- MSAB XRY
+
+## 72. Imprimantes
+
+- CUPS
+- Windows Print Management Console
+- HP Smart
+- Epson Connect
+- Brother iPrint&Scan
+- Canon IJ Network Tool
+- PaperCut
+- PrinterLogic
+- Ghostscript
+
+## 73. Serveurs (matériel & admin distante)
+
+- Dell iDRAC
+- HPE iLO
+- Lenovo XClarity
+- ipmitool
+- Supermicro IPMI/BMC
+- Redfish API tools
+- Dell Update Package (DUP)
+- HPE Service Pack for ProLiant
 
 
 ---
