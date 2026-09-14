@@ -44,7 +44,23 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
       monolithe de 3800 lignes)
 - [ ] Audit de sécurité externe (pentest ou revue communautaire si le projet
       s'ouvre), en particulier sur le module RBAC/verrou de rôle et le
-      module forensique
+      module forensique. Deux questions concrètes déjà identifiées
+      (2026-09-14, voir le commentaire au-dessus de la génération de
+      `policy.tsv` dans `sonar_master.sh` pour le détail) à trancher lors
+      de cet audit, pas avant :
+      - **DESTRUCTIVE vs DEPLOY** : `policy.tsv` refuse DESTRUCTIVE à
+        Technician mais autorise DEPLOY (le vrai chemin d'écriture disque
+        `--disk`, donc l'opération destructive elle-même) — colonnes en
+        conflit. Faut-il exiger CONFIRM aussi pour Technician sur
+        `--disk`, fusionner DESTRUCTIVE dans DEPLOY, ou autre chose ?
+        Non tranchable sans matériel réel pour valider (même blocage P0
+        que la validation matérielle ci-dessus).
+      - **FORENSIC** : `sonar_forensic_acquire`/`backup_execute`/
+        `forensic_chain_of_custody` restent volontairement en libre-service
+        (Technician, sans jeton) — testé et voulu ainsi (v3.10.2/v3.10.3,
+        voir CHANGELOG.md). Si un jour on veut restreindre qui peut
+        *collecter* (pas seulement qui est *identifié* dans le journal),
+        ça change ce cas de test documenté — décision produit, pas un bug.
 
 ## P2 — Maturité produit
 

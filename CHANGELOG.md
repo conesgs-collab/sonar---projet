@@ -6,6 +6,49 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.10.5-forensic-policy-decision] — 2026-09-14
+
+### Note
+`SONAR_VERSION` n'avait pas été mise à jour pour 3.10.4 ci-dessous (oubli
+— l'entrée CHANGELOG existait sans que le script porte le numéro
+correspondant). Rattrapé ici ; ce saut de version couvre donc aussi
+3.10.4 en pratique, pas seulement ce qui suit.
+
+### Contexte
+Suite à la question explicite : les colonnes DESTRUCTIVE et FORENSIC de
+`policy.tsv` doivent-elles enfin être appliquées dans le code (via
+`sonar_require_role`), ou rester déclaratives ? Décision **volontaire de
+ne pas les appliquer maintenant**, documentée avec les raisons concrètes
+plutôt que laissée comme un vague "à faire" :
+
+- **FORENSIC** : déjà tenté en v3.10.3, réverté — casse le comportement
+  testé et voulu (acquisition en libre-service sans jeton, "le cas le
+  plus courant" selon CHANGELOG v3.10.2).
+- **DESTRUCTIVE** : `Technician` y est refusé (`-`), mais autorisé sous
+  `DEPLOY` (`R`) — qui est le vrai chemin d'écriture disque destructive
+  (`--disk`, seul contrôlé par `sonar_require_role DEPLOY`). Appliquer
+  DESTRUCTIVE littéralement bloquerait donc le déploiement en libre-service
+  que DEPLOY autorise déjà pour ce même rôle — conflit interne entre les
+  deux colonnes, pas juste une case non cochée. Aucune couverture
+  `--self-test` n'existe sur le chemin d'écriture disque réel (bloqué P0
+  matériel) pour valider un changement ici sans risque.
+
+### Modifié
+- Commentaire au-dessus de la génération de `policy.tsv` dans
+  `sonar_master.sh` : remplacé par une explication détaillée de chaque
+  conflit (pas juste "en attente d'audit").
+- `ROADMAP.md` : le point P1 "audit de sécurité externe" porte désormais
+  ces deux questions concrètes en sous-puces, pour que qui fera cet audit
+  n'ait pas à re-découvrir le problème depuis zéro.
+
+### Non fait (délibérément)
+Aucun changement de comportement du script. Cette entrée documente une
+décision de ne pas coder quelque chose maintenant, pas un correctif.
+
+### Testé
+`bash -n`, `--self-audit` (14/14) — changements limités à des
+commentaires/documentation, aucune régression possible côté logique.
+
 ## [3.10.4-catalog-expansion] — 2026-09-14
 
 ### Contexte

@@ -393,21 +393,37 @@ sonar_security_init() {
         "${SONAR_SECURITY_DIR}/Vault" \
         "${SONAR_AI_DIR}/Hardware"
 
-    # NOTE (2026-09-14): AUDIT, DEPLOY and VAULT are actively enforced via
-    # sonar_require_role at their respective call sites (build/verify
+    # NOTE (2026-09-14, revisited): AUDIT, DEPLOY and VAULT are the only
+    # columns actively enforced via sonar_require_role (build/verify
     # manifest, disk deploy, catalog seal/verify-seal). DESTRUCTIVE and
-    # FORENSIC are NOT currently wired to any sonar_require_role gate —
-    # sonar_recovery_execute/backup_execute/forensic_acquire/
-    # forensic_chain_of_custody run under the default self-service
-    # Technician role deliberately (see --self-test's "acquisition without
-    # an authenticated identity" case and CHANGELOG.md v3.10.2/v3.10.3):
-    # any local operator can gather evidence; only an elevated role+token
-    # adds an *attributed* identity to the resulting audit trail. Gating
-    # these functions on FORENSIC/DESTRUCTIVE was tried in v3.10.3 and
-    # reverted because it broke that tested behavior. These two columns
-    # are left here as the intended shape for the external RBAC/forensic
-    # audit tracked in ROADMAP.md (P1) — read them as a stated intent,
-    # not an enforced boundary, until that audit lands.
+    # FORENSIC are deliberately left unenforced — not an oversight still
+    # to wire up, but a decision, because enforcing either one *as
+    # currently specified* would conflict with tested/intended behavior:
+    #
+    #   - FORENSIC: gating sonar_forensic_acquire/backup_execute/
+    #     forensic_chain_of_custody on it was tried in v3.10.3 and
+    #     reverted — it broke --self-test's "acquisition works without an
+    #     authenticated identity" case, which CHANGELOG.md v3.10.2 documents
+    #     as intentional: evidence collection is meant to stay open to any
+    #     local operator (Technician, no token); an elevated role+token only
+    #     adds an *attributed* identity to the audit trail, it doesn't gate
+    #     the ability to collect.
+    #   - DESTRUCTIVE: Technician is "-" here, but Technician is "R" under
+    #     DEPLOY, and the real `--disk` write path (main_final, checked via
+    #     sonar_require_role DEPLOY only) IS the destructive operation —
+    #     disk erase/partition/format. Enforcing DESTRUCTIVE literally would
+    #     block the exact self-service deploy DEPLOY=R already allows, for
+    #     every role except Senior/Admin/Expert. That's a real product
+    #     decision (should Technician deploys require CONFIRM too? should
+    #     DESTRUCTIVE and DEPLOY be merged into one column?), not something
+    #     to resolve by adding a check — no self-test coverage exists for
+    #     the real disk-write path (P0 hardware-validation blocker in
+    #     ROADMAP.md) to verify a change here doesn't break it.
+    #
+    # Both are left declarative on purpose until the external RBAC/forensic
+    # audit (ROADMAP.md P1) resolves them with someone who can validate
+    # against real hardware and the project's actual policy intent — see
+    # ROADMAP.md for the specific open questions above, spelled out there.
     if [[ ! -f "${SONAR_POLICY_FILE}" ]]; then
         cat > "${SONAR_POLICY_FILE}" <<'EOF'
 ROLE	AUDIT	DIAGNOSE	DEPLOY	DESTRUCTIVE	FORENSIC	VAULT
@@ -3209,7 +3225,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.10.3-role-lock-hardening"
+SONAR_VERSION="3.10.5-forensic-policy-decision"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
