@@ -6,6 +6,57 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.11.2-first-hardware-deploy-fixes] — 2026-09-14
+
+### Contexte
+**Premier vrai déploiement `--disk` sur matériel physique** (SSD externe
+USB, via WSL2 + passthrough disque brut). Ventoy2Disk.sh a réussi du
+premier coup ("Install Ventoy to /dev/sdd successfully finished") — un
+vrai jalon, le P0 du ROADMAP le marquait "jamais testé" depuis le début.
+Deux bugs réels trouvés dans la foulée, uniquement visibles sur du vrai
+matériel (jamais reproductibles en `--dry-run` ni en `--self-test`).
+
+### Corrigé
+- **`AI_PROVIDER: unbound variable`** — crash immédiat sous `set -u`.
+  `install_ai_layer_final()` lisait `AI_PROVIDER` avant que
+  `run_ai_final()` (seul appelant de `ai_detect_provider()`, qui
+  l'initialise) n'ait jamais tourné — ordre d'appel inversé dans
+  `deploy_single_disk_final`. Le crash survenait systématiquement, sur
+  tout déploiement réel non-dry-run. Corrigé sur deux niveaux : valeur
+  par défaut (`AI_PROVIDER="${AI_PROVIDER:-none}"`, jamais réellement
+  non définie quel que soit l'ordre d'appel futur) et réordonnancement
+  (`ai_detect_provider` appelée avant `install_ai_layer_final`, pour que
+  `AI_CONFIG.tsv` reflète le fournisseur réellement détecté, pas
+  toujours "none").
+- **`cp -a` échoue systématiquement sur la partition exFAT de Ventoy** —
+  `cp: failed to preserve ownership ... Operation not permitted` sur
+  chaque dossier copié (ISO/Portable/Scripts/Drivers/macOS), qu'exFAT ne
+  peut par nature pas représenter (pas de notion d'uid/gid). `cp` retourne
+  un code non-nul malgré un contenu copié intégralement, et
+  `copy_tree_final` interprétait ça à tort comme une copie incomplète
+  (`COPY_ERRORS` incrémenté) — sur un vrai déploiement avec du contenu
+  dans `SOURCE_DIR`, ça aurait fait échouer `validate_final` même sans le
+  crash IA. Corrigé avec `cp -a --no-preserve=ownership`, qui garde le
+  reste du mode archive (récursivité, horodatage, liens) et ne renonce
+  qu'à l'attribut qu'exFAT ne peut de toute façon pas porter.
+
+### Non corrigé (risque apparenté, pas de preuve)
+`sonar_backup_execute`/`sonar_forensic_acquire` utilisent aussi `cp -a`
+vers une destination choisie par l'opérateur — si elle est exFAT/FAT/NTFS,
+même faux-positif possible. Laissé tel quel : contrairement au cas
+Ventoy, la destination peut être un vrai système de fichiers POSIX où
+préserver l'ownership a une vraie valeur (fidélité forensique). Corriger
+sans preuve concrète aurait dégradé ce que ces fonctions font de mieux
+ailleurs — à confirmer par un test réel avant de toucher au code, même
+logique que le revert FORENSIC de la v3.10.3.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
+`--self-test` (0 FAIL). **Premier `--disk` réussi sur du vrai matériel**
+(Ventoy installé, persistance 5×8GiB créée, ~470 MB/s en écriture) —
+retest en cours après ces deux correctifs pour confirmer un run complet
+sans erreur de bout en bout.
+
 ## [3.11.1-ventoy-default-background] — 2026-09-14
 
 ### Contexte

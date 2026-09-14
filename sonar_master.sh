@@ -775,6 +775,15 @@ MANIFEST_SOURCE="${MANIFEST_SOURCE:-${SOURCE_DIR}/MANIFEST.tsv}"
 AI_MODE="${AI_MODE:-auto}"
 AI_MODEL="${AI_MODEL:-}"
 AI_ENDPOINT="${AI_ENDPOINT:-}"
+# AI_PROVIDER is normally set by ai_detect_provider() (curl-probes Ollama/
+# llama.cpp/openai-compatible endpoints), not given a real default here —
+# but install_ai_layer_final() reads it before run_ai_final() ever calls
+# ai_detect_provider() in deploy_single_disk_final's AI block, so under
+# set -u this was an unconditional crash on every real --disk deploy
+# (found 2026-09-14, first real hardware run). Placeholder default so the
+# variable is never truly unbound regardless of call order; the real
+# value is still filled in by ai_detect_provider() before it's written.
+AI_PROVIDER="${AI_PROVIDER:-none}"
 AI_ENABLE_DIAGNOSTICS="${AI_ENABLE_DIAGNOSTICS:-true}"
 AI_ENABLE_INVENTORY="${AI_ENABLE_INVENTORY:-true}"
 AI_ENABLE_RECOMMENDATIONS="${AI_ENABLE_RECOMMENDATIONS:-true}"
@@ -1392,7 +1401,15 @@ unmount_final() {
 copy_tree_final() {
     [[ -d "$1" ]] || { log "[INFO] Source absente: $1"; return; }
     mkdir -p "$2"
-    if ! cp -a "$1/." "$2/"; then
+    # --no-preserve=ownership: the destination is Ventoy's exFAT data
+    # partition, which has no concept of Unix uid/gid. Plain `cp -a`
+    # always fails to chown there (found 2026-09-14, first real hardware
+    # deploy) and reports a false "copie incomplète" — the file content
+    # itself copies fine, only the (meaningless-on-exFAT) ownership bit
+    # can't be applied. Keep the rest of archive mode (recursion,
+    # timestamps, symlinks) — just drop the one attribute this
+    # destination fundamentally can't represent.
+    if ! cp -a --no-preserve=ownership "$1/." "$2/"; then
         log_err "Copie incomplète: $1 -> $2"
     fi
 }
@@ -1845,6 +1862,12 @@ deploy_single_disk_final() {
     else
         local local_ai_mp
         local_ai_mp="$(mount_ventoy_final)"
+        # Detect before installing: install_ai_layer_final writes AI_PROVIDER
+        # into AI_CONFIG.tsv, so it needs the real value, not just a
+        # placeholder default — ai_detect_provider() is a pure probe (no
+        # side effects beyond setting the variable), safe to call again
+        # inside run_ai_final() right after.
+        ai_detect_provider
         install_ai_layer_final "${local_ai_mp}"
         run_ai_final "${local_ai_mp}"
         unmount_final "${local_ai_mp}"
@@ -3314,7 +3337,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.11.1-ventoy-default-background"
+SONAR_VERSION="3.11.2-first-hardware-deploy-fixes"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
