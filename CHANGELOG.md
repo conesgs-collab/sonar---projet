@@ -52,10 +52,13 @@ logique que le revert FORENSIC de la v3.10.3.
 
 ### Testé
 `bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
-`--self-test` (0 FAIL). **Premier `--disk` réussi sur du vrai matériel**
-(Ventoy installé, persistance 5×8GiB créée, ~470 MB/s en écriture) —
-retest en cours après ces deux correctifs pour confirmer un run complet
-sans erreur de bout en bout.
+`--self-test` (0 FAIL). **Confirmé sur vrai matériel** : après ces deux
+correctifs, run complet rejoué de bout en bout sur le même SSD externe —
+`0 avertissement(s), 0 erreur(s) de copie`, vérification post-déploiement
+OK (5 fichiers relus et confirmés), validation structurelle OK,
+`SONAR MASTER — TERMINÉ`. Débit observé : 243–476 MB/s en écriture selon
+les images de persistance. Boot effectif de la clé pas encore testé
+(prochaine étape, voir ROADMAP.md).
 
 ## [3.11.1-ventoy-default-background] — 2026-09-14
 

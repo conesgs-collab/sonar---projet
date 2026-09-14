@@ -22,16 +22,29 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
       et vérifiée verte au moins une fois — **indépendant du point matériel
       ci-dessous**, peut avancer dès accès à une machine avec Git/réseau,
       même sans matériel de test physique
-- [ ] **BLOQUÉ (côté opérateur, pas résolu) — Validation matérielle réelle** :
-      au moins un déploiement complet sur une vraie clé USB jetable, avec
-      boot effectif testé sur 2-3 machines différentes (BIOS legacy + UEFI).
-      Nécessite un accès physique à du matériel, indisponible pour le moment.
-      **Mitigation logicielle ajoutée en attendant (v3.5.0)** : tout
-      déploiement réel (`--disk` sans `--dry-run`) affiche désormais un
-      avertissement explicite et exige un acquiescement séparé
-      (`JE COMPRENDS LE RISQUE` ou `--accept-hardware-risk`), tracé dans
-      l'audit. Ça ne remplace pas le test réel — ça empêche seulement que
-      quelqu'un s'y expose sans le savoir.
+- [ ] **Validation matérielle réelle** (partiellement débloqué le
+      2026-09-14) :
+      - [x] Premier déploiement `--disk` complet sur un vrai périphérique
+            bloc physique (SSD externe USB, via WSL2 + passthrough disque
+            brut `wsl --mount --bare`) : Ventoy installé avec succès,
+            persistance 5×8GiB créée, vérification post-déploiement OK,
+            **0 erreur, 0 avertissement**. Deux bugs réels trouvés et
+            corrigés dans la foulée (`AI_PROVIDER` non définie, `cp -a`
+            incompatible avec exFAT) — voir CHANGELOG.md v3.11.2. Aucun
+            des deux n'était détectable en `--dry-run`/`--self-test`.
+      - [ ] **Boot effectif non encore testé** — le déploiement réussit,
+            mais rien ne prouve encore que la clé démarre réellement
+            (Secure Boot, ordre de boot BIOS/UEFI spécifique à une
+            machine sont des causes d'échec indépendantes d'un
+            déploiement propre). Prochaine étape concrète.
+      - [ ] Testé sur 2-3 machines différentes (BIOS legacy + UEFI) — un
+            seul support testé jusqu'ici, pas encore une validation large.
+      **Mitigation logicielle en place depuis v3.5.0** : tout déploiement
+      réel (`--disk` sans `--dry-run`) affiche un avertissement explicite
+      et exige un acquiescement séparé (`JE COMPRENDS LE RISQUE` ou
+      `--accept-hardware-risk`), tracé dans l'audit — toujours actif,
+      le premier succès ci-dessus ne change rien à cette exigence pour
+      les déploiements suivants.
 
 ## P1 — Une fois le filet en place
 
