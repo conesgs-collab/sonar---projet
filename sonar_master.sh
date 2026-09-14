@@ -126,10 +126,7 @@ shopt -s extglob
 umask 077
 
 # Racine d'exécution stable : indépendante du répertoire courant de l'appelant.
-SONAR_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SONAR_ROOT="${SONAR_ROOT:-${SONAR_SCRIPT_DIR}}"
-
-# Stable runtime root: do not depend on the caller's current directory.
+# (Stable runtime root: does not depend on the caller's current directory.)
 SONAR_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SONAR_ROOT="${SONAR_ROOT:-${SONAR_SCRIPT_DIR}}"
 
@@ -144,7 +141,6 @@ SONAR_AUDIT_LOG="${SONAR_AUDIT_LOG:-${SONAR_SECURITY_DIR}/Logs/audit.log}"
 SONAR_HASHCHAIN_LOG="${SONAR_HASHCHAIN_LOG:-${SONAR_SECURITY_DIR}/Logs/hashchain.log}"
 SONAR_MANIFEST="${SONAR_MANIFEST:-${SONAR_SECURITY_DIR}/MANIFEST.sha256}"
 SONAR_ROLE="${SONAR_ROLE:-Technician}"
-SONAR_AI_SECURITY_MODE="${SONAR_AI_SECURITY_MODE:-advisory}"
 
 # ----------------------------------------------------------------------------
 # ROLE LOCK v2: prevents `SONAR_ROLE=Admin` / `--role Admin` from silently
@@ -224,14 +220,7 @@ sonar_role_bootstrap_secret() {
         return 1
     fi
     local secret
-    if command -v sha256sum >/dev/null 2>&1; then
-        secret="$(head -c 32 /dev/urandom | sha256sum | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-        secret="$(head -c 32 /dev/urandom | shasum -a 256 | awk '{print $1}')"
-    else
-        echo "[SONAR] Aucun moteur SHA-256 disponible pour générer le secret." >&2
-        return 1
-    fi
+    secret="$(sonar_generate_secret_hex)" || { echo "[SONAR] Aucun moteur SHA-256 disponible pour générer le secret." >&2; return 1; }
     [[ -n "$secret" ]] || { echo "[SONAR] Échec de génération du secret." >&2; return 1; }
     printf '%s' "$secret" > "${SONAR_ROLE_SECRET_FILE}"
     chmod 600 "${SONAR_ROLE_SECRET_FILE}"
@@ -316,7 +305,7 @@ sonar_role_revoke_token() {
         echo "[SONAR] Jeton déjà révoqué (identity=${identity}, role=${role})."
         return 0
     fi
-    printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$identity" "$role" "$expiry" "$token_id" >> "${SONAR_ROLE_REVOKED_FILE}"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(sonar_iso_now)" "$identity" "$role" "$expiry" "$token_id" >> "${SONAR_ROLE_REVOKED_FILE}"
     chmod 600 "${SONAR_ROLE_REVOKED_FILE}" 2>/dev/null || true
     sonar_audit "ROLE_TOKEN_REVOKED" "identity=${identity};role=${role}"
     echo "[SONAR] Jeton révoqué: identity=${identity}, role=${role}."
@@ -404,6 +393,21 @@ sonar_security_init() {
         "${SONAR_SECURITY_DIR}/Vault" \
         "${SONAR_AI_DIR}/Hardware"
 
+    # NOTE (2026-09-14): AUDIT, DEPLOY and VAULT are actively enforced via
+    # sonar_require_role at their respective call sites (build/verify
+    # manifest, disk deploy, catalog seal/verify-seal). DESTRUCTIVE and
+    # FORENSIC are NOT currently wired to any sonar_require_role gate —
+    # sonar_recovery_execute/backup_execute/forensic_acquire/
+    # forensic_chain_of_custody run under the default self-service
+    # Technician role deliberately (see --self-test's "acquisition without
+    # an authenticated identity" case and CHANGELOG.md v3.10.2/v3.10.3):
+    # any local operator can gather evidence; only an elevated role+token
+    # adds an *attributed* identity to the resulting audit trail. Gating
+    # these functions on FORENSIC/DESTRUCTIVE was tried in v3.10.3 and
+    # reverted because it broke that tested behavior. These two columns
+    # are left here as the intended shape for the external RBAC/forensic
+    # audit tracked in ROADMAP.md (P1) — read them as a stated intent,
+    # not an enforced boundary, until that audit lands.
     if [[ ! -f "${SONAR_POLICY_FILE}" ]]; then
         cat > "${SONAR_POLICY_FILE}" <<'EOF'
 ROLE	AUDIT	DIAGNOSE	DEPLOY	DESTRUCTIVE	FORENSIC	VAULT
@@ -439,6 +443,23 @@ sonar_hash_str() {
     fi
 }
 
+# sonar_generate_secret_hex: 32 bytes of /dev/urandom, hex-encoded via
+# whichever SHA-256 engine is available. Shared by the two independent
+# trust roots this script maintains (role-lock secret, build-watermark
+# secret) so the derivation only needs to be right — or changed — in one
+# place instead of two copies drifting apart.
+sonar_iso_now() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
+
+sonar_generate_secret_hex() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        head -c 32 /dev/urandom | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        head -c 32 /dev/urandom | shasum -a 256 | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
 # sonar_sanitize_value: neutralize a single operator-supplied token (case id,
 # disk label, operator identity, ...) before it is embedded either in a
 # `key=value;key=value` audit details string or in a line-based report/manifest
@@ -456,7 +477,7 @@ sonar_audit() {
     local event="${1:-event}"
     local details="${2:-}"
     local ts prev hash
-    ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    ts="$(sonar_iso_now)"
     # audit.log and hashchain.log are tab-separated, newline-terminated.
     # Several callers pass caller/user-supplied free text into `details`
     # (forensic case ids, disk labels, etc.) — without this, an embedded
@@ -635,7 +656,6 @@ sonar_security_status() {
     echo "SONAR SECURITY"
     echo "  role: ${SONAR_ROLE}"
     echo "  identity: ${SONAR_ROLE_IDENTITY:-<libre-service>}"
-    echo "  mode: ${SONAR_AI_SECURITY_MODE}"
     echo "  OS: $(sonar_detect_os)"
     echo "  ARCH: $(sonar_detect_arch)"
     echo "  audit: ${SONAR_AUDIT_LOG}"
@@ -1794,7 +1814,7 @@ SONAR_ALLOW_NONOFFICIAL="${SONAR_ALLOW_NONOFFICIAL:-0}"
 
 sonar_dl_log() {
     mkdir -p "$(dirname "$SONAR_AI_LOG")" 2>/dev/null || true
-    printf '%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" | tee -a "$SONAR_AI_LOG"
+    printf '%s\t%s\n' "$(sonar_iso_now)" "$*" | tee -a "$SONAR_AI_LOG"
 }
 die() { sonar_dl_log "ERROR $*"; exit 1; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "Commande manquante: $1"; }
@@ -1868,12 +1888,6 @@ raise SystemExit(1)
 '
 }
 
-sha256_file() {
-    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
-    else shasum -a 256 "$1" | awk '{print $1}'
-    fi
-}
-
 download_file() {
     local url="$1" out="$2"
     [[ "$SONAR_DRY_RUN" == "1" ]] && { sonar_dl_log "DRY-RUN $url -> $out"; return 0; }
@@ -1935,7 +1949,7 @@ Le SHA-256 doit correspondre exactement au fichier de l'URL. Si non vérifiable,
             printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$name" "DOWNLOAD_FAILED" "$url" "$sha" "$confidence" >> "$SONAR_REJECTED"
             return 3
         }
-        actual="$(sha256_file "$out")"
+        actual="$(sonar_hash "$out")"
         if [[ "${actual,,}" != "${sha,,}" ]]; then
             rm -f "$out"
             printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$name" "SHA256_MISMATCH" "$url" "$sha" "$confidence" >> "$SONAR_REJECTED"
@@ -2995,7 +3009,7 @@ sonar_ai_dry_run_report() {
     {
         echo "SONAR AI DRY-RUN SUMMARY"
         echo "========================="
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo "Catalogue entries: $total"
         echo "OS requiring AI resolution: $auto_os"
         echo "Architecture requiring AI resolution: $auto_arch"
@@ -3092,7 +3106,7 @@ Retourne UNIQUEMENT JSON avec:
     {
         echo "SONAR OLLAMA CATALOGUE AUDIT"
         echo "============================"
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo "Model: $SONAR_AI_MODEL"
         echo "Items processed: $total"
         echo "AI-resolved candidates: $resolved"
@@ -3200,7 +3214,7 @@ sonar_diagnostic_report() {
         echo 'SONAR DIAGNOSTIC REPORT'
         echo '======================='
         echo "Version: ${SONAR_VERSION}"
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo "OS: $(sonar_detect_os)"
         echo "ARCH: $(sonar_detect_arch)"
         echo "Kernel: $(uname -srmo 2>/dev/null || true)"
@@ -3259,7 +3273,7 @@ sonar_self_test_v2() {
         echo 'SONAR SELF-TEST V2'
         echo '=================='
         echo "Version: ${SONAR_VERSION}"
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo
         check() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then printf "PASS\t%s\n" "${label}"; else printf "FAIL\t%s\n" "${label}"; errors=$((errors+1)); fi; }
         check 'bash syntax' bash -n "$self"
@@ -3537,7 +3551,7 @@ sonar_forensic_workspace() {
     cat > "$root/README_FORENSIC.txt" <<EOF
 SONAR FORENSIC WORKSPACE
 ========================
-Created: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+Created: $(sonar_iso_now)
 
 Acquisition -> Hash -> Preserve -> Analyze -> Report
 
@@ -3554,7 +3568,7 @@ sonar_network_diagnostic() {
     {
         echo 'SONAR NETWORK DIAGNOSTIC'
         echo '========================'
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo
         if command -v ip >/dev/null 2>&1; then
             echo '[INTERFACES]'; ip -brief address 2>/dev/null || true
@@ -3589,7 +3603,7 @@ sonar_builder_v2() {
     cat > "$root/VERSION" <<EOF
 ${SONAR_VERSION}
 PROFILE=${profile}
-BUILT=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+BUILT=$(sonar_iso_now)
 STATUS=BUILD_CANDIDATE
 EOF
     cat > "$root/README.md" <<'EOF'
@@ -3610,7 +3624,7 @@ EOF
         printf 'FIELD\tVALUE\n'
         printf 'VERSION\t%s\n' "${SONAR_VERSION}"
         printf 'PROFILE\t%s\n' "${profile}"
-        printf 'BUILT\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        printf 'BUILT\t%s\n' "$(sonar_iso_now)"
         printf 'STATUS\tBUILD_CANDIDATE\n'
     } > "$root/MANIFEST/BUILD_INFO.tsv"
     sonar_audit "BUILDER" "profile=${profile};root=${root}"
@@ -3625,7 +3639,7 @@ sonar_release_report() {
         echo 'SONAR RELEASE REPORT'
         echo '===================='
         echo "Version: ${SONAR_VERSION}"
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo "Script SHA256: ${hash}"
         echo
         echo 'Implemented operational layers:'
@@ -3706,7 +3720,7 @@ sonar_smart_advisor() {
     {
         echo 'SONAR SMART ADVISOR — RAPPORT DE RAISONNEMENT'
         echo '=============================================='
-        echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Date: $(sonar_iso_now)"
         echo "Role actuel: ${SONAR_ROLE}"
         echo 'Moteur: regles deterministes locales (aucun appel LLM implique).'
         echo
@@ -3928,7 +3942,7 @@ sonar_confirm_phrase() { local expected="$1" prompt="${2:-Type ${1} to continue:
 sonar_recovery_execute() {
   sonar_require_role DIAGNOSE || return 1
   sonar_report_init; local mode="${1:-collect}" ts out; ts="$(sonar_timestamp)"; out="${SONAR_REPORT_DIR}/recovery/SONAR_RECOVERY_EXEC_${ts}.txt"
-  { echo 'SONAR RECOVERY EXECUTION'; echo '========================'; echo "Mode: ${mode}"; echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"; echo "OS: $(sonar_detect_os)"; echo
+  { echo 'SONAR RECOVERY EXECUTION'; echo '========================'; echo "Mode: ${mode}"; echo "Date: $(sonar_iso_now)"; echo "OS: $(sonar_detect_os)"; echo
     case "$mode" in
       collect) echo '[SAFE COLLECTION]'; echo 'Filesystem mounts:'; if command -v findmnt >/dev/null 2>&1; then findmnt -rn || true; elif command -v mount >/dev/null 2>&1; then mount || true; fi; echo; echo 'Block devices:'; command -v lsblk >/dev/null 2>&1 && lsblk -f || true; echo; echo 'Boot environment:'; [[ -d /sys/firmware/efi ]] && echo 'UEFI=detected' || echo 'UEFI=not-detected';;
       verify) echo '[NON-DESTRUCTIVE VERIFICATION]'; command -v dmesg >/dev/null 2>&1 && dmesg --level=err,warn 2>/dev/null | tail -n 200 || true; command -v journalctl >/dev/null 2>&1 && journalctl -p warning -n 100 --no-pager 2>/dev/null || true;;
@@ -3945,7 +3959,7 @@ sonar_backup_execute() {
   sonar_require_cmd mkdir || return 127
   ts="$(sonar_timestamp)"; out="${SONAR_REPORT_DIR}/recovery/SONAR_BACKUP_EXEC_${ts}.txt"; echo "[SONAR] Backup source: $source"; echo "[SONAR] Backup destination: $destination"
   case "$mode" in copy) sonar_confirm_phrase "BACKUP-$(basename "$source")" "Type BACKUP-$(basename "$source") to confirm: " || { echo '[SONAR] Cancelled.'; return 1; }; mkdir -p "$destination"; if [[ -d "$source" ]]; then cp -a "$source"/. "$destination"/; else cp -a "$source" "$destination"/; fi;; *) echo "[SONAR][ERROR] Unsupported backup mode: $mode" >&2; return 2;; esac
-  { echo 'SONAR BACKUP EXECUTION'; echo '======================'; echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"; echo "Source: $source"; echo "Destination: $destination"; echo "Mode: $mode"; echo 'Status: COMPLETED'; [[ -f "$source" ]] && { echo 'Source SHA-256:'; sonar_hash "$source" || true; }; } > "$out"; sonar_audit 'BACKUP_EXECUTE' "source=${source};destination=${destination};mode=${mode}"; echo "[SONAR] Backup completed: $out"
+  { echo 'SONAR BACKUP EXECUTION'; echo '======================'; echo "Date: $(sonar_iso_now)"; echo "Source: $source"; echo "Destination: $destination"; echo "Mode: $mode"; echo 'Status: COMPLETED'; [[ -f "$source" ]] && { echo 'Source SHA-256:'; sonar_hash "$source" || true; }; } > "$out"; sonar_audit 'BACKUP_EXECUTE' "source=${source};destination=${destination};mode=${mode}"; echo "[SONAR] Backup completed: $out"
 }
 sonar_forensic_acquire() {
   sonar_report_init; local source="${1:-}" destination="${2:-}" ts root hashfile
@@ -3960,7 +3974,7 @@ sonar_forensic_acquire() {
   ts="$(sonar_timestamp)"; root="${destination%/}/SONAR_EVIDENCE_${ts}"; mkdir -p "$root/evidence" "$root/hashes" "$root/logs" "$root/reports"
   if [[ -d "$source" ]]; then cp -a "$source"/. "$root/evidence"/; else cp -a "$source" "$root/evidence"/; fi
   hashfile="$root/hashes/SHA256.txt"; if command -v sha256sum >/dev/null 2>&1; then (cd "$root/evidence" && find . -type f -print0 | sort -z | xargs -0 sha256sum) > "$hashfile"; else (cd "$root/evidence" && find . -type f -print0 | sort -z | while IFS= read -r -d '' f; do shasum -a 256 "$f"; done) > "$hashfile"; fi
-  printf 'SONAR FORENSIC ACQUISITION\n==========================\nDate: %s\nSource: %s\nDestination: %s\nHash file: %s\n\nNo block-device imaging was performed.\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$source" "$root" "$hashfile" > "$root/reports/ACQUISITION.txt"; sonar_audit 'FORENSIC_ACQUIRE' "source=${source};destination=${root}"; echo "[SONAR] Forensic acquisition: $root"
+  printf 'SONAR FORENSIC ACQUISITION\n==========================\nDate: %s\nSource: %s\nDestination: %s\nHash file: %s\n\nNo block-device imaging was performed.\n' "$(sonar_iso_now)" "$source" "$root" "$hashfile" > "$root/reports/ACQUISITION.txt"; sonar_audit 'FORENSIC_ACQUIRE' "source=${source};destination=${root}"; echo "[SONAR] Forensic acquisition: $root"
 }
 sonar_clone_guarded() { echo '[SONAR][ERROR] Raw block-device cloning is intentionally disabled in V2.3.'; echo '[SONAR] Use the planning layer until a dedicated physical test matrix is approved.'; return 126; }
 
@@ -4003,7 +4017,7 @@ sonar_forensic_chain_of_custody() {
         echo "SONAR — CHAINE DE POSSESSION (CHAIN OF CUSTODY)"
         echo "================================================"
         echo "Dossier n: ${case_id}"
-        echo "Genere le: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        echo "Genere le: $(sonar_iso_now)"
         echo
         echo "--- Acquisition ---"
         echo "Horodatage de l'acquisition: ${ts_acquired}"
@@ -4062,13 +4076,7 @@ sonar_ensure_build_secret() {
     mkdir -p "$(dirname "${SONAR_BUILD_SECRET_FILE}")"
     chmod 700 "$(dirname "${SONAR_BUILD_SECRET_FILE}")" 2>/dev/null || true
     local secret
-    if command -v sha256sum >/dev/null 2>&1; then
-        secret="$(head -c 32 /dev/urandom | sha256sum | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-        secret="$(head -c 32 /dev/urandom | shasum -a 256 | awk '{print $1}')"
-    else
-        return 1
-    fi
+    secret="$(sonar_generate_secret_hex)" || return 1
     [[ -n "$secret" ]] || return 1
     printf '%s' "$secret" > "${SONAR_BUILD_SECRET_FILE}"
     chmod 600 "${SONAR_BUILD_SECRET_FILE}"
@@ -4095,7 +4103,7 @@ sonar_generate_build_watermark() {
     sonar_ensure_build_secret || { log "[WATERMARK] Secret indisponible — build non filigrané."; return 0; }
     build_id="$(head -c 16 /dev/urandom | sha256sum 2>/dev/null | awk '{print $1}')"
     [[ -z "$build_id" ]] && build_id="$(head -c 16 /dev/urandom | shasum -a 256 | awk '{print $1}')"
-    ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    ts="$(sonar_iso_now)"
     # Sanitize before signing (not after) so the HMAC covers exactly the
     # values written below — DISK_LABEL/VOL are env/volume-label controlled
     # and, unsanitized, a newline here forges an extra SONAR_BUILD_*= line in
@@ -4287,7 +4295,7 @@ sonar_catalog_seal() {
     mkdir -p "$(dirname "${SONAR_CATALOG_SEAL_FILE}")"
     local hash
     hash="$(sonar_hash_str "${SONAR_EMBEDDED_CATALOG_TSV}")" || { echo "[SONAR] Hachage indisponible." >&2; return 1; }
-    printf '%s\t%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "${SONAR_ROLE}" "${hash}" > "${SONAR_CATALOG_SEAL_FILE}"
+    printf '%s\t%s\t%s\n' "$(sonar_iso_now)" "${SONAR_ROLE}" "${hash}" > "${SONAR_CATALOG_SEAL_FILE}"
     sonar_audit "CATALOG_SEALED" "hash=${hash}"
     echo "[SONAR] Catalogue scelle: ${SONAR_CATALOG_SEAL_FILE}"
     echo "[SONAR] SHA256: ${hash}"
