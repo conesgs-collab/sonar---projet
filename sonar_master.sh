@@ -368,10 +368,18 @@ sonar_role_verify_token_string() {
 # then still gets denied a second time by the existing sonar_require_role
 # checks, with its own ACCESS_DENIED audit entry. Both attempts are logged.
 sonar_role_enforce_lock() {
-    [[ "${SONAR_ROLE_LOCK_ENFORCED:-0}" == "1" ]] && return 0
-    SONAR_ROLE_LOCK_ENFORCED=1
+    # Keyed on (role, token, token file) rather than a plain "already ran"
+    # flag: this function is called once early (before any CLI flag is
+    # parsed) and again after parse_final_args parses --role/--role-token.
+    # A plain boolean would make the second call a permanent no-op the
+    # instant the first call ran with the pre-parse defaults, silently
+    # skipping verification of whatever role/token the CLI just requested.
+    local sig="${SONAR_ROLE}:${SONAR_ROLE_TOKEN}:${SONAR_ROLE_TOKEN_FILE}"
+    [[ "${SONAR_ROLE_LOCK_ENFORCED_SIG:-}" == "$sig" ]] && return 0
+    SONAR_ROLE_LOCK_ENFORCED_SIG="$sig"
     sonar_role_is_self_service "${SONAR_ROLE}" && return 0
-    local provided="${SONAR_ROLE_TOKEN}"
+    local provided
+    provided="$(tr -d ' \t\r\n' <<< "${SONAR_ROLE_TOKEN}")"
     if [[ -z "$provided" && -n "${SONAR_ROLE_TOKEN_FILE}" && -f "${SONAR_ROLE_TOKEN_FILE}" ]]; then
         provided="$(tr -d ' \t\r\n' < "${SONAR_ROLE_TOKEN_FILE}")"
     fi
@@ -431,6 +439,19 @@ sonar_hash_str() {
     fi
 }
 
+# sonar_sanitize_value: neutralize a single operator-supplied token (case id,
+# disk label, operator identity, ...) before it is embedded either in a
+# `key=value;key=value` audit details string or in a line-based report/manifest
+# file. Stricter than sonar_audit's own tab/newline stripping below (which only
+# protects the log's column structure): a lone value sitting next to `;`/`=`
+# delimiters must not be able to forge extra fields with them either.
+sonar_sanitize_value() {
+    local s="$1"
+    s="${s//$'\t'/ }"; s="${s//$'\r'/ }"; s="${s//$'\n'/ }"
+    s="${s//;/,}"; s="${s//=/-}"
+    printf '%s' "$s"
+}
+
 sonar_audit() {
     local event="${1:-event}"
     local details="${2:-}"
@@ -451,12 +472,21 @@ sonar_audit() {
     if [[ -n "${SONAR_ROLE_IDENTITY:-}" ]]; then
         details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY}"
     fi
-    printf '%s\t%s\t%s\t%s\n' "$ts" "${SONAR_ROLE}" "$event" "$details" >> "${SONAR_AUDIT_LOG}"
+    # Serialize the read-prev/append sequence below with flock when available:
+    # without it, two concurrent SONAR invocations can both read the same
+    # "prev" hash and each append a link to it, producing a chain
+    # --verify-hashchain reports as broken/tampered even though nothing was
+    # actually falsified — just two legitimate writers racing. Best-effort
+    # (skipped if flock isn't installed) — no worse than the prior behavior.
+    {
+        command -v flock >/dev/null 2>&1 && { flock -x 201 || true; }
+        printf '%s\t%s\t%s\t%s\n' "$ts" "${SONAR_ROLE}" "$event" "$details" >> "${SONAR_AUDIT_LOG}"
 
-    prev="$(tail -n 1 "${SONAR_HASHCHAIN_LOG}" 2>/dev/null | awk -F '\t' '{print $NF}')"
-    prev="${prev:-GENESIS}"
-    hash="$(sonar_hash_str "${prev}|${ts}|${SONAR_ROLE}|${event}|${details}")" || hash="UNAVAILABLE"
-    printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "${SONAR_ROLE}" "$event" "$details" "$hash" >> "${SONAR_HASHCHAIN_LOG}"
+        prev="$(tail -n 1 "${SONAR_HASHCHAIN_LOG}" 2>/dev/null | awk -F '\t' '{print $NF}')" || true
+        prev="${prev:-GENESIS}"
+        hash="$(sonar_hash_str "${prev}|${ts}|${SONAR_ROLE}|${event}|${details}")" || hash="UNAVAILABLE"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "${SONAR_ROLE}" "$event" "$details" "$hash" >> "${SONAR_HASHCHAIN_LOG}"
+    } 201>>"${SONAR_HASHCHAIN_LOG}.lock"
 }
 
 # sonar_verify_hashchain: recompute each hashchain entry from GENESIS forward and
@@ -1195,7 +1225,7 @@ run_ai_final() {
 preflight_final() {
     log "=== PRE-FLIGHT SONAR FINAL ==="
     [[ "$(id -u)" -eq 0 ]] || error_exit "Exécuter avec sudo/root."
-    for c in awk basename blockdev findmnt lsblk mount umount sync dd mkfs.ext4 sha256sum tar gzip sed grep find sort date head python3 wget curl; do
+    for c in awk basename blockdev findmnt lsblk mount umount sync dd mkfs.ext4 sha256sum tar gzip sed grep find sort date head python3 wget curl cp; do
         require_cmd_final "$c"
     done
     [[ -d "${SOURCE_DIR}" ]] || error_exit "Source absente: ${SOURCE_DIR}"
@@ -3120,7 +3150,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.10.2-audit-integrity"
+SONAR_VERSION="3.10.3-role-lock-hardening"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3573,13 +3603,16 @@ Hardware, Windows, Linux, macOS, AI, Self-Test, Manifest.
 Hardware/boot compatibility requires real-device validation.
 EOF
     (cd "$root" && find . -type f -print0 | sort -z | xargs -0 sha256sum > MANIFEST/FILES.sha256)
-    cat > "$root/MANIFEST/BUILD_INFO.tsv" <<EOF
-FIELD\tVALUE
-VERSION\t${SONAR_VERSION}
-PROFILE\t${profile}
-BUILT\t$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-STATUS\tBUILD_CANDIDATE
-EOF
+    # A heredoc never interprets \t as a real tab (only $()/${} expand here) —
+    # printf does, keeping this TSV consistent with every other one the file
+    # writes (e.g. FILES.sha256's manifest just above).
+    {
+        printf 'FIELD\tVALUE\n'
+        printf 'VERSION\t%s\n' "${SONAR_VERSION}"
+        printf 'PROFILE\t%s\n' "${profile}"
+        printf 'BUILT\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        printf 'STATUS\tBUILD_CANDIDATE\n'
+    } > "$root/MANIFEST/BUILD_INFO.tsv"
     sonar_audit "BUILDER" "profile=${profile};root=${root}"
     echo "[SONAR] Build candidate: $root"
 }
@@ -3893,6 +3926,7 @@ MENU
 sonar_require_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "[SONAR][ERROR] Required command not found: $1" >&2; return 127; }; }
 sonar_confirm_phrase() { local expected="$1" prompt="${2:-Type ${1} to continue: }" answer; read -r -p "$prompt" answer || return 1; [[ "$answer" == "$expected" ]]; }
 sonar_recovery_execute() {
+  sonar_require_role DIAGNOSE || return 1
   sonar_report_init; local mode="${1:-collect}" ts out; ts="$(sonar_timestamp)"; out="${SONAR_REPORT_DIR}/recovery/SONAR_RECOVERY_EXEC_${ts}.txt"
   { echo 'SONAR RECOVERY EXECUTION'; echo '========================'; echo "Mode: ${mode}"; echo "Date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"; echo "OS: $(sonar_detect_os)"; echo
     case "$mode" in
@@ -3940,7 +3974,8 @@ sonar_clone_guarded() { echo '[SONAR][ERROR] Raw block-device cloning is intenti
 # SONAR's control — the template leaves blank rows for those, anchored to
 # the cryptographic evidence this tool CAN attest to.
 sonar_forensic_chain_of_custody() {
-    local root="${1:-}" case_id="${2:-NON_SPECIFIE}" hashfile out audit_line identity_field operator ts_acquired file_count meta_hash chain_status
+    local root="${1:-}" case_id out audit_line identity_field operator ts_acquired file_count meta_hash chain_status
+    case_id="$(sonar_sanitize_value "${2:-NON_SPECIFIE}")"
     [[ -n "$root" && -d "$root" ]] || { echo 'Usage: --forensic-chain-of-custody EVIDENCE_ROOT [CASE_ID]' >&2; return 2; }
     hashfile="${root%/}/hashes/SHA256.txt"
     [[ -s "$hashfile" ]] || { echo "[SONAR][ERROR] ${hashfile} introuvable — ${root} n'est pas un dossier d'acquisition SONAR valide." >&2; return 2; }
@@ -4061,8 +4096,13 @@ sonar_generate_build_watermark() {
     build_id="$(head -c 16 /dev/urandom | sha256sum 2>/dev/null | awk '{print $1}')"
     [[ -z "$build_id" ]] && build_id="$(head -c 16 /dev/urandom | shasum -a 256 | awk '{print $1}')"
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    operator="${SONAR_ROLE_IDENTITY:-${SONAR_ROLE}}"
-    label="${VOL:-${DISK_LABEL:-INCONNU}}"
+    # Sanitize before signing (not after) so the HMAC covers exactly the
+    # values written below — DISK_LABEL/VOL are env/volume-label controlled
+    # and, unsanitized, a newline here forges an extra SONAR_BUILD_*= line in
+    # BUILD_WATERMARK.txt that sonar_verify_build_watermark's line-based awk
+    # parser would then mis-read.
+    operator="$(sonar_sanitize_value "${SONAR_ROLE_IDENTITY:-${SONAR_ROLE}}")"
+    label="$(sonar_sanitize_value "${VOL:-${DISK_LABEL:-INCONNU}}")"
     sig="$(sonar_build_sign "$build_id" "$ts" "$operator" "$label")" || { log "[WATERMARK] Échec de signature — build non filigrané."; return 0; }
 
     mkdir -p "${mp}/MANIFEST"
@@ -4225,8 +4265,12 @@ sonar_embedded_catalog_validate() {
     local tmp rc
     tmp="$(mktemp)"
     printf '%s\n' "$SONAR_EMBEDDED_CATALOG_TSV" > "$tmp"
-    awk -F '\t' 'NR==1 {if ($1!="DOMAIN" || NF<18) exit 2} NR>1 {if (NF<18) exit 3}' "$tmp"
-    rc=$?
+    # `|| rc=$?` (not a bare statement + separate `rc=$?`) keeps this exempt
+    # from the script's global `set -e`: awk legitimately exits 2/3 on a
+    # malformed schema, and under errexit a bare failing statement here would
+    # trip the ERR trap before rc is captured or the temp file is cleaned up.
+    rc=0
+    awk -F '\t' 'NR==1 {if ($1!="DOMAIN" || NF<18) exit 2} NR>1 {if (NF<18) exit 3}' "$tmp" || rc=$?
     rm -f "$tmp"
     if [[ $rc -eq 0 ]]; then echo '[SONAR] Embedded catalog schema: PASS'; else echo '[SONAR] Embedded catalog schema: FAIL' >&2; fi
     return "$rc"
@@ -4279,22 +4323,22 @@ sonar_builder_profile() {
 sonar_security_init
 sonar_role_enforce_lock || true
 case "${1:-}" in
-    --launcher) sonar_launcher_v2; exit $? ;;
-    --module-status) sonar_module_status_v23; exit $? ;;
-    --recovery-execute) shift; sonar_recovery_execute "${1:-collect}"; exit $? ;;
-    --backup-execute) shift; sonar_backup_execute "${1:-}" "${2:-}" "${3:-copy}"; exit $? ;;
-    --forensic-acquire) shift; sonar_forensic_acquire "${1:-}" "${2:-}"; exit $? ;;
-    --forensic-chain-of-custody) shift; sonar_forensic_chain_of_custody "${1:-}" "${2:-}"; exit $? ;;
-    --clone-execute) sonar_clone_guarded; exit $? ;;
-    --diagnostic) sonar_diagnostic_report; exit $? ;;
-    --self-test) sonar_self_test_v2; exit $? ;;
-    --recovery-plan) sonar_recovery_plan; exit $? ;;
-    --backup-plan) sonar_backup_plan; exit $? ;;
-    --forensic-workspace) sonar_forensic_workspace; exit $? ;;
-    --network-diagnostic) sonar_network_diagnostic; exit $? ;;
-    --builder) shift; [[ $# -ge 1 ]] && SONAR_PROFILE="$1"; sonar_builder_v2; exit $? ;;
-    --release-report) sonar_release_report; exit $? ;;
-    --dependencies-report) sonar_dependency_report; exit $? ;;
+    --launcher) if sonar_launcher_v2; then exit 0; else exit $?; fi ;;
+    --module-status) if sonar_module_status_v23; then exit 0; else exit $?; fi ;;
+    --recovery-execute) shift; if sonar_recovery_execute "${1:-collect}"; then exit 0; else exit $?; fi ;;
+    --backup-execute) shift; if sonar_backup_execute "${1:-}" "${2:-}" "${3:-copy}"; then exit 0; else exit $?; fi ;;
+    --forensic-acquire) shift; if sonar_forensic_acquire "${1:-}" "${2:-}"; then exit 0; else exit $?; fi ;;
+    --forensic-chain-of-custody) shift; if sonar_forensic_chain_of_custody "${1:-}" "${2:-}"; then exit 0; else exit $?; fi ;;
+    --clone-execute) if sonar_clone_guarded; then exit 0; else exit $?; fi ;;
+    --diagnostic) if sonar_diagnostic_report; then exit 0; else exit $?; fi ;;
+    --self-test) if sonar_self_test_v2; then exit 0; else exit $?; fi ;;
+    --recovery-plan) if sonar_recovery_plan; then exit 0; else exit $?; fi ;;
+    --backup-plan) if sonar_backup_plan; then exit 0; else exit $?; fi ;;
+    --forensic-workspace) if sonar_forensic_workspace; then exit 0; else exit $?; fi ;;
+    --network-diagnostic) if sonar_network_diagnostic; then exit 0; else exit $?; fi ;;
+    --builder) shift; [[ $# -ge 1 ]] && SONAR_PROFILE="$1"; if sonar_builder_v2; then exit 0; else exit $?; fi ;;
+    --release-report) if sonar_release_report; then exit 0; else exit $?; fi ;;
+    --dependencies-report) if sonar_dependency_report; then exit 0; else exit $?; fi ;;
     --self-audit)
         if sonar_structural_self_audit; then exit 0; else exit $?; fi
         ;;
@@ -4317,18 +4361,18 @@ case "${1:-}" in
         shift
         if sonar_ai_downloader_main --dry-run "$@"; then exit 0; else exit $?; fi
         ;;
-    --catalog-install) sonar_embedded_catalog_install; exit $? ;;
-    --catalog-validate-embedded) sonar_embedded_catalog_validate; exit $? ;;
-    --catalog-seal) sonar_catalog_seal; exit $? ;;
-    --catalog-verify-seal) sonar_catalog_verify_seal; exit $? ;;
-    --builder-profile) shift; sonar_builder_profile "${1:-FULL}"; exit $? ;;
-    --smart-advisor) sonar_smart_advisor; exit $? ;;
-    --mission-report) sonar_mission_report; exit $? ;;
-    --verify-hashchain) sonar_verify_hashchain; exit $? ;;
-    --role-bootstrap) sonar_role_bootstrap_secret; exit $? ;;
-    --role-issue-token) shift; sonar_role_issue_token "${1:-}" "${2:-}" "${3:-30}"; exit $? ;;
-    --role-revoke-token) shift; sonar_role_revoke_token "${1:-}"; exit $? ;;
-    --verify-watermark) shift; sonar_verify_build_watermark "${1:-}"; exit $? ;;
+    --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
+    --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
+    --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;
+    --catalog-verify-seal) if sonar_catalog_verify_seal; then exit 0; else exit $?; fi ;;
+    --builder-profile) shift; if sonar_builder_profile "${1:-FULL}"; then exit 0; else exit $?; fi ;;
+    --smart-advisor) if sonar_smart_advisor; then exit 0; else exit $?; fi ;;
+    --mission-report) if sonar_mission_report; then exit 0; else exit $?; fi ;;
+    --verify-hashchain) if sonar_verify_hashchain; then exit 0; else exit $?; fi ;;
+    --role-bootstrap) if sonar_role_bootstrap_secret; then exit 0; else exit $?; fi ;;
+    --role-issue-token) shift; if sonar_role_issue_token "${1:-}" "${2:-}" "${3:-30}"; then exit 0; else exit $?; fi ;;
+    --role-revoke-token) shift; if sonar_role_revoke_token "${1:-}"; then exit 0; else exit $?; fi ;;
+    --verify-watermark) shift; if sonar_verify_build_watermark "${1:-}"; then exit 0; else exit $?; fi ;;
 
 esac
 

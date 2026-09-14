@@ -6,6 +6,89 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.10.3-role-lock-hardening] — 2026-09-14
+
+### Contexte
+Revue de code ciblée sur `sonar_master.sh` (8 angles : bugs ligne-à-ligne,
+invariants de sécurité absents ailleurs qu'à leur point de correction
+d'origine, cohérence inter-fonctions, duplication, simplification,
+efficacité, profondeur des correctifs). Deux failles réelles confirmées
+directement dans le code, plus plusieurs bugs de robustesse liés à
+`set -euo pipefail`.
+
+### Corrigé — sécurité
+- **Contournement du verrou de rôle via `--disk ... --role Admin`** :
+  `sonar_role_enforce_lock` est appelée une première fois avant le parsing
+  des flags CLI (avec les valeurs par défaut), puis une seconde fois dans
+  `parse_final_args` une fois `--role`/`--role-token` lus — mais son garde
+  `SONAR_ROLE_LOCK_ENFORCED` (booléen "déjà exécuté") transformait ce
+  second appel en no-op systématique, donc le token n'était **jamais
+  vérifié** pour le rôle demandé en CLI. Corrigé : le garde est maintenant
+  une signature `(rôle, token, fichier de token)` — un second appel avec
+  un rôle/token différent du premier redéclenche bien la vérification.
+- **Filigrane de build non protégé contre l'injection** : `DISK_LABEL`/`VOL`
+  et l'identité opérateur étaient écrits tels quels (sans neutralisation
+  tab/retour-ligne) dans `BUILD_WATERMARK.txt` et le registre TSV — seul
+  l'appel `sonar_audit` séparé bénéficiait de la neutralisation centrale
+  de la v3.10.2, pas ces deux écritures directes. Un nouvel helper partagé
+  `sonar_sanitize_value` est appliqué **avant la signature HMAC** (pas
+  après, pour que la signature couvre exactement ce qui est écrit), et
+  réutilisé pour le `case_id` de `--forensic-chain-of-custody`.
+- **Trim des espaces/CRLF d'un jeton de rôle** appliqué uniquement quand le
+  jeton venait d'un fichier (`SONAR_ROLE_TOKEN_FILE`), pas de la valeur
+  directe (`--role-token`/env) — corrigé, même traitement dans les deux cas.
+- **Hashchain sans verrou** : deux exécutions concurrentes de SONAR
+  pouvaient lire le même hash "précédent" et produire deux entrées
+  chaînées au même prédécesseur, que `--verify-hashchain` aurait signalé
+  comme une falsification. Verrouillage `flock` best-effort ajouté autour
+  de la séquence lecture-puis-écriture.
+
+### Corrigé — robustesse (`set -euo pipefail`)
+- La quasi-totalité du dispatch final (`case "${1:-}" in ... exit $? ;;`)
+  appelait les fonctions comme instructions nues : quand une fonction
+  retournait légitimement un code non-nul (falsification détectée par
+  `--verify-hashchain`, scellé de catalogue non conforme...), le trap ERR
+  se déclenchait **avant** `exit $?`, remplaçant un message de diagnostic
+  utile par une "ERREUR FATALE" générique. Les ~26 branches concernées
+  utilisent maintenant le même style `if fn; then exit 0; else exit $?; fi`
+  que les branches déjà correctes du même bloc.
+- `sonar_embedded_catalog_validate` capturait `rc=$?` après une commande
+  `awk` non protégée — un schéma de catalogue invalide déclenchait le
+  même abandon prématuré (avant capture du code et nettoyage du fichier
+  temporaire). Corrigé avec `awk ... || rc=$?`.
+- `preflight_final` (chemin de déploiement `--disk`) ne vérifiait jamais
+  la présence de `cp` avant de commencer à écrire sur le disque cible,
+  contrairement à `sonar_backup_execute`/`sonar_forensic_acquire` (déjà
+  corrigés en v3.9.0) — ajouté à la liste de dépendances préflight.
+- `BUILD_INFO.tsv` était généré via un heredoc non-quoté contenant des
+  `\t` littéraux (un heredoc n'interprète jamais les séquences d'échappement)
+  au lieu de vraies tabulations — remplacé par des appels `printf`,
+  cohérent avec le reste des manifestes TSV du script.
+
+### Non retenu (testé puis réverté)
+Une première tentative de cette session ajoutait `sonar_require_role
+FORENSIC` à `sonar_backup_execute`, `sonar_forensic_acquire` et
+`sonar_forensic_chain_of_custody`, en s'appuyant sur la colonne FORENSIC
+de `policy.tsv` (Technician: `-`). `--self-test` a immédiatement révélé
+que ce garde cassait un comportement volontaire et déjà testé : une
+acquisition forensique sous le rôle Technician par défaut (sans jeton)
+est le "cas le plus courant" documenté dans la section v3.10.2
+ci-dessous, pas un accès à bloquer. Réverté ; seul `sonar_recovery_execute`
+garde un contrôle (`sonar_require_role DIAGNOSE`, colonne où Technician a
+déjà `R`, donc sans régression).
+
+### Ajouté
+- `.gitattributes` forçant `eol=lf` sur `*.sh` et `hooks/pre-commit` — sans
+  ça, `core.autocrlf=true` (réglage par défaut de Git pour Windows) aurait
+  fini par convertir le script en CRLF au checkout et faire échouer la
+  vérification "LF-only" de `--self-audit`.
+
+### Testé
+- `bash -n` : OK. `shellcheck --severity=error` : aucun résultat.
+- `--self-audit` : 14/14 PASS.
+- `--self-test` : 39 PASS, 6 WARN (environnement de test sans dossier
+  source — attendu), **0 FAIL**.
+
 ## [3.10.2-audit-integrity] — 2026-08-18
 
 ### Contexte

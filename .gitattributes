@@ -1,0 +1,7 @@
+# --self-audit in sonar_master.sh fails hard on any CRLF byte in the script
+# (`grep -q $'\r'`). Git for Windows defaults to core.autocrlf=true, which
+# would otherwise convert this file to CRLF in the working tree on checkout
+# and silently break that check. Force LF regardless of the local/global
+# autocrlf setting.
+*.sh text eol=lf
+hooks/pre-commit text eol=lf
