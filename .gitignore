@@ -4,6 +4,7 @@ sonar-test-root/
 sonar_test_root/
 SONAR_REPORTS/
 Secure/
+SONAR_SOURCE/
 
 # Fichiers temporaires
 *.log

@@ -156,16 +156,20 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       (référencé tel quel dans les commits/CHANGELOG existants) plutôt
       que renuméroté.
 - [ ] **Étape 6 — Validation matérielle des profils** : au moins 3
-      scénarios réels (boot cassé réparé via `boot-repair`, fichier
-      supprimé récupéré via `data-recovery`, machine infectée nettoyée
-      via `malware`), documentés dans `CHANGELOG.md` — ce qui a marché,
-      ce qui a échoué, ce qui a surpris. Dépend de l'accès matériel de
-      l'opérateur — protocole détaillé, prêt à suivre pas à pas,
-      préparé le 2026-09-15 : `docs/VALIDATION-ETAPE6.md` (injection de
-      panne, procédure de réparation, ce qu'il faut mesurer, gabarit
-      d'entrée CHANGELOG). Reste une étape SONAR (le builder) : valide
-      que les outils *choisis* pour chaque profil fonctionnent
-      manuellement, indépendamment de l'existence ou non de SONAR Field.
+      scénarios réels, documentés dans `CHANGELOG.md` — ce qui a marché,
+      ce qui a échoué, ce qui a surpris. Protocole :
+      `docs/VALIDATION-ETAPE6.md`. **2 sur 3 faits (2026-09-15, VM
+      VirtualBox, voir CHANGELOG v3.19.0)** :
+      - [x] `boot-repair` — succès complet, vérifié bit-exact (SHA-256
+        identique avant/après sur les 5 fichiers témoins).
+      - [x] `data-recovery` — succès après correction de méthodologie
+        (PhotoRec ne peut pas récupérer des données sans signature de
+        format reconnaissable — utiliser TestDisk "List" pour ce cas).
+        SHA-256 bit-exact **pas encore reconfirmé**, à refaire.
+      - [ ] `malware` — pas encore fait.
+      Reste une étape SONAR (le builder) : valide que les outils
+      *choisis* pour chaque profil fonctionnent manuellement,
+      indépendamment de l'existence ou non de SONAR Field.
 - [ ] **Étape 7 — déplacée vers SONAR Field** (section dédiée
       ci-dessous, 2026-09-15) — l'accréditation à l'usage de la clé
       n'a de sens que pour un outil qui *agit* sur la machine cible ;

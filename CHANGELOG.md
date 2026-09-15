@@ -6,6 +6,86 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.19.0-hardware-validation-partial] — 2026-09-15
+
+### Contexte
+Étape 6/6 du recentrage : validation matérielle des profils, protocole
+détaillé dans `docs/VALIDATION-ETAPE6.md` (commit 827b296). Exécutée en
+conditions réelles cette session, sur VM VirtualBox 7.2.16 (nouvellement
+installée, SHA-256 vérifié contre `SHA256SUMS` officiel avant
+installation) : 2 scénarios sur les 3 minimum exigés par `ROADMAP.md`
+(`boot-repair`, `data-recovery`) — `malware` reste à faire. Étape 6
+**pas encore close**, gardée ouverte dans `ROADMAP.md`.
+
+Disque de test préparé via WSL2 (accès root natif `wsl -u root`, sans
+sudo interactif) : image 2 Go, table GPT, 2 partitions ext4
+(`SONARP1` vide, `SONARP2` avec 5 fichiers témoins de 1 MiB) — converti
+en VDI et attaché à une VM avec l'ISO SystemRescue (récupérée via
+`--fetch boot-repair`, SHA-256 déjà vérifié au commit 730a1c5) comme
+support de boot.
+
+### Testé — `boot-repair` : SUCCÈS COMPLET, vérifié bit-exact
+- Panne injectée : premier Mo du disque écrasé (`dd if=/dev/zero`),
+  détruisant l'en-tête GPT et la table de partitions.
+- Réparation : `testdisk /dev/sda` (via SystemRescue sur la clé SONAR)
+  → type **EFI GPT** → **Analyse** → **Recherche rapide**. Les 2
+  partitions retrouvées **du premier coup**, avec leurs labels de
+  filesystem d'origine intacts (`SONARP1`/`SONARP2`) — pas besoin de
+  recherche approfondie. "Write" pour réécrire la table.
+- Vérification : après remontage, les 5 fichiers témoins comparés par
+  SHA-256 à leurs empreintes d'avant la casse — **5/5 identiques, octet
+  pour octet**.
+- Surprise : aucune — le scénario s'est déroulé exactement comme prévu
+  par le protocole.
+
+### Testé — `data-recovery` : succès après correction de méthodologie
+- Panne injectée : suppression normale (`rm`) des 5 fichiers témoins
+  sur la partition déjà réparée.
+- **Première tentative (PhotoRec) : 0 fichier récupéré — et c'est
+  attendu, pas un échec de l'outil.** PhotoRec récupère par
+  reconnaissance de signature de format (en-tête JPEG/PDF/ZIP/...) ; les
+  fichiers témoins étaient des données `/dev/urandom` sans aucun format
+  reconnaissable. Erreur de méthodologie de test (le protocole
+  recommandait déjà des formats reconnaissables pour cette raison même
+  — pas suivi lors de la préparation du disque cette session), pas un
+  problème du profil `data-recovery`.
+- **Deuxième tentative (TestDisk, mode "List") : succès.** Pour
+  ext2/3/4, TestDisk n'a pas de commande "Undelete" séparée — "List"
+  affiche directement les entrées du répertoire, y compris les fichiers
+  supprimés dont les blocs n'ont pas encore été réécrits, sélectionnables
+  et copiables (`a` sélectionne tout, `C` copie). Les 5 fichiers
+  retrouvés avec leur taille exacte (1 048 576 octets chacun) ;
+  "Copy done: 5 ok, 0 failed".
+- **Limite explicite de cette validation** : contrairement au scénario
+  `boot-repair`, le SHA-256 des fichiers copiés n'a **pas** été
+  reconfirmé bit-exact cette session (arrêt des manipulations
+  manuelles avant cette dernière étape). Taille exacte + rapport "0
+  failed" de l'outil sont des signaux forts mais pas une preuve
+  cryptographique — à refaire une prochaine session pour clore ce point
+  proprement.
+- Surprise réelle et utile à retenir : **PhotoRec et TestDisk
+  "List/Undelete" ne sont pas interchangeables** — le choix du bon
+  outil dépend de la nature de la perte (structure de répertoire encore
+  intacte vs fichier reconnaissable par signature). Le profil
+  `data-recovery` documente déjà les deux outils ; cette session
+  confirme que c'est délibéré, pas redondant.
+
+### Non fait dans cette version
+- Scénario `malware` (le 3e minimum exigé) : pas encore exécuté.
+- Vérification SHA-256 bit-exacte du scénario `data-recovery` : à
+  refaire (voir "Limite explicite" ci-dessus).
+- Étape 6 reste `[ ]` non cochée dans `ROADMAP.md` — au moins un
+  scénario supplémentaire nécessaire pour la clore.
+
+### Testé (méta)
+VM VirtualBox créée et pilotée via `VBoxManage` (CLI) pour la
+préparation (disque, ISO, réseau boot) ; les manipulations interactives
+dans TestDisk/PhotoRec elles-mêmes (navigation clavier, choix de menu)
+ont été effectuées par l'opérateur humain via la fenêtre VirtualBox,
+Claude ne pouvant pas piloter une interface graphique/TUI interactive à
+distance — cohérent avec la limite déjà documentée sur l'exécution de
+cette étape.
+
 ## [3.18.0-winpe-step4-documented-gap] — 2026-09-15
 
 ### Contexte
