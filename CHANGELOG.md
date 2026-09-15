@@ -6,7 +6,65 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
-## [3.13.0-catalog-apt-download] — 2026-09-15
+## [3.14.0-rbac-security-audit] — 2026-09-15
+
+### Contexte
+Revue de sécurité adversariale ciblée sur le module RBAC/verrou de rôle
+et la chaîne de signature — le point que le ROADMAP réserve depuis le
+début à un "audit de sécurité externe". Pas un substitut à cet audit
+(qui demande un regard extérieur par nature), mais une passe sérieuse,
+en pensant activement comme un attaquant local, sur exactement le
+périmètre que cet audit devra couvrir. Deux failles réelles trouvées et
+corrigées, toutes deux dans le modèle de menace que le projet définit
+lui-même ("auto-escalade de privilège occasionnelle" par un opérateur
+au même niveau OS, pas un attaquant réseau).
+
+### Corrigé
+- **Secret HMAC exposé en clair dans la liste des processus** —
+  `sonar_role_sign`/`sonar_build_sign` appelaient
+  `openssl dgst -sha256 -hmac "$secret"`, qui place le secret
+  directement sur la ligne de commande du processus, lisible par
+  n'importe quel processus/utilisateur local via `ps`/
+  `/proc/<pid>/cmdline` pendant la (brève mais réelle) fenêtre
+  d'exécution d'openssl. Un attaquant local captant ce secret pourrait
+  ensuite forger n'importe quel jeton de rôle (y compris Admin) ou
+  filigrane de build à volonté. Corrigé avec un nouvel helper partagé
+  `sonar_hmac_sha256_file` (Python `hmac`/`hashlib`, déjà une dépendance
+  dure du script) : seul le **chemin** du fichier secret traverse
+  l'argv, jamais ses octets — Python lit le secret lui-même via
+  `open()`. `sonar_require_openssl` supprimée (devenue orpheline, plus
+  aucun appelant).
+- **`--role-revoke-token` sans aucun contrôle de rôle** — n'importe quel
+  Technician non authentifié (libre-service, aucun jeton) pouvait
+  révoquer le jeton de **n'importe quel autre opérateur** (Admin,
+  Forensic, Senior, Expert), parce que `sonar_role_token_id` ne
+  nécessite que l'identité/rôle/expiration en clair du jeton (pas sa
+  signature) — et ces trois champs sont justement ceux que
+  `ROLE_TOKEN_ISSUED` écrit en clair dans `audit.log`. Un vrai déni de
+  service contre des opérateurs élevés légitimes. Corrigé : la
+  révocation exige désormais un rôle non-libre-service (via
+  `sonar_role_is_self_service`, pas une des colonnes déjà appliquées
+  (AUDIT/DEPLOY/VAULT) — aucune des trois n'exclut Technician dans
+  `policy.tsv`, elles n'auraient donc rien bloqué).
+- Bug cosmétique trouvé au passage dans `--self-test` : deux lignes
+  utilisaient `echo 'PASS\t...'` (échec silencieux d'interprétation de
+  l'échappement, `\t` littéral) au lieu de `printf '...\t...\n'` comme
+  les ~40 autres lignes PASS/FAIL/WARN du fichier — corrigé pour rester
+  cohérent avec le format tabulé.
+
+### Ajouté
+- Nouveau test de régression `--self-test` : confirme qu'une tentative
+  de révocation non authentifiée échoue et que le jeton visé reste
+  valide — couvre directement la faille ci-dessus pour l'avenir.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
+`--self-test` (0 FAIL, y compris le nouveau test de régression) — validé
+en conditions réelles (WSL2 Ubuntu 26.04, Python réel), pas seulement en
+isolation. Vérifié explicitement que le nouveau mécanisme HMAC produit
+des jetons et filigranes qui se signent et se vérifient correctement
+(pas seulement que le code s'exécute sans erreur).
+
 
 ### Contexte
 L'auteur pensait que le catalogue de référence (981 outils/73 domaines,

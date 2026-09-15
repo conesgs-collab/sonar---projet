@@ -79,6 +79,16 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
         voir CHANGELOG.md). Si un jour on veut restreindre qui peut
         *collecter* (pas seulement qui est *identifié* dans le journal),
         ça change ce cas de test documenté — décision produit, pas un bug.
+      - [x] **Passe interne (2026-09-15)** — pas un substitut à l'audit
+        externe, mais une revue adversariale sérieuse sur ce même
+        périmètre en attendant. Deux vraies failles trouvées et
+        corrigées (voir CHANGELOG.md v3.14.0) : secret HMAC exposé via
+        `ps`/`/proc/<pid>/cmdline` (signature des jetons et du filigrane
+        de build), et `--role-revoke-token` sans aucun contrôle de rôle
+        (déni de service — n'importe quel Technician non authentifié
+        pouvait révoquer le jeton de n'importe qui). Les deux questions
+        DESTRUCTIVE/FORENSIC ci-dessus restent ouvertes, elles demandent
+        une décision produit/matérielle, pas juste du code.
 
 ## P2 — Maturité produit
 

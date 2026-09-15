@@ -160,11 +160,14 @@ SONAR_ROLE="${SONAR_ROLE:-Technician}"
 # secret needed to check membership), so revoking doesn't require re-issuing
 # everyone else's tokens.
 #
-# The signature is a real HMAC-SHA256 (RFC 2104, via `openssl dgst -hmac`),
-# not a bespoke keyed hash — openssl is a hard requirement for the role-lock
-# specifically (checked at first use, fails closed with a clear message if
-# missing, never silently falls back to a weaker construction). Comparison
-# still goes through sonar_const_time_eq, a best-effort constant-time
+# The signature is a real HMAC-SHA256 (RFC 2104), not a bespoke keyed
+# hash — computed via Python's stdlib hmac/hashlib (sonar_hmac_sha256_file),
+# not `openssl dgst -hmac "$secret"`: that form puts the secret's bytes
+# directly on the process command line, readable by any local process/
+# user via `ps`/`/proc/<pid>/cmdline` while openssl runs (found
+# 2026-09-15). python3 is already a hard preflight dependency, so this
+# adds no new requirement and never exposes the secret outside this
+# process. Comparison still goes through sonar_const_time_eq, a best-effort constant-time
 # compare rather than a formally verified one — an accepted trade-off for a
 # local, single-host Bash tool defending against casual privilege
 # self-escalation, not a network attacker with a timing oracle.
@@ -231,24 +234,11 @@ sonar_role_bootstrap_secret() {
     echo "[SONAR] Émettez des jetons avec: --role-issue-token <ROLE> <IDENTITE> [JOURS_VALIDITE=30]."
 }
 
-# sonar_require_openssl: hard dependency for the role-lock's HMAC. Fails
-# closed with a clear message — never silently downgrades to a weaker
-# construction, consistent with the fail-safe posture of the rest of the
-# lock (an unclear failure mode here would be worse than a loud one).
-sonar_require_openssl() {
-    command -v openssl >/dev/null 2>&1 && return 0
-    echo "[SONAR] openssl est requis pour signer/vérifier les jetons de rôle (HMAC-SHA256)." >&2
-    echo "[SONAR] Installez-le (ex: apt install openssl) puis réessayez." >&2
-    return 1
-}
-
 # sonar_role_sign IDENTITY ROLE EXPIRY -> HMAC-SHA256(secret, "identity|role|expiry")
 sonar_role_sign() {
-    local identity="$1" role="$2" expiry="$3" secret
-    sonar_require_openssl || return 1
+    local identity="$1" role="$2" expiry="$3"
     sonar_role_secret_exists || return 1
-    secret="$(cat "${SONAR_ROLE_SECRET_FILE}")" || return 1
-    printf '%s' "${identity}|${role}|${expiry}" | openssl dgst -sha256 -hmac "${secret}" -r | awk '{print $1}'
+    sonar_hmac_sha256_file "${SONAR_ROLE_SECRET_FILE}" "${identity}|${role}|${expiry}"
 }
 
 # sonar_role_token_id IDENTITY ROLE EXPIRY -> revocation key (no secret needed:
@@ -296,6 +286,21 @@ sonar_role_issue_token() {
 # combination (recomputed from the token's own plaintext fields — no secret
 # needed), independent of anyone else's tokens for the same role.
 sonar_role_revoke_token() {
+    # Gated on "not self-service" rather than one specific policy.tsv
+    # column: none of AUDIT/DEPLOY/VAULT (the only enforced columns)
+    # actually exclude Technician — all three show at least R/RW for it
+    # — so reusing any of them here wouldn't have blocked anything.
+    # Found 2026-09-15: without this, ANY unauthenticated Technician
+    # could revoke ANY other operator's Admin/Forensic/Senior/Expert
+    # token — a real denial-of-service, since sonar_role_token_id()
+    # only needs the token's plaintext identity/role/expiry (no
+    # signature check), and those are exactly the fields
+    # ROLE_TOKEN_ISSUED already writes to audit.log in the clear.
+    if sonar_role_is_self_service "${SONAR_ROLE}"; then
+        echo "[SONAR] Rôle '${SONAR_ROLE}' insuffisant pour révoquer un jeton (rôle élevé requis)." >&2
+        sonar_audit "ACCESS_DENIED" "action=ROLE_REVOKE_TOKEN"
+        return 1
+    fi
     local provided="$1" identity role expiry sig token_id
     IFS=':' read -r identity role expiry sig <<< "${provided}"
     [[ -n "$identity" && -n "$role" && -n "$expiry" ]] || { echo "[SONAR] Jeton illisible (format attendu: identite:role:expiry:signature)." >&2; return 2; }
@@ -457,6 +462,26 @@ sonar_hash_str() {
     else
         return 1
     fi
+}
+
+# sonar_hmac_sha256_file SECRET_FILE MESSAGE -> hex HMAC-SHA256.
+# Deliberately NOT `openssl dgst -sha256 -hmac "$secret"`: that form puts
+# the secret's actual bytes on the process command line, readable by any
+# local process/user via `ps`/`/proc/<pid>/cmdline` for the (short but
+# real) duration openssl runs — found 2026-09-15 while auditing the
+# role-lock/build-watermark signing paths. Here only the secret's PATH
+# crosses argv; Python reads the key bytes itself via `open(...)`, never
+# exposing them outside this process. python3 is already a hard
+# preflight dependency, so this adds no new requirement.
+sonar_hmac_sha256_file() {
+    local secret_file="$1" message="$2"
+    python3 - "$secret_file" "$message" <<'PY'
+import hashlib, hmac, sys
+secret_file, message = sys.argv[1], sys.argv[2]
+with open(secret_file, "rb") as f:
+    key = f.read()
+print(hmac.new(key, message.encode("utf-8"), hashlib.sha256).hexdigest())
+PY
 }
 
 # sonar_generate_secret_hex: 32 bytes of /dev/urandom, hex-encoded via
@@ -3533,7 +3558,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.13.0-catalog-apt-download"
+SONAR_VERSION="3.14.0-rbac-security-audit"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3648,9 +3673,9 @@ sonar_self_test_v2() {
         check 'bash syntax' bash -n "$self"
         check 'python3' command -v python3
         check 'sha256 engine' bash -c 'command -v sha256sum || command -v shasum'
-        if [[ -d "${SOURCE_DIR}" ]]; then echo 'PASS\tsource directory'; else printf 'WARN\tsource directory absent (runtime test environment)\n'; warnings=$((warnings+1)); fi
+        if [[ -d "${SOURCE_DIR}" ]]; then printf 'PASS\tsource directory\n'; else printf 'WARN\tsource directory absent (runtime test environment)\n'; warnings=$((warnings+1)); fi
         [[ -d "${ISO_SOURCE_DIR}" ]] && echo 'PASS\tISO source' || { printf 'WARN\tISO source absent\n'; warnings=$((warnings+1)); }
-        [[ -d "${PORTABLE_SOURCE_DIR}" ]] && echo 'PASS\tPortable source' || { printf 'WARN\tPortable source absent\n'; warnings=$((warnings+1)); }
+        [[ -d "${PORTABLE_SOURCE_DIR}" ]] && printf 'PASS\tPortable source\n' || { printf 'WARN\tPortable source absent\n'; warnings=$((warnings+1)); }
         [[ -d "${SCRIPTS_SOURCE_DIR}" ]] && echo 'PASS\tScripts source' || { printf 'WARN\tScripts source absent\n'; warnings=$((warnings+1)); }
         [[ -d "${DRIVERS_SOURCE_DIR}" ]] && echo 'PASS\tDrivers source' || { printf 'WARN\tDrivers source absent\n'; warnings=$((warnings+1)); }
         [[ -d "${MACOS_SOURCE_DIR}" ]] && echo 'PASS\tmacOS source' || { printf 'WARN\tmacOS source absent\n'; warnings=$((warnings+1)); }
@@ -3698,12 +3723,33 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tPer-identity token did not grant role\n'; errors=$((errors+1))
         fi
-        SONAR_ROOT="${_rt_root}" "$self" --role-revoke-token "${_rt_token}" >/dev/null 2>&1
+        # Revoking now requires an elevated (non-self-service) role itself
+        # (2026-09-15 fix — see sonar_role_revoke_token) — authenticate
+        # with the same valid Admin token being revoked, exactly how a
+        # real operator would use it, instead of the unauthenticated call
+        # this test used to make.
+        SONAR_ROOT="${_rt_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_rt_token}" "$self" --role-revoke-token "${_rt_token}" >/dev/null 2>&1
         _rt_out="$(SONAR_ROOT="${_rt_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_rt_token}" "$self" --security-status 2>/dev/null)"
         if grep -q 'role: Technician' <<< "${_rt_out}"; then
             printf 'PASS\tRevoked token is rejected\n'
         else
             printf 'FAIL\tRevoked token was NOT rejected\n'; errors=$((errors+1))
+        fi
+        # Regression test (2026-09-15): an unauthenticated Technician must
+        # NOT be able to revoke someone else's token — before this fix,
+        # sonar_role_revoke_token had no role gate at all, so any local
+        # user could DoS any Admin/Forensic/Senior/Expert token just by
+        # reading its identity/role/expiry from audit.log (no signature
+        # check was required to revoke). Issue a second token, attempt an
+        # unauthenticated revoke, then confirm the token STILL works.
+        local _rt2_token _rt2_out
+        _rt2_token="$(SONAR_ROOT="${_rt_root}" "$self" --role-issue-token Admin selftest2.bot 1 2>/dev/null)"
+        SONAR_ROOT="${_rt_root}" "$self" --role-revoke-token "${_rt2_token}" >/dev/null 2>&1
+        _rt2_out="$(SONAR_ROOT="${_rt_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_rt2_token}" "$self" --security-status 2>/dev/null)"
+        if grep -q 'role: Admin' <<< "${_rt2_out}"; then
+            printf 'PASS\tUnauthenticated revoke attempt is rejected (token still valid)\n'
+        else
+            printf 'FAIL\tUnauthenticated Technician was able to revoke another token\n'; errors=$((errors+1))
         fi
         local _old_secret_file="${SONAR_ROLE_SECRET_FILE}" _old_revoked_file="${SONAR_ROLE_REVOKED_FILE}" _exp_epoch _exp_sig _exp_token
         _exp_epoch=$(( $(date -u +%s) - 3600 ))
@@ -3813,7 +3859,7 @@ sonar_self_test_v2() {
           mkdir -p "${SONAR_SECURITY_DIR}/Logs"
           SONAR_ROLE="Technician"; SONAR_ROLE_IDENTITY="wm.trace.bot"; VOL="SELFTEST-USB"
           source <(sed -n '/^sonar_hash_str() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_require_openssl() {/,/^}/p' "$self")
+          source <(sed -n '/^sonar_hmac_sha256_file() {/,/^}/p' "$self")
           source <(sed -n '/^sonar_const_time_eq() {/,/^}/p' "$self")
           source <(sed -n '/^sonar_audit() {/,/^}/p' "$self")
           source <(sed -n '/^sonar_build_secret_exists() {/,/^}/p' "$self")
@@ -4454,11 +4500,9 @@ sonar_ensure_build_secret() {
 
 # sonar_build_sign BUILD_ID TS OPERATOR LABEL -> HMAC-SHA256
 sonar_build_sign() {
-    local build_id="$1" ts="$2" operator="$3" label="$4" secret
-    sonar_require_openssl || return 1
+    local build_id="$1" ts="$2" operator="$3" label="$4"
     sonar_build_secret_exists || return 1
-    secret="$(cat "${SONAR_BUILD_SECRET_FILE}")" || return 1
-    printf '%s' "${build_id}|${ts}|${operator}|${label}" | openssl dgst -sha256 -hmac "${secret}" -r | awk '{print $1}'
+    sonar_hmac_sha256_file "${SONAR_BUILD_SECRET_FILE}" "${build_id}|${ts}|${operator}|${label}"
 }
 
 # sonar_generate_build_watermark MOUNT_POINT: writes a signed watermark file
