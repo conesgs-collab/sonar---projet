@@ -105,14 +105,20 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       base de connaissance (`docs/CATALOG.md`), plus source de vérité du
       déploiement. IA/smart-advisor/`--builder` marqués `[EXPÉRIMENTAL]`
       dans `--help` sans suppression.
-- [ ] **Étape 2 — `--fetch <profil>`** : télécharge chaque outil du
-      profil depuis une URL connue, vérifie le SHA-256 contre un
-      manifeste **signé** (GPG ou HMAC via le secret de build existant,
-      `sonar_hmac_sha256_file`), refuse sur non-correspondance, journalise
-      source+SHA-256 dans `MANIFEST/`. URLs/checksums déjà identifiés
-      pour SystemRescue (`.sha256` + `.asc` GPG), ClamAV (`.sig`),
-      TestDisk/PhotoRec (cgsecurity.org) — pas encore encodés dans le
-      script (voir CHANGELOG v3.15.0, section "Non fait").
+- [x] **Étape 2 — `--fetch <profil>`** (v3.16.0-fetch-step2, 2026-09-15) :
+      télécharge chaque outil unique du profil depuis une URL connue,
+      vérifie le SHA-256 contre `SONAR_FETCH_MANIFEST_TSV`, supprime le
+      fichier et refuse sur non-correspondance, journalise source+SHA-256
+      (audit hashchainé + `SOURCE_DIR/.../FETCH/MANIFEST_FETCH.tsv`). Le
+      manifeste est scellé par HMAC (secret de build existant,
+      `--fetch-manifest-seal`, rôle VAULT) — `--fetch` refuse tant qu'il
+      n'est pas scellé. Les 6 entrées (SystemRescue, TestDisk/PhotoRec,
+      ddrescue, ClamAV, Clonezilla, chntpw) ont chacune été vérifiées
+      individuellement avant d'être figées (SHA-256 vendeur et/ou
+      signature GPG amont contrôlée en direct — détail dans CHANGELOG
+      v3.16.0). Testé de bout en bout en conditions réelles
+      (téléchargement + vérification effectifs, pas seulement en
+      isolation).
 - [ ] **Étape 3 — Environnement de boot complet** : intégrer SystemRescue
       par défaut dans les profils `boot-repair` et `disk-clone`
       (téléchargement + vérification SHA-256 + signature GPG amont).

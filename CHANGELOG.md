@@ -6,6 +6,123 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.16.0-fetch-step2] — 2026-09-15
+
+### Contexte
+Étape 2/6 du recentrage (voir v3.15.0 et `ROADMAP.md`, section P0bis) :
+les profils de dépannage existaient déjà (`--profile`) mais rien ne
+pouvait encore récupérer réellement les outils qu'ils citent. Exigence
+explicite de l'auteur : "un manifeste non signé est une porte ouverte"
+— le SHA-256 attendu de chaque outil doit être vérifié contre un
+manifeste lui-même protégé (GPG ou HMAC via le secret de build), pas
+juste codé en dur sans garantie.
+
+### Ajouté
+- **`--fetch <profil>`** : télécharge chaque outil unique du profil
+  (déduplication déjà faite par `sonar_profile_tools`), vérifie son
+  SHA-256 contre `SONAR_FETCH_MANIFEST_TSV`, **supprime le fichier et
+  refuse sur non-correspondance**, journalise systématiquement
+  (`sonar_audit`, hashchainé) et écrit un rapport
+  `SOURCE_DIR/.../FETCH/MANIFEST_FETCH.tsv` (outil, URL, SHA-256,
+  horodatage, destination). Un outil sans entrée manifeste (ex.
+  `GParted`, bundlé dans l'ISO SystemRescue, pas téléchargé seul) est
+  signalé et sauté proprement, pas traité en échec.
+- **`--fetch-manifest-seal`** (rôle VAULT) et
+  **`--fetch-manifest-verify-seal`** : scelle/vérifie
+  `SONAR_FETCH_MANIFEST_TSV` par HMAC-SHA256 (secret de build existant,
+  `sonar_hmac_sha256_file` — même mécanisme que le filigrane de build et
+  la révocation de jeton, pas un nouveau système de signature). `--fetch`
+  refuse de fonctionner tant que ce scellé n'existe pas ou ne correspond
+  plus au manifeste embarqué — seule la **création** du scellé exige le
+  rôle VAULT, sa **vérification** (lecture) n'exige aucun rôle, comme
+  `--verify-manifest`.
+- **Manifeste initial, 6 outils, chacun vérifié individuellement avant
+  d'être figé** (pas de valeur inventée — voir méthode par outil) :
+  - **SystemRescue** 13.02 — SHA-256 récupéré directement depuis le
+    fichier `.sha256` officiel (HTTPS, system-rescue.org) ; signature
+    GPG `.asc` disponible mais pas re-vérifiée cette session (ISO
+    ~1,3 Go, transfert jugé disproportionné pour ce qu'apporterait une
+    double vérification quand le SHA-256 vient déjà du vendeur).
+  - **TestDisk/PhotoRec** 7.2 (cgsecurity.org, couvre les deux outils
+    dans la même archive) — aucun `.sha256`/`.sig` publié par le
+    fournisseur ; SHA-256 calculé localement après téléchargement HTTPS
+    depuis le domaine officiel (assurance équivalente à ce qu'un
+    opérateur humain obtiendrait en téléchargeant manuellement).
+  - **ddrescue** 1.30 (GNU) — signature GPG **vérifiée en direct**
+    cette session (clé Antonio Diaz, via `gnu-keyring.gpg` officiel de
+    gnu.org) : `gpg: Good signature from "Antonio Diaz"`.
+  - **ClamAV** 1.5.4 (`.deb`, pas de tarball portable — corrigé après
+    recherche initiale erronée) — signature GPG **vérifiée en direct**
+    cette session (clé Cisco Talos, via le fichier officiel du dépôt
+    `Cisco-Talos/clamav-documentation`) : `gpg: Good signature from
+    "Talos (Talos, Cisco Systems Inc.)"`. Extraction sans `dpkg` : `ar x
+    clamav*.deb && tar xf data.tar.*` (fonctionne sur SystemRescue/Arch).
+  - **Clonezilla** 3.3.3-15 — SHA-256 et signature GPG (clé DRBL)
+    **vérifiés en direct** via `CHECKSUMS.TXT`/`CHECKSUMS.TXT.gpg`
+    servis par clonezilla.org (pas SourceForge, où seule l'ISO elle-même
+    est hébergée) : `gpg: Good signature from "DRBL Project"`.
+  - **chntpw** cd140201 — **assurance la plus faible du manifeste,
+    signalée explicitement dans la colonne NOTES** : source officielle
+    (pogostick.net) en HTTP seul, sans TLS, et sans SHA-256/GPG publiés
+    — seul un MD5 est fourni. MD5 recoupé (correspond) lors de la
+    constitution de ce manifeste ; SHA-256 calculé localement. Retenu
+    quand même faute d'alternative libre équivalente pour cette
+    fonction précise (reset de mot de passe Windows hors-ligne).
+- Quatre tests de régression `--self-test`, tous hors-réseau : présence
+  du module, `--fetch` refuse effectivement sur un manifeste non scellé
+  (vérifié par le code de retour ET l'absence de toute tentative de
+  téléchargement dans la sortie), le cycle scellement/vérification
+  fonctionne avec un rôle VAULT valide, et
+  `sonar_fetch_sha256_matches` accepte le bon SHA-256 et rejette un
+  SHA-256 incorrect.
+
+### Corrigé (trouvé pendant la vérification manuelle des outils)
+- Recherche initiale (avant ce commit) supposait un tarball ClamAV
+  portable (`clamav-*.linux.x86_64.tar.gz`) — n'existe pas réellement,
+  seuls `.deb`/`.rpm` sont publiés. Corrigé avant d'écrire une URL
+  fausse dans le manifeste.
+- Deux itérations sur le test `--self-test` "refuse sur manifeste non
+  scellé" : la première version cherchait la sous-chaîne
+  `Téléchargement` (insensible à la casse) dans la sortie pour prouver
+  qu'aucun téléchargement n'avait été tenté, mais cette sous-chaîne
+  apparaît aussi, en minuscule, dans le message de refus lui-même
+  ("manifeste de **téléchargement** non scellé") — faux négatif.
+  Corrigé pour vérifier le code de retour ET la présence littérale de
+  `Téléchargement: ` (avec les deux-points), qui n'apparaît que dans la
+  ligne de tentative de téléchargement réelle.
+- Premier essai de `sonar_fetch_manifest_seal` renvoyait vers
+  `--role-bootstrap` en cas de secret de build absent — message
+  trompeur (`--role-bootstrap` initialise le secret des **jetons de
+  rôle**, pas le secret de **build**, qui a son propre mécanisme
+  transparent `sonar_ensure_build_secret`, déjà utilisé par le
+  filigrane de build). Corrigé pour appeler `sonar_ensure_build_secret`
+  directement, cohérent avec le reste du script.
+
+### Non fait dans cette version (volontairement)
+- **Étape 3** (SystemRescue embarqué par défaut dans les profils
+  `boot-repair`/`disk-clone`), **étape 4** (WinPE/ADK), **étape 5**
+  (menu orienté tâche), **étape 6** (validation matérielle des
+  profils) : pas commencées, voir `ROADMAP.md`.
+- `--fetch` ne re-vérifie pas les signatures GPG amont à chaque
+  exécution (seulement le SHA-256 qu'il gate réellement) — les
+  vérifications GPG ci-dessus ont eu lieu une fois, à la constitution
+  de ce manifeste. Documenté explicitement en tête de la section
+  `SONAR FETCH V1` dans `sonar_master.sh` pour que ça reste clair au
+  prochain outil ajouté au manifeste.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit`,
+`--self-test` (0 FAIL) sous WSL2 Ubuntu (Python réel). **Test de bout
+en bout en conditions réelles** (pas seulement les chemins hors-réseau
+du self-test) : `--role-bootstrap` → `--fetch-manifest-seal` (rôle
+VAULT) → `--fetch password-reset` → téléchargement réel de
+`cd140201.zip` (16,53 Mo) depuis pogostick.net, SHA-256 vérifié
+conforme à la valeur figée dans le manifeste, entrée écrite dans
+`MANIFEST_FETCH.tsv` et dans le hashchain d'audit. Chacune des 6
+signatures/checksums du manifeste a été vérifiée individuellement avant
+d'être figée (détail ci-dessus) — aucune valeur de ce manifeste n'a été
+inventée ou recopiée sans contrôle direct.
+
 ## [3.15.0-profiles-step1] — 2026-09-15
 
 ### Contexte

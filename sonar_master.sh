@@ -944,6 +944,19 @@ Commandes indépendantes (à la place de --disk):
                                 POURQUOI ceux-là (pas le catalogue 981, qui
                                 n'est qu'une base de connaissance). Sans
                                 argument (ou "list") : vue d'ensemble.
+  --fetch-manifest-seal       [rôle VAULT] Scelle (HMAC, secret de build) le
+                                manifeste de téléchargement (URL+SHA256 par
+                                outil) — à exécuter une fois avant tout
+                                --fetch ("un manifeste non signé est une
+                                porte ouverte").
+  --fetch-manifest-verify-seal Vérifie que le manifeste n'a pas changé depuis
+                                son scellement.
+  --fetch <PROFIL>             Télécharge chaque outil du profil, vérifie son
+                                SHA-256 contre le manifeste scellé, refuse et
+                                supprime le fichier sur non-correspondance,
+                                journalise source+SHA-256 (audit + MANIFEST_
+                                FETCH.tsv). Refuse si le manifeste n'est pas
+                                scellé.
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -3475,6 +3488,173 @@ sonar_profile_doc() {
     sonar_audit "PROFILE_DOC_VIEWED" "profile=${profile}"
 }
 
+# === SONAR FETCH V1 (étape 2/6) ===
+# --fetch <profil> télécharge chaque outil (unique) du profil depuis une URL
+# connue et vérifie son SHA-256 contre ce manifeste — supprime le fichier et
+# refuse sur non-correspondance, journalise systématiquement (audit
+# hashchainé + rapport TSV dans SOURCE_DIR/.../FETCH). Le manifeste
+# lui-même est protégé par un scellé HMAC (secret de build existant,
+# sonar_hmac_sha256_file) : --fetch refuse de fonctionner tant que
+# --fetch-manifest-seal (rôle VAULT) n'a pas été exécuté au moins une fois
+# sur cette machine — "un manifeste non signé est une porte ouverte".
+#
+# Ce que --fetch vérifie EN DIRECT, à chaque exécution : le SHA-256 du
+# fichier téléchargé. Les colonnes SIG_URL/SIG_TYPE/NOTES documentent
+# COMMENT ce SHA-256 a été établi (signature GPG amont du fournisseur,
+# vérifiée manuellement lors de la constitution de ce manifeste, voir
+# CHANGELOG.md) — --fetch ne re-télécharge pas les clés GPG de six
+# fournisseurs différents à chaque exécution, ce qui serait au-delà de ce
+# qui a été demandé (un manifeste signé PAR SONAR, pas une chaîne de
+# confiance GPG multi-fournisseurs re-vérifiée en continu).
+SONAR_FETCH_MANIFEST_TSV="$(cat <<'FETCH_EOF'
+TOOL	URL	SHA256	SIG_URL	SIG_TYPE	NOTES
+SystemRescue	https://fastly-cdn.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso	ad4d670b72859d887c7960142a9a9d36a3e50446694a035e254442f65d6e7572	https://www.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso.asc	gpg	SHA-256 source: fichier .sha256 officiel (HTTPS, system-rescue.org). Signature GPG .asc disponible ; non re-verifiee ici (ISO ~1.3 Go, cle fdupoux).
+TestDisk	https://www.cgsecurity.org/testdisk-7.2.linux26-x86_64.tar.bz2	19669b6d36314d6e531efdf836c768574e8a556d1e9db3c8f3c4e93a5092cb1c		none	Couvre aussi PhotoRec (meme archive). Aucun .sha256/.sig publie par cgsecurity.org ; SHA-256 calcule localement apres telechargement HTTPS depuis le domaine officiel.
+ddrescue	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz	2264622d309d6c87a1cfc19148292b8859a688e9bc02d4702f5cd4f288745542	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz.sig	gpg	Signature GPG verifiee cette session (cle Antonio Diaz, via gnu-keyring.gpg officiel de gnu.org).
+ClamAV	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb	28d6efc5b4423e7830c3559339552eb53870a9eac51ac4efb37d60530d329886	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb.sig	gpg	Signature GPG verifiee cette session (cle Cisco Talos). Paquet .deb : extraire avec 'ar x clamav*.deb && tar xf data.tar.*' (pas besoin de dpkg, fonctionne sur SystemRescue/Arch).
+Clonezilla	https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-15/clonezilla-live-3.3.3-15-amd64.iso/download	482518ea32af3b82ed15d09e2e7714806775deb62aeed81491e534f6cc6bbc47		none	SHA-256 verifie via CHECKSUMS.TXT signe GPG (cle DRBL) sur clonezilla.org (hors SourceForge). L'ISO vient de SourceForge : miroirs parfois instables, --fetch reprend un telechargement interrompu (curl -C -).
+chntpw	http://pogostick.net/~pnh/ntpasswd/cd140201.zip	c88d86aee55b31827ab4782d05bd44922276955909c43c69f0fb15377cc64374		none	ATTENTION assurance plus faible que les autres lignes : source officielle en HTTP seul (pas de TLS), MD5 uniquement publie par le fournisseur (pas de SHA-256/GPG amont). MD5 recoupe (f274127bf8be9a7ed48b563fd951ae9e) lors de la constitution de ce manifeste ; SHA-256 calcule localement.
+FETCH_EOF
+)"
+
+# sonar_fetch_manifest_lookup TOOL -> la ligne TSV complète, ou échec (rc 1)
+# si l'outil n'a pas d'entrée (cas normal pour un outil fourni par un autre,
+# ex. GParted est inclus dans l'ISO SystemRescue, pas téléchargé seul).
+sonar_fetch_manifest_lookup() {
+    local tool="$1"
+    awk -F'\t' -v t="$tool" 'NR>1 && $1==t {print; found=1} END{exit !found}' <<<"${SONAR_FETCH_MANIFEST_TSV}"
+}
+
+SONAR_FETCH_MANIFEST_SEAL_FILE="${SONAR_FETCH_MANIFEST_SEAL_FILE:-${SONAR_SECURITY_DIR}/Vault/fetch_manifest.hmac}"
+
+sonar_fetch_manifest_hmac() {
+    sonar_build_secret_exists || return 1
+    sonar_hmac_sha256_file "${SONAR_BUILD_SECRET_FILE}" "${SONAR_FETCH_MANIFEST_TSV}"
+}
+
+sonar_fetch_manifest_seal() {
+    sonar_require_role VAULT || return 1
+    sonar_ensure_build_secret || { echo "[SONAR][ERROR] Impossible de générer/lire le secret de build." >&2; return 1; }
+    mkdir -p "$(dirname "${SONAR_FETCH_MANIFEST_SEAL_FILE}")"
+    local hmac
+    hmac="$(sonar_fetch_manifest_hmac)" || { echo "[SONAR] Échec du calcul HMAC." >&2; return 1; }
+    printf '%s\t%s\t%s\n' "$(sonar_iso_now)" "${SONAR_ROLE}" "${hmac}" > "${SONAR_FETCH_MANIFEST_SEAL_FILE}"
+    chmod 600 "${SONAR_FETCH_MANIFEST_SEAL_FILE}" 2>/dev/null || true
+    sonar_audit "FETCH_MANIFEST_SEALED" "hmac=${hmac}"
+    echo "[SONAR] Manifeste de téléchargement scellé: ${SONAR_FETCH_MANIFEST_SEAL_FILE}"
+}
+
+# sonar_fetch_manifest_seal_ok -> 0 scellé et conforme, 1 modifié depuis le
+# scellement, 2 jamais scellé sur cette machine. Pas de garde de rôle : la
+# LECTURE d'un scellé existant est une vérification, pas une escalade — seule
+# sa CRÉATION (sonar_fetch_manifest_seal ci-dessus) exige le rôle VAULT.
+sonar_fetch_manifest_seal_ok() {
+    [[ -s "${SONAR_FETCH_MANIFEST_SEAL_FILE}" ]] || return 2
+    sonar_build_secret_exists || return 2
+    local sealed_hmac current_hmac
+    sealed_hmac="$(awk -F'\t' '{print $NF}' "${SONAR_FETCH_MANIFEST_SEAL_FILE}")"
+    current_hmac="$(sonar_fetch_manifest_hmac)" || return 2
+    [[ "${sealed_hmac}" == "${current_hmac}" ]]
+}
+
+sonar_fetch_manifest_verify_seal() {
+    local rc=0
+    sonar_fetch_manifest_seal_ok || rc=$?
+    case "$rc" in
+        0) echo "[SONAR] Manifeste de téléchargement conforme au scellé."; sonar_audit "FETCH_MANIFEST_SEAL_VERIFIED" "status=MATCH" ;;
+        1) echo "[SONAR][ALERTE] Le manifeste de téléchargement a changé depuis son scellement." >&2; sonar_audit "FETCH_MANIFEST_SEAL_VERIFIED" "status=MISMATCH" ;;
+        *) echo "[SONAR] Aucun scellé trouvé ; exécutez --fetch-manifest-seal (rôle VAULT) d'abord." >&2 ;;
+    esac
+    return "$rc"
+}
+
+# sonar_fetch_sha256_matches FILE EXPECTED -> vrai si le SHA-256 de FILE
+# correspond (comparaison insensible à la casse). Pas de réseau — testable
+# hors-ligne par --self-test.
+sonar_fetch_sha256_matches() {
+    local file="$1" expected="$2" actual
+    [[ -f "$file" ]] || return 2
+    actual="$(sha256_final "$file" 2>/dev/null)" || return 2
+    [[ "${actual,,}" == "${expected,,}" ]]
+}
+
+SONAR_FETCH_REPORT_DIR="${SONAR_FETCH_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/FETCH}"
+SONAR_FETCH_REPORT="${SONAR_FETCH_REPORT:-${SONAR_FETCH_REPORT_DIR}/MANIFEST_FETCH.tsv}"
+
+# sonar_fetch_one_tool TOOL -> 0 téléchargé+vérifié, 1 échec (téléchargement
+# ou SHA-256), 3 pas d'entrée manifeste pour cet outil (fourni autrement,
+# ex. bundlé dans une autre ISO du même profil — pas une erreur).
+sonar_fetch_one_tool() {
+    local tool="$1" row url expected_sha256 url_clean base ext dest_dir dest_file actual_sha256
+    row="$(sonar_fetch_manifest_lookup "$tool")" || {
+        echo "[SONAR] '${tool}' : pas d'entrée de téléchargement séparée (fourni par un autre outil du profil, ex. inclus dans une ISO déjà récupérée)."
+        return 3
+    }
+    IFS=$'\t' read -r _ url expected_sha256 _ _ _ <<< "$row"
+    [[ -n "$url" && -n "$expected_sha256" ]] || { echo "[SONAR][ERROR] Entrée de manifeste incomplète pour '${tool}'." >&2; return 1; }
+    url_clean="${url%/download}"
+    base="${url_clean##*/}"
+    ext="${base##*.}"
+    case "$ext" in
+        iso) dest_dir="${ISO_SOURCE_DIR}/Fetched" ;;
+        *) dest_dir="${PORTABLE_SOURCE_DIR}/Fetched" ;;
+    esac
+    mkdir -p "$dest_dir"
+    dest_file="${dest_dir}/${base}"
+    echo "[SONAR] Téléchargement: ${tool} <- ${url}"
+    if ! curl -fL --retry 3 --retry-delay 5 -C - -o "${dest_file}.part" "$url"; then
+        rm -f "${dest_file}.part"
+        echo "[SONAR][ERROR] Échec du téléchargement: ${tool}" >&2
+        sonar_audit "FETCH_DOWNLOAD_FAILED" "tool=${tool};url=${url}"
+        return 1
+    fi
+    mv -f "${dest_file}.part" "${dest_file}"
+    if ! sonar_fetch_sha256_matches "${dest_file}" "${expected_sha256}"; then
+        actual_sha256="$(sha256_final "${dest_file}" 2>/dev/null || echo indisponible)"
+        rm -f "${dest_file}"
+        echo "[SONAR][ERROR] SHA-256 NE CORRESPOND PAS pour ${tool} — fichier supprimé. Attendu=${expected_sha256} Obtenu=${actual_sha256}" >&2
+        sonar_audit "FETCH_HASH_MISMATCH" "tool=${tool};expected=${expected_sha256};actual=${actual_sha256}"
+        return 1
+    fi
+    mkdir -p "${SONAR_FETCH_REPORT_DIR}"
+    [[ -s "${SONAR_FETCH_REPORT}" ]] || printf 'TOOL\tURL\tSHA256\tFETCHED_AT\tDEST\n' > "${SONAR_FETCH_REPORT}"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$tool" "$url" "$expected_sha256" "$(sonar_iso_now)" "$dest_file" >> "${SONAR_FETCH_REPORT}"
+    sonar_audit "FETCH_VERIFIED" "tool=${tool};sha256=${expected_sha256};dest=${dest_file}"
+    echo "[SONAR] OK: ${tool} vérifié (SHA-256 conforme) -> ${dest_file}"
+    return 0
+}
+
+sonar_fetch_profile() {
+    local profile="${1:-}" seal_rc=0
+    sonar_profile_scenario "$profile" >/dev/null || {
+        echo "[SONAR][ERROR] Profil inconnu: '${profile}'. Profils disponibles: $(sonar_profile_names)" >&2
+        return 2
+    }
+    sonar_fetch_manifest_seal_ok || seal_rc=$?
+    if [[ "$seal_rc" -ne 0 ]]; then
+        echo "[SONAR][ERROR] --fetch refuse : manifeste de téléchargement non scellé ou modifié (code ${seal_rc})." >&2
+        echo "[SONAR] Exécutez --fetch-manifest-seal (rôle VAULT) pour valider ce manifeste avant toute utilisation de --fetch." >&2
+        sonar_audit "FETCH_REFUSED" "profile=${profile};reason=unsealed_manifest;seal_rc=${seal_rc}"
+        return 1
+    fi
+    command -v curl >/dev/null 2>&1 || { echo "[SONAR][ERROR] curl requis pour --fetch." >&2; return 127; }
+    local tools tool rc ok=0 fail=0 skip=0
+    tools="$(sonar_profile_tools "$profile" | awk -F'\t' '{print $1}')"
+    while IFS= read -r tool; do
+        [[ -z "$tool" ]] && continue
+        rc=0
+        sonar_fetch_one_tool "$tool" || rc=$?
+        case "$rc" in
+            0) ok=$((ok+1)) ;;
+            3) skip=$((skip+1)) ;;
+            *) fail=$((fail+1)) ;;
+        esac
+    done <<< "$tools"
+    echo "[SONAR] Profil '${profile}' : ${ok} outil(s) vérifié(s), ${fail} échec(s), ${skip} fourni(s) autrement."
+    sonar_audit "FETCH_PROFILE_DONE" "profile=${profile};ok=${ok};fail=${fail};skip=${skip}"
+    [[ "$fail" -eq 0 ]]
+}
+
 # === SONAR AI DRY-RUN REPORT ENGINE V1 ===
 SONAR_AI_REPORT_DIR="${SONAR_AI_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/AI_REPORT}"
 SONAR_AI_REPORT="${SONAR_AI_REPORT:-${SONAR_AI_REPORT_DIR}/ai_dry_run_report.tsv}"
@@ -3673,7 +3853,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.15.0-profiles-step1"
+SONAR_VERSION="3.16.0-fetch-step2"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4020,6 +4200,37 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))
         fi
+        grep -q '^SONAR_FETCH_MANIFEST_TSV=' "$self" && printf 'PASS\tFetch manifest module present\n' || { printf 'FAIL\tFetch manifest module missing\n'; errors=$((errors+1)); }
+        grep -q '^sonar_fetch_profile() {' "$self" && printf 'PASS\tFetch profile function present\n' || { printf 'FAIL\tFetch profile function missing\n'; errors=$((errors+1)); }
+        local _fm_dir _fm_out
+        _fm_dir="$(mktemp -d)"
+        local _fm_rc=0
+        _fm_out="$(SONAR_ROOT="${_fm_dir}" "$self" --fetch boot-repair 2>&1)" || _fm_rc=$?
+        if [[ "${_fm_rc}" -ne 0 ]] && ! grep -qF 'Téléchargement: ' <<<"${_fm_out}"; then
+            printf 'PASS\t--fetch refuses to run against an unsealed manifest (no network attempted)\n'
+        else
+            printf 'FAIL\t--fetch did not refuse an unsealed manifest as expected\n'; errors=$((errors+1))
+        fi
+        SONAR_ROOT="${_fm_dir}" "$self" --role-bootstrap >/dev/null 2>&1
+        local _fm_token
+        _fm_token="$(SONAR_ROOT="${_fm_dir}" "$self" --role-issue-token Vault fetch.selftest.bot 1 2>/dev/null)"
+        if SONAR_ROOT="${_fm_dir}" SONAR_ROLE=Vault SONAR_ROLE_TOKEN="${_fm_token}" "$self" --fetch-manifest-seal >/dev/null 2>&1 \
+           && SONAR_ROOT="${_fm_dir}" "$self" --fetch-manifest-verify-seal >/dev/null 2>&1; then
+            printf 'PASS\tFetch manifest seal/verify round-trip works (role VAULT)\n'
+        else
+            printf 'FAIL\tFetch manifest seal/verify round-trip did not behave as expected\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_fm_dir}"
+        local _hash_tmp _hash_known
+        _hash_tmp="$(mktemp)"
+        printf 'sonar-fetch-selftest' > "${_hash_tmp}"
+        _hash_known="$(sha256_final "${_hash_tmp}")"
+        if sonar_fetch_sha256_matches "${_hash_tmp}" "${_hash_known}" && ! sonar_fetch_sha256_matches "${_hash_tmp}" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"; then
+            printf 'PASS\tsonar_fetch_sha256_matches accepts correct hash and rejects wrong hash\n'
+        else
+            printf 'FAIL\tsonar_fetch_sha256_matches did not behave as expected\n'; errors=$((errors+1))
+        fi
+        rm -f "${_hash_tmp}"
         echo
         echo "ERRORS=$errors"
         echo "WARNINGS=$warnings"
@@ -4928,6 +5139,9 @@ case "${1:-}" in
             if sonar_profile_doc "${1:-}"; then exit 0; else exit $?; fi
         fi
         ;;
+    --fetch-manifest-seal) if sonar_fetch_manifest_seal; then exit 0; else exit $?; fi ;;
+    --fetch-manifest-verify-seal) if sonar_fetch_manifest_verify_seal; then exit 0; else exit $?; fi ;;
+    --fetch) shift; if sonar_fetch_profile "${1:-}"; then exit 0; else exit $?; fi ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;
