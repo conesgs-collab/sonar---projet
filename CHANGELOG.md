@@ -6,6 +6,83 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.20.0-hardware-validation-complete] — 2026-09-15
+
+### Contexte
+Étape 6/6 du recentrage, dernier scénario : `malware`. Avec `boot-repair`
+et `data-recovery` déjà validés (v3.19.0), c'est le **3e sur 3**
+scénarios minimum exigés par `ROADMAP.md` — **étape 6 close**.
+
+Une tentative sur machine physique réelle (pas la VM) a été faite en
+premier, avec la vraie clé SONAR (`E:`, déployée le 2026-09-14) mise à
+jour pour l'occasion (SystemRescue + ClamAV copiés dessus, dossier
+`E:\TestMalware\` avec les 3 fichiers EICAR). Le démarrage physique a
+posé plus de difficultés que prévu (clavier, navigation) sans qu'on
+puisse établir clairement la cause avant d'abandonner cette voie pour
+la session de VM déjà en place — **non résolu**, à reprendre une
+prochaine fois si un test matériel physique complet du scénario reste
+souhaité. La clé physique reste équipée (ClamAV + EICAR dessus) pour
+cette prochaine tentative.
+
+### Testé — `malware` : SUCCÈS après plusieurs corrections en cascade
+Sur le même disque de test VM que les scénarios précédents (partition
+`SONARP2`, fichiers témoins déjà validés), 3 fichiers EICAR standard
+déposés hors-VM via WSL (`eicar.com`, `facture_suspecte.exe` — extension
+trompeuse, `sous_dossier/eicar_cache.scr` — sous-dossier + extension
+trompeuse). ClamAV livré à la VM via une image ISO de données
+(`sonar_data.iso`, générée avec `genisoimage`, attachée comme second
+lecteur — plus propre que de le re-télécharger depuis la VM, ça
+préserve la vérification SHA-256/GPG déjà faite au `--fetch`).
+
+Trois obstacles réels rencontrés et résolus dans l'ordre — chacun
+maintenant documenté dans la colonne `NOTES` du manifeste
+(`SONAR_FETCH_MANIFEST_TSV`, entrée `ClamAV`) pour que la prochaine
+tentative n'ait pas à les redécouvrir :
+1. **Espace insuffisant sur le système live** : l'extraction complète
+   du `.deb` (~300 Mo, essentiellement de la documentation) remplissait
+   l'overlay en RAM d'une VM à 2 Go — `No space left on device` en
+   plein milieu de `tar xf`. Corrigé en passant la VM à 4 Go de RAM
+   (redémarrage nécessaire, pas de correctif à chaud).
+2. **Chemin du binaire réel différent de l'hypothèse initiale** :
+   `usr/local/bin/clamscan`, pas `usr/bin/clamscan` comme documenté
+   jusqu'ici — trouvé via `find`, pas deviné.
+3. **Bibliothèque partagée introuvable puis base de signatures
+   absente** : `error while loading shared libraries: libclamav.so.12`
+   (corrigé avec `LD_LIBRARY_PATH=<extrait>/usr/local/lib`), puis un
+   premier scan "réussi" à 0 fichier scanné (base de signatures vide —
+   le paquet ne l'inclut pas). Corrigé avec `freshclam --datadir=...`
+   (téléchargement réseau depuis la VM) puis `clamscan --database=...`
+   pointé explicitement dessus (le chemin système par défaut,
+   `/usr/local/share/clamav`, n'existe pas hors d'une vraie
+   installation).
+
+**Résultat final : 3/3 fichiers EICAR détectés**, y compris les deux à
+extension trompeuse (`.exe`, `.scr`) et celui en sous-dossier — confirme
+que la détection se fait bien par signature de contenu, pas par nom ou
+emplacement.
+
+### Corrigé (documentation)
+- `SONAR_FETCH_MANIFEST_TSV`, entrée `ClamAV` : NOTES enrichies avec le
+  chemin réel du binaire et la séquence complète
+  `LD_LIBRARY_PATH`/`freshclam`/`--database` — évite de refaire ce
+  parcours de découverte la prochaine fois.
+
+### Non résolu
+- Démarrage physique réel de la clé sur machine physique : difficultés
+  rencontrées (clavier, navigation), cause non identifiée, abandonné
+  au profit de la VM pour cette session. La clé physique (`E:`) reste
+  équipée pour une prochaine tentative.
+
+### Testé (méta)
+Même limite que les scénarios précédents : manipulations interactives
+dans SystemRescue effectuées par l'opérateur humain (moi ne pouvant pas
+piloter une TUI/GUI à distance) ; accès disque physique brut à la vraie
+clé USB depuis une VM explicitement refusé par le mode auto de cet
+environnement (catégorie "Irreversible Local Destruction") — décision
+de sécurité respectée sans tentative de contournement, option laissée à
+l'utilisateur (exécuter la commande lui-même hors de cette session) non
+retenue cette fois par manque de temps/énergie.
+
 ## [3.19.0-hardware-validation-partial] — 2026-09-15
 
 ### Contexte

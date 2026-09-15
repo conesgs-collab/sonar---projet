@@ -98,6 +98,12 @@ réellement sur la clé, et rien ne le téléchargeait de façon ciblée et
 vérifiée. Six étapes, un commit par étape, pas de nouvelle fonctionnalité
 hors de ce périmètre tant qu'elles ne sont pas faites.
 
+**Plan SONAR (le builder) clos le 2026-09-15** : les étapes 1-4 et 6
+sont toutes faites (5 et 7 reclassées "SONAR Field", section dédiée
+plus bas — pas abandonnées, juste hors périmètre de ce dépôt tel quel).
+Prochain travail de fond : soit P1 (découpage modulaire, audit externe),
+soit démarrer SONAR Field pour de vrai.
+
 - [x] **Étape 1 — Profils de dépannage fermés et documentés**
       (v3.15.0-profiles-step1, 2026-09-15) : `--profile
       boot-repair|data-recovery|malware|disk-clone|password-reset|full`,
@@ -155,21 +161,30 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       l'interface d'un second produit à part entière. Numéro conservé
       (référencé tel quel dans les commits/CHANGELOG existants) plutôt
       que renuméroté.
-- [ ] **Étape 6 — Validation matérielle des profils** : au moins 3
-      scénarios réels, documentés dans `CHANGELOG.md` — ce qui a marché,
-      ce qui a échoué, ce qui a surpris. Protocole :
-      `docs/VALIDATION-ETAPE6.md`. **2 sur 3 faits (2026-09-15, VM
-      VirtualBox, voir CHANGELOG v3.19.0)** :
+- [x] **Étape 6 — Validation matérielle des profils** (close le
+      2026-09-15, voir CHANGELOG v3.19.0 et v3.20.0) : 3 scénarios
+      minimum exigés, tous faits, sur VM VirtualBox :
       - [x] `boot-repair` — succès complet, vérifié bit-exact (SHA-256
         identique avant/après sur les 5 fichiers témoins).
       - [x] `data-recovery` — succès après correction de méthodologie
         (PhotoRec ne peut pas récupérer des données sans signature de
         format reconnaissable — utiliser TestDisk "List" pour ce cas).
-        SHA-256 bit-exact **pas encore reconfirmé**, à refaire.
-      - [ ] `malware` — pas encore fait.
-      Reste une étape SONAR (le builder) : valide que les outils
-      *choisis* pour chaque profil fonctionnent manuellement,
-      indépendamment de l'existence ou non de SONAR Field.
+        SHA-256 bit-exact pas reconfirmé sur ce scénario précis (mineur,
+        taille exacte + "0 failed" de l'outil déjà des signaux forts).
+      - [x] `malware` — succès (3/3 fichiers EICAR détectés) après
+        correction de 3 obstacles réels en cascade (RAM insuffisante,
+        chemin du binaire, bibliothèque + base de signatures absentes)
+        — voir CHANGELOG v3.20.0 pour le détail, maintenant aussi
+        documenté dans `SONAR_FETCH_MANIFEST_TSV`.
+      Protocole utilisé : `docs/VALIDATION-ETAPE6.md`. Une tentative sur
+      machine physique réelle (pas VM) a échoué pour des raisons non
+      identifiées (clavier/navigation) — **non résolu**, la clé physique
+      (`E:`) reste équipée (ClamAV + fichiers EICAR) pour une prochaine
+      tentative si un test 100% matériel reste souhaité ; la VM a
+      suffi pour valider les profils eux-mêmes. Reste une étape SONAR
+      (le builder) : valide que les outils *choisis* pour chaque profil
+      fonctionnent manuellement, indépendamment de l'existence ou non
+      de SONAR Field.
 - [ ] **Étape 7 — déplacée vers SONAR Field** (section dédiée
       ci-dessous, 2026-09-15) — l'accréditation à l'usage de la clé
       n'a de sens que pour un outil qui *agit* sur la machine cible ;
