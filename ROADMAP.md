@@ -129,44 +129,70 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       terme : documenter explicitement que SONAR ne fournit pas de WinPE
       et que l'opérateur doit en fournir un — ne pas sauter cette étape
       en silence.
-- [ ] **Étape 5 — Menu orienté tâche** ("Boot cassé ? Récupération ?
-      Malware ? Clone ?") plutôt qu'orienté fichier — probablement un
-      script dans l'environnement de boot embarqué (étape 3), Ventoy/GRUB
-      seul ne permettant pas facilement ce branchement.
+- [ ] **Étape 5 — déplacée vers SONAR Field** (section dédiée
+      ci-dessous, 2026-09-15). Le menu orienté tâche n'est plus vu comme
+      un script annexe dans l'environnement de boot de SONAR, mais comme
+      l'interface d'un second produit à part entière. Numéro conservé
+      (référencé tel quel dans les commits/CHANGELOG existants) plutôt
+      que renuméroté.
 - [ ] **Étape 6 — Validation matérielle des profils** : au moins 3
       scénarios réels (boot Windows cassé réparé via `boot-repair`,
       fichier supprimé récupéré via `data-recovery`, machine infectée
       nettoyée via `malware`), documentés dans `CHANGELOG.md` — ce qui a
       marché, ce qui a échoué, ce qui a surpris. Dépend de l'accès
-      matériel de l'opérateur.
-- [ ] **Étape 7 — Accréditation à l'usage de la clé (identification au
-      démarrage de l'environnement de dépannage)** : demande formulée le
-      2026-09-15, ajoutée au plan plutôt qu'implémentée dans la foulée
-      (règle "pas de nouvelle fonctionnalité avant les étapes 1-3" du
-      recentrage lui-même). Principe retenu : ne pas inventer un second
-      système d'identité — réutiliser le RBAC existant
-      (`Viewer/Technician/Senior/Forensic/Admin/Expert`, jetons
-      nominatifs signés) qui aujourd'hui ne gouverne que le script de
-      build, et l'étendre à l'environnement de dépannage lui-même. Un
-      technicien qui démarre la clé sur la machine du client s'identifie
-      (jeton/PIN) et n'accède qu'aux outils/profils correspondant à son
-      niveau d'accréditation.
-      - **Dépend de l'étape 5** (menu orienté tâche) : c'est ce menu,
-        dans l'environnement de boot embarqué (étape 3, SystemRescue),
-        qui porterait l'invite d'identification avant d'afficher les
-        outils autorisés — pas Ventoy/GRUB lui-même, qui ne sait pas
-        faire ce genre de logique.
-      - **Windows (WinPE)** : bloqué tant que l'étape 4 n'est pas résolue
-        (ou explicitement documentée comme non fournie).
-      - **macOS** : limite déjà actée dans ce document (P2, "Distinguer
-        Intel et Apple Silicon... ne pas prétendre à un remplacement
-        générique de la récupération Apple par ISO") — SONAR ne pilote
-        pas le boot de la Recovery Apple. Décision retenue : pas de vrai
-        verrou au démarrage sur macOS, seulement un script SONAR lancé
-        *après coup* une fois en Recovery, qui peut demander
-        l'identification à ce moment-là. Pas un vrai "gate" comme sur
-        Windows/Linux — à documenter clairement pour ne pas survendre
-        la parité entre OS.
+      matériel de l'opérateur. Reste une étape SONAR (le builder) :
+      valide que les outils *choisis* pour chaque profil fonctionnent
+      manuellement, indépendamment de l'existence ou non de SONAR Field.
+- [ ] **Étape 7 — déplacée vers SONAR Field** (section dédiée
+      ci-dessous, 2026-09-15) — l'accréditation à l'usage de la clé
+      n'a de sens que pour un outil qui *agit* sur la machine cible ;
+      elle devient le mécanisme d'identification de SONAR Field, pas
+      une extension du RBAC de build de SONAR. Numéro conservé pour la
+      même raison qu'étape 5.
+
+## SONAR Field — second produit (décision du 2026-09-15)
+
+SONAR (ce dépôt, `sonar_master.sh`) **construit la clé et trace son
+origine** — Ventoy, manifeste, filigrane, RBAC, hashchain. Il ne répare
+rien lui-même ; les étapes 1-6 ci-dessus ne font que curer, vérifier et
+organiser ce qui va *sur* la clé.
+
+**SONAR Field** est un second produit : une fois la clé bootée sur la
+machine cible, il orchestre la réparation selon le profil choisi,
+journalise ce qu'il fait, et laisse la clé comme trace de
+l'intervention. Il ne remplace pas SONAR, il en dépend (une clé qu'il
+n'a pas construite lui-même n'a ni profils ni format d'audit à
+réutiliser).
+
+- **Ce qui est partagé, concrètement (pas juste en principe)** :
+  - Le même `SONAR_PROFILES_TSV`, copié sur la clé au build — les deux
+    outils restent synchronisés par construction, pas par discipline
+    de maintenance parallèle.
+  - Le même format de hashchain d'audit que `sonar_master.sh` — un cas
+    (préparation + intervention) se relit comme une seule histoire
+    continue, pas deux journaux à recouper à la main.
+  - La même discipline de confirmation : rien de destructif sans un
+    accord explicite et tracé, mêmes principes que
+    `SONAR_HARDWARE_RISK_ACK`/`--accept-hardware-risk` côté build.
+  - La même règle de fond : ne jamais rien faire qu'on ne puisse pas
+    expliquer après coup — non-destructif par défaut, journalisé,
+    honnête sur ses limites.
+- **Ce qui n'est PAS partagé** : le rôle. `sonar_master.sh` tourne en
+  root sur la machine du technicien, avec RBAC complet (jetons signés,
+  révocation en ligne). `sonar_field.sh` tourne sur la machine du
+  client, potentiellement hors-ligne — un jeton signé révocable à
+  distance n'a pas de sens dans ce contexte. Mécanisme d'identification
+  à définir séparément (PIN local le plus probable), voir ancienne
+  étape 7 ci-dessus pour le contexte de la demande.
+- **Nom retenu** : *SONAR Field*, fichier `sonar_field.sh`, même dépôt,
+  même philosophie un-seul-fichier (contrainte réelle : doit tourner
+  dans un rescue Linux minimal, sans gestionnaire de paquets fiable).
+- **Séquencement** : documenté maintenant, **implémentation non
+  commencée** — bloquée sur l'étape 3 (SystemRescue) par nature : on ne
+  peut pas écrire l'interface d'un environnement de boot qui n'existe
+  pas encore sur la clé. Reprend l'ancien contenu des étapes 5
+  (menu orienté tâche) et 7 (accréditation) ci-dessus, qui restent la
+  référence du besoin fonctionnel.
 
 ## P2 — Maturité produit
 
