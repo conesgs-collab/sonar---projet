@@ -133,6 +133,34 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       nettoyée via `malware`), documentés dans `CHANGELOG.md` — ce qui a
       marché, ce qui a échoué, ce qui a surpris. Dépend de l'accès
       matériel de l'opérateur.
+- [ ] **Étape 7 — Accréditation à l'usage de la clé (identification au
+      démarrage de l'environnement de dépannage)** : demande formulée le
+      2026-09-15, ajoutée au plan plutôt qu'implémentée dans la foulée
+      (règle "pas de nouvelle fonctionnalité avant les étapes 1-3" du
+      recentrage lui-même). Principe retenu : ne pas inventer un second
+      système d'identité — réutiliser le RBAC existant
+      (`Viewer/Technician/Senior/Forensic/Admin/Expert`, jetons
+      nominatifs signés) qui aujourd'hui ne gouverne que le script de
+      build, et l'étendre à l'environnement de dépannage lui-même. Un
+      technicien qui démarre la clé sur la machine du client s'identifie
+      (jeton/PIN) et n'accède qu'aux outils/profils correspondant à son
+      niveau d'accréditation.
+      - **Dépend de l'étape 5** (menu orienté tâche) : c'est ce menu,
+        dans l'environnement de boot embarqué (étape 3, SystemRescue),
+        qui porterait l'invite d'identification avant d'afficher les
+        outils autorisés — pas Ventoy/GRUB lui-même, qui ne sait pas
+        faire ce genre de logique.
+      - **Windows (WinPE)** : bloqué tant que l'étape 4 n'est pas résolue
+        (ou explicitement documentée comme non fournie).
+      - **macOS** : limite déjà actée dans ce document (P2, "Distinguer
+        Intel et Apple Silicon... ne pas prétendre à un remplacement
+        générique de la récupération Apple par ISO") — SONAR ne pilote
+        pas le boot de la Recovery Apple. Décision retenue : pas de vrai
+        verrou au démarrage sur macOS, seulement un script SONAR lancé
+        *après coup* une fois en Recovery, qui peut demander
+        l'identification à ce moment-là. Pas un vrai "gate" comme sur
+        Windows/Linux — à documenter clairement pour ne pas survendre
+        la parité entre OS.
 
 ## P2 — Maturité produit
 
