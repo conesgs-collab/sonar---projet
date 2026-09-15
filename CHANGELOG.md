@@ -6,6 +6,54 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.13.0-catalog-apt-download] — 2026-09-15
+
+### Contexte
+L'auteur pensait que le catalogue de référence (981 outils/73 domaines,
+`docs/CATALOG.md`) déclenchait un téléchargement automatique — ce n'est
+explicitement pas le cas (voir la note "Ce que ce catalogue est — et
+n'est pas" dans ce même document). Décision, après clarification : au
+lieu du pipeline IA existant (`--ollama-audit`/`--ai-download`, qui
+demande Ollama et reste "best-effort"), construire un second chemin
+sans IA, basé sur le gestionnaire de paquets `apt` — le seul qui ait du
+sens à intégrer directement dans le script, puisque `preflight_final`
+exige déjà que `sonar_master.sh` tourne en root sous Linux (un
+équivalent winget/chocolatey ne s'exécuterait jamais dans ce contexte).
+
+### Ajouté
+- **`--catalog-download-resolve`** : fait correspondre chaque cellule
+  NAME du catalogue (éclatée sur les virgules — beaucoup de cellules
+  listent plusieurs outils, ex. "Ubuntu, Debian, Fedora...") aux paquets
+  `apt` réellement disponibles (`apt-cache pkgnames`), plus une petite
+  table d'alias pour les cas connus où le nom diffère (VS Code → `code`,
+  7-Zip → `p7zip-full`, Docker → `docker.io`...). Écrit un rapport complet
+  DOMAIN/CATALOG_NAME/APT_PACKAGE/STATUS — aucun téléchargement.
+- **`--catalog-download-dry-run`** / **`--catalog-download`** : résout
+  puis télécharge (sans installer, `apt-get download`) chaque paquet
+  résolu vers `SOURCE_DIR/Portable/AptPackages`.
+- Pas d'IA, pas d'URL codée en dur à maintenir — la correspondance se
+  fait sur l'index apt local, donc elle reste juste aussi longtemps que
+  l'index l'est, sans intervention.
+
+### Couverture — testé en conditions réelles (WSL2 Ubuntu 26.04)
+- **258/1003 entrées catalogue résolues** (~26 %) → **187 paquets apt
+  uniques téléchargés, 0 échec, 696 Mo** — y compris des outils des
+  domaines ajoutés récemment (`adb` pour la téléphonie mobile, `autopsy`
+  pour le forensique).
+- La couverture partielle est **attendue, pas un défaut** : une grande
+  partie du catalogue est du commercial/sous licence (Adobe, JetBrains,
+  Cellebrite UFED...) ou des fonctionnalités intégrées à l'OS plutôt que
+  des téléchargements discrets (Active Directory, PowerShell...) — rien
+  ne peut légalement ou techniquement les récupérer automatiquement,
+  quelle que soit la méthode. Le rapport de résolution nomme chaque
+  entrée non résolue, donc l'écart reste visible plutôt que masqué.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
+`--self-test` (0 FAIL). Pipeline complet validé en conditions réelles
+(pas seulement en isolation) : résolution + téléchargement effectif de
+187 paquets sans échec.
+
 ## [3.12.0-first-successful-boot] — 2026-09-15
 
 ### Contexte

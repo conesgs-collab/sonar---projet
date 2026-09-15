@@ -904,6 +904,15 @@ Commandes indépendantes (à la place de --disk):
   --ollama-audit [--queue F] Audit du catalogue via Ollama (lecture seule)
   --ai-download [--queue F]  Résolution + téléchargement vérifié via Ollama
   --ai-download-dry-run      Comme --ai-download, sans téléchargement réel
+  --catalog-download-resolve Fait correspondre le catalogue aux paquets apt
+                                disponibles (Debian/Ubuntu), sans télécharger —
+                                rapport DOMAIN/CATALOG_NAME/APT_PACKAGE/STATUS
+  --catalog-download-dry-run Comme --catalog-download, sans téléchargement réel
+  --catalog-download          Télécharge (sans installer) chaque paquet apt
+                                résolu vers SOURCE_DIR/Portable/AptPackages —
+                                pas d'IA, pas d'URL codée en dur ; couverture
+                                partielle par nature (rien ne peut auto-
+                                télécharger un logiciel commercial/sous licence)
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -3161,6 +3170,170 @@ sonar_build_ai_queue_from_catalogue() {
     echo "[SONAR] Entrées catalogue: $(($(wc -l < "$out") - 1))"
 }
 
+# === SONAR CATALOG APT DOWNLOAD ENGINE V1 ===
+# Real, non-AI automatic download of the reference catalog, using apt's
+# own live package index instead of an LLM (--ollama-audit/--ai-download)
+# or a hand-maintained table of download URLs (which goes stale the
+# moment a project renames a file or moves host). apt is the only
+# package manager it makes sense to target here: preflight_final
+# requires this script to run as root on Linux, so a Windows winget/
+# choco integration would never execute in this script's own runtime —
+# apt matches where the script actually runs.
+#
+# Coverage is necessarily partial and that is expected, not a bug: a
+# large share of the 981-entry catalogue is commercial/licensed software
+# behind an account or EULA (Adobe, JetBrains, Cellebrite UFED...), or an
+# OS-builtin feature rather than a discrete download (Active Directory,
+# PowerShell...) — nothing can legally or technically auto-fetch those,
+# regardless of method. The resolve report names every entry that didn't
+# match, so the gap is visible instead of silently assumed away.
+SONAR_CATALOG_RESOLVE_REPORT="${SONAR_CATALOG_RESOLVE_REPORT:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/CATALOG_APT_RESOLVE.tsv}"
+SONAR_CATALOG_DOWNLOAD_DIR="${SONAR_CATALOG_DOWNLOAD_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/Portable/AptPackages}"
+
+# sonar_catalog_resolve_apt: matches every catalogue NAME cell (split on
+# commas — many cells list several tools at once, e.g. "Ubuntu, Debian,
+# Fedora...") against `apt-cache pkgnames`, plus a small curated alias
+# table for well-known tools whose apt package name doesn't match their
+# catalogue name (VS Code -> code, 7-Zip -> p7zip-full, Docker ->
+# docker.io, ...). Writes a full DOMAIN/CATALOG_NAME/APT_PACKAGE/STATUS
+# report — never downloads anything itself.
+sonar_catalog_resolve_apt() {
+    command -v apt-cache >/dev/null 2>&1 || { echo "[SONAR][ERROR] apt-cache introuvable — nécessite une distribution basée Debian/Ubuntu." >&2; return 127; }
+    command -v python3 >/dev/null 2>&1 || { echo "[SONAR][ERROR] python3 requis." >&2; return 127; }
+    sonar_install_embedded_catalogue
+    mkdir -p "$(dirname "$SONAR_CATALOG_RESOLVE_REPORT")"
+    local pkgnames_tmp
+    pkgnames_tmp="$(mktemp)"
+    apt-cache pkgnames > "$pkgnames_tmp" 2>/dev/null || true
+    python3 - "$SONAR_CATALOGUE_EMBEDDED" "$pkgnames_tmp" "$SONAR_CATALOG_RESOLVE_REPORT" <<'PY'
+import csv, re, sys
+
+catalogue_path, pkgnames_path, out_path = sys.argv[1:4]
+
+with open(pkgnames_path, encoding="utf-8", errors="replace") as f:
+    apt_pkgs = set(line.strip() for line in f if line.strip())
+
+# Small, deliberately non-exhaustive alias table: catalogue name (once
+# normalized) -> real apt package name, for well-known cases where they
+# differ. Anything not listed here just falls through to exact/normalized
+# matching against apt_pkgs — this table exists to raise coverage on
+# common tools, not to be a complete mapping.
+ALIASES = {
+    "vs-code": "code", "visual-studio-code": "code",
+    "7-zip": "p7zip-full", "7zip": "p7zip-full",
+    "docker": "docker.io",
+    "node.js": "nodejs",
+    "python": "python3",
+    "ssh": "openssh-client", "openssh": "openssh-client",
+    "kubernetes": "kubectl",
+    "postgresql": "postgresql",
+    "mysql": "mysql-server", "mariadb": "mariadb-server",
+    "nginx": "nginx",
+    "apache": "apache2", "apache-http-server": "apache2",
+    "sqlite": "sqlite3",
+    "vim": "vim", "neovim": "neovim",
+    "putty": "putty",
+    "openvpn": "openvpn", "wireguard": "wireguard",
+    "gimp": "gimp",
+    "inkscape": "inkscape",
+    "blender": "blender",
+    "audacity": "audacity",
+    "obs-studio": "obs-studio", "obs": "obs-studio",
+    "handbrake": "handbrake-cli",
+    "ffmpeg": "ffmpeg",
+    "rsync": "rsync",
+    "netcat": "netcat-openbsd",
+    "john-the-ripper": "john", "hydra": "hydra",
+    "hashcat": "hashcat",
+    "sleuth-kit": "sleuthkit", "the-sleuth-kit": "sleuthkit",
+    "guymager": "guymager",
+    "bulk-extractor": "bulk-extractor",
+    "ddrescue": "gddrescue",
+    "clamav": "clamav",
+    "rkhunter": "rkhunter",
+    "openjdk": "default-jdk", "java": "default-jdk",
+}
+
+
+def normalize(s: str) -> str:
+    s = s.lower().strip()
+    s = re.sub(r"\([^)]*\)", "", s)          # drop parenthetical notes
+    s = re.sub(r"[^a-z0-9+.\- ]", "", s)
+    s = re.sub(r"\s+", "-", s).strip("-")
+    return s
+
+
+rows = []
+with open(catalogue_path, encoding="utf-8", newline="") as f:
+    reader = csv.reader(f, delimiter="\t")
+    next(reader, None)  # header
+    for row in reader:
+        if len(row) < 3:
+            continue
+        domain = row[0].strip()
+        for cand in (c.strip() for c in row[2].split(",")):
+            if not cand:
+                continue
+            norm = normalize(cand)
+            pkg = ""
+            if norm in apt_pkgs:
+                pkg = norm
+            elif ALIASES.get(norm) in apt_pkgs:
+                pkg = ALIASES[norm]
+            status = "RESOLVED" if pkg else "UNRESOLVED"
+            rows.append((domain, cand, pkg, status))
+
+with open(out_path, "w", encoding="utf-8", newline="") as f:
+    w = csv.writer(f, delimiter="\t", lineterminator="\n")
+    w.writerow(["DOMAIN", "CATALOG_NAME", "APT_PACKAGE", "STATUS"])
+    w.writerows(rows)
+PY
+    rm -f "$pkgnames_tmp"
+    local total resolved
+    total=$(($(wc -l < "$SONAR_CATALOG_RESOLVE_REPORT") - 1))
+    resolved=$(awk -F'\t' 'NR>1 && $4=="RESOLVED"' "$SONAR_CATALOG_RESOLVE_REPORT" | wc -l)
+    echo "[SONAR] Résolution catalogue -> apt : ${resolved}/${total} entrées résolues."
+    echo "[SONAR] Rapport: $SONAR_CATALOG_RESOLVE_REPORT"
+    sonar_audit "CATALOG_APT_RESOLVED" "total=${total};resolved=${resolved}"
+}
+
+# sonar_catalog_download_final [--dry-run]: sonar_catalog_resolve_apt()
+# then `apt-get download` (fetches the .deb, does NOT install it — same
+# "touch the running system as little as possible" posture as the rest
+# of SONAR's operational layer) for every uniquely RESOLVED package,
+# into SOURCE_DIR/Portable/AptPackages. --dry-run stops after the
+# resolve report, same convention as --ai-download-dry-run.
+sonar_catalog_download_final() {
+    local dry_run=false
+    [[ "${1:-}" == "--dry-run" ]] && dry_run=true
+    sonar_catalog_resolve_apt || return $?
+    if [[ "$dry_run" == "true" ]]; then
+        echo "[SONAR] --dry-run : aucun téléchargement effectué, voir le rapport de résolution."
+        return 0
+    fi
+    if ! apt-get update >/dev/null 2>&1; then
+        echo "[SONAR][WARN] 'apt-get update' a échoué (réseau ou permissions) — le cache local existant, potentiellement périmé, sera utilisé." >&2
+    fi
+    mkdir -p "$SONAR_CATALOG_DOWNLOAD_DIR"
+    local pkgs_tmp total ok=0 fail=0 pkg
+    pkgs_tmp="$(mktemp)"
+    awk -F'\t' 'NR>1 && $4=="RESOLVED" {print $3}' "$SONAR_CATALOG_RESOLVE_REPORT" | sort -u > "$pkgs_tmp"
+    total=$(wc -l < "$pkgs_tmp")
+    echo "[SONAR] ${total} paquet(s) apt unique(s) à télécharger vers ${SONAR_CATALOG_DOWNLOAD_DIR}"
+    while IFS= read -r pkg; do
+        [[ -z "$pkg" ]] && continue
+        if (cd "$SONAR_CATALOG_DOWNLOAD_DIR" && apt-get download "$pkg" >/dev/null 2>&1); then
+            ok=$((ok+1))
+        else
+            fail=$((fail+1))
+            echo "[SONAR][WARN] Échec du téléchargement: $pkg" >&2
+        fi
+    done < "$pkgs_tmp"
+    rm -f "$pkgs_tmp"
+    echo "[SONAR] Téléchargement terminé : ${ok} réussi(s), ${fail} échec(s) sur ${total}."
+    sonar_audit "CATALOG_APT_DOWNLOADED" "total=${total};ok=${ok};fail=${fail}"
+}
+
 
 # === SONAR AI DRY-RUN REPORT ENGINE V1 ===
 SONAR_AI_REPORT_DIR="${SONAR_AI_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/AI_REPORT}"
@@ -3360,7 +3533,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.12.0-first-successful-boot"
+SONAR_VERSION="3.13.0-catalog-apt-download"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4565,6 +4738,9 @@ case "${1:-}" in
         shift
         if sonar_ai_downloader_main --dry-run "$@"; then exit 0; else exit $?; fi
         ;;
+    --catalog-download-resolve) if sonar_catalog_resolve_apt; then exit 0; else exit $?; fi ;;
+    --catalog-download-dry-run) if sonar_catalog_download_final --dry-run; then exit 0; else exit $?; fi ;;
+    --catalog-download) if sonar_catalog_download_final; then exit 0; else exit $?; fi ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;

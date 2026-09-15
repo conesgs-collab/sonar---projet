@@ -36,6 +36,11 @@ git config core.hooksPath hooks/
 # Après une acquisition forensique, générer la chaîne de possession
 ./sonar_master.sh --forensic-chain-of-custody <DOSSIER_PREUVES> "DOSSIER-2026-042"
 
+# Télécharger (sans installer) tout ce que le catalogue résout via apt —
+# pas d'IA, couverture partielle par nature (voir CHANGELOG.md v3.13.0)
+./sonar_master.sh --catalog-download-resolve   # rapport seul, rien à télécharger
+./sonar_master.sh --catalog-download           # télécharge vers SOURCE_DIR/Portable/AptPackages
+
 # Voir toutes les commandes disponibles
 ./sonar_master.sh --help
 ```
