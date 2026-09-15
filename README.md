@@ -93,6 +93,9 @@ mais l'authenticité n'est pas confirmable.
 ## Avant tout déploiement réel sur disque
 
 Guide détaillé, étape par étape : [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+**SONAR ne fournit pas de WinPE** (outillage Windows ADK, ne peut pas
+être piloté par ce script Linux+root) — voir [`docs/WINPE.md`](docs/WINPE.md)
+pour pourquoi et comment ajouter le vôtre.
 Base de connaissance de référence (981 outils, 73 domaines — **pas** la
 source de vérité du déploiement, voir `--profile` ci-dessus) :
 [`docs/CATALOG.md`](docs/CATALOG.md).

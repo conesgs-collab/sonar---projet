@@ -84,6 +84,13 @@ ceux des profils `--profile X`."
    Ventoy voie ces ISO (son `VTOY_DEFAULT_SEARCH_ROOT` scanne `/ISO`
    récursivement par défaut).
 
+> **Réparation côté Windows (bootrec/bcdedit/DISM)** : nécessite un
+> WinPE, que SONAR ne construit pas (outillage Windows ADK, incompatible
+> avec ce script Linux+root) — voir [`docs/WINPE.md`](WINPE.md) pour
+> pourquoi et comment ajouter le vôtre. Le même mécanisme de copie
+> récursive ci-dessus s'applique : déposez votre ISO dans
+> `SOURCE_DIR/ISO/WinPE/` avant `--disk`.
+
 ---
 
 ## Étape 1 — Brancher la clé USB et l'identifier

@@ -134,13 +134,21 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       Étape 0bis) plutôt que codé en dur, pour laisser `--disk` offline
       par défaut (pas de téléchargement réseau surprise pendant un
       déploiement).
-- [ ] **Étape 4 — WinPE via Windows ADK** : la pièce qui différencie
-      MediCat/Hiren's/Strelec. Techniquement impossible à piloter depuis
-      ce script (ADK est un outillage Windows uniquement ; le script
-      exige Linux+root via `preflight_final`). Si trop lourd à court
-      terme : documenter explicitement que SONAR ne fournit pas de WinPE
-      et que l'opérateur doit en fournir un — ne pas sauter cette étape
-      en silence.
+- [x] **Étape 4 — WinPE via Windows ADK, documentée comme non fournie**
+      (v3.18.0-winpe-step4-documented-gap, 2026-09-15) : confirmé
+      techniquement impossible à piloter depuis ce script (ADK est un
+      outillage Windows uniquement ; le script exige Linux+root via
+      `preflight_final` — les deux mondes ne se recoupent pas, ce n'est
+      pas un manque d'effort). Suivant l'instruction explicite de
+      l'auteur ("documenter plutôt que sauter en silence") :
+      `docs/WINPE.md` explique pourquoi, ce qui en dépend
+      (réparation côté Windows du profil `boot-repair`), et comment
+      l'opérateur construit et ajoute son propre WinPE (`copype` +
+      `MakeWinPEMedia`, puis dépôt dans `SOURCE_DIR/ISO/WinPE/` — même
+      mécanisme de copie récursive que le reste). `--profile
+      boot-repair`/`full` affichent désormais cette limite directement
+      ("LIMITE CONNUE"), pas seulement dans un fichier séparé qu'on
+      peut manquer.
 - [ ] **Étape 5 — déplacée vers SONAR Field** (section dédiée
       ci-dessous, 2026-09-15). Le menu orienté tâche n'est plus vu comme
       un script annexe dans l'environnement de boot de SONAR, mais comme

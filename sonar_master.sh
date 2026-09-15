@@ -3436,6 +3436,17 @@ sonar_profile_scenario() {
     esac
 }
 
+# sonar_profile_caveat PROFILE -> une limite connue et honnete a afficher
+# avec le profil (chaine vide si aucune). Pas une erreur : juste ce que ce
+# profil NE couvre PAS, pour ne pas laisser croire a une couverture totale.
+sonar_profile_caveat() {
+    case "$1" in
+        boot-repair|full)
+            echo "Ce profil ne couvre que la reparation cote Linux (SystemRescue). La reparation cote Windows (bootrec/bcdedit/DISM) exige un WinPE, que SONAR ne construit pas — voir docs/WINPE.md." ;;
+        *) : ;;
+    esac
+}
+
 # sonar_profile_tools PROFILE -> lines "TOOL\tWHY" (dedupliquees pour "full").
 sonar_profile_tools() {
     local profile="${1:-}"
@@ -3479,12 +3490,19 @@ sonar_profile_doc() {
         [[ -z "$tool" ]] && continue
         printf -- '  - %s\n      -> %s\n' "$tool" "$why"
     done <<< "$tools"
+    local caveat
+    caveat="$(sonar_profile_caveat "$profile")"
+    if [[ -n "$caveat" ]]; then
+        echo
+        echo "LIMITE CONNUE: ${caveat}"
+    fi
     echo
     echo "NOTE: le catalogue de 981 outils embarque (--help pour SONAR_CATALOGUE_EMBEDDED)"
     echo "      reste une base de connaissance consultable ; ce profil, pas ce catalogue,"
     echo "      decide de ce qui va reellement sur la cle."
-    echo "NOTE: telechargement verifie (--fetch ${profile}) : etape 2 de la feuille de"
-    echo "      route, pas encore implementee dans cette version — voir ROADMAP.md."
+    echo "NOTE: --fetch ${profile} telecharge et verifie (SHA-256 contre manifeste scelle)"
+    echo "      les outils de ce profil — necessite --fetch-manifest-seal (role VAULT) au"
+    echo "      prealable. Voir docs/DEPLOYMENT.md, Etape 0bis."
     sonar_audit "PROFILE_DOC_VIEWED" "profile=${profile}"
 }
 
@@ -3853,7 +3871,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.17.0-boot-env-step3"
+SONAR_VERSION="3.18.0-winpe-step4-documented-gap"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4199,6 +4217,12 @@ sonar_self_test_v2() {
             printf 'PASS\tProfile "full" is the union of all profiles\n'
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))
+        fi
+        _full_out="$("$self" --profile boot-repair 2>/dev/null)"
+        if grep -q 'LIMITE CONNUE' <<<"${_full_out}" && grep -q 'WinPE' <<<"${_full_out}"; then
+            printf 'PASS\tboot-repair profile discloses the WinPE gap (docs/WINPE.md)\n'
+        else
+            printf 'FAIL\tboot-repair profile does not disclose the WinPE gap\n'; errors=$((errors+1))
         fi
         grep -q '^SONAR_FETCH_MANIFEST_TSV=' "$self" && printf 'PASS\tFetch manifest module present\n' || { printf 'FAIL\tFetch manifest module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_fetch_profile() {' "$self" && printf 'PASS\tFetch profile function present\n' || { printf 'FAIL\tFetch profile function missing\n'; errors=$((errors+1)); }

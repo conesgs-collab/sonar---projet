@@ -6,6 +6,49 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.18.0-winpe-step4-documented-gap] — 2026-09-15
+
+### Contexte
+Étape 4/6 du recentrage : WinPE via Windows ADK, "la pièce qui
+différencie MediCat/Hiren's BootCD/Strelec" selon les mots de l'auteur.
+Confirmé, comme anticipé dès la formulation du plan initial : construire
+un WinPE demande le Windows ADK (`copype.cmd`, `MakeWinPEMedia.cmd`,
+DISM), un outillage qui n'existe que sous Windows, alors que
+`sonar_master.sh` exige de tourner en root sous Linux
+(`preflight_final`). Ce n'est pas un manque d'effort d'implémentation —
+les deux mondes ne se recoupent pas, il n'existe littéralement pas de
+chemin où ce script piloterait cet outillage. Instruction explicite de
+l'auteur pour ce cas précis : "documenter explicitement que SONAR ne
+fournit pas de WinPE et que l'opérateur doit en fournir un" plutôt que
+de sauter l'étape en silence.
+
+### Ajouté (documentation, aucune tentative d'implémentation)
+- **`docs/WINPE.md`** (nouveau) : explique pourquoi c'est impossible
+  depuis ce script, ce qui en dépend concrètement (la réparation côté
+  Windows du profil `boot-repair` — `bootrec`/`bcdedit`/`DISM` — reste
+  hors de portée sans WinPE ; `boot-repair` couvre déjà la réparation
+  côté Linux via SystemRescue, donc reste utile mais partiel), le guide
+  pas-à-pas pour que l'opérateur construise le sien (ADK + add-on WinPE,
+  `copype amd64 <dossier>`, `MakeWinPEMedia /iso <dossier>
+  <fichier.iso>`), comment l'ajouter à une clé SONAR (dépôt dans
+  `SOURCE_DIR/ISO/WinPE/` — même mécanisme de copie récursive que
+  `--fetch`, aucune commande SONAR spécifique), et pourquoi une
+  distribution d'un WinPE pré-construit dans ce dépôt a été rejetée
+  (licence : un WinPE embarque des composants Microsoft sous licence
+  propre à chaque poste de build).
+- **`sonar_profile_caveat()`** (`sonar_master.sh`) : les profils
+  `boot-repair` et `full` affichent désormais une section "LIMITE
+  CONNUE" directement dans `--profile <nom>`, pas seulement dans un
+  fichier séparé qu'un opérateur pressé pourrait manquer.
+- `README.md`/`docs/DEPLOYMENT.md` : pointeurs explicites vers
+  `docs/WINPE.md` à l'endroit où l'opérateur prépare son `--source`.
+- Un test de régression `--self-test` : confirme que `--profile
+  boot-repair` mentionne bien la limite WinPE dans sa sortie.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit`,
+`--self-test` (0 FAIL, nouveau test inclus) sous WSL2 Ubuntu.
+
 ## [3.17.0-boot-env-step3] — 2026-09-15
 
 ### Contexte
