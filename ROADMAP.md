@@ -223,18 +223,53 @@ réutiliser).
   root sur la machine du technicien, avec RBAC complet (jetons signés,
   révocation en ligne). `sonar_field.sh` tourne sur la machine du
   client, potentiellement hors-ligne — un jeton signé révocable à
-  distance n'a pas de sens dans ce contexte. Mécanisme d'identification
-  à définir séparément (PIN local le plus probable), voir ancienne
-  étape 7 ci-dessus pour le contexte de la demande.
+  distance n'a pas de sens dans ce contexte.
 - **Nom retenu** : *SONAR Field*, fichier `sonar_field.sh`, même dépôt,
   même philosophie un-seul-fichier (contrainte réelle : doit tourner
   dans un rescue Linux minimal, sans gestionnaire de paquets fiable).
-- **Séquencement** : documenté maintenant, **implémentation non
-  commencée** — bloquée sur l'étape 3 (SystemRescue) par nature : on ne
-  peut pas écrire l'interface d'un environnement de boot qui n'existe
-  pas encore sur la clé. Reprend l'ancien contenu des étapes 5
-  (menu orienté tâche) et 7 (accréditation) ci-dessus, qui restent la
-  référence du besoin fonctionnel.
+
+### v1 implémentée (2026-09-15, voir CHANGELOG)
+
+Étape 3 (SystemRescue) étant faite, l'interface a pu être écrite pour de
+vrai — plus besoin d'attendre :
+
+- **`sonar_field.sh`** généré et déposé sur la clé par
+  `copy_payload_final` (`Scripts/sonar_field.sh`), avec les profils
+  exportés en TSV (`MANIFEST/PROFILES.tsv`,
+  `MANIFEST/PROFILES_SCENARIOS.tsv`) — mêmes données que `--profile`,
+  pas dupliquées à la main.
+- **Identification : un seul PIN partagé** (`--field-pin-set <PIN>`,
+  optionnel — sans PIN configuré, SONAR Field le dit explicitement au
+  lieu de prétendre être verrouillé). **Pas encore différencié par
+  niveau d'accréditation** (Technician/Senior/Admin chacun avec des
+  profils différents) — c'est la partie de l'ancienne étape 7 qui reste
+  à faire ; v1 répond à "qui a touché la clé", pas encore à "qui a le
+  droit de faire quoi".
+- **Menu orienté tâche** : liste les 6 profils avec leur scénario,
+  affiche pour le profil choisi les outils + pourquoi + où ils se
+  trouvent sur la clé (cherche dans `ISO/`/`Portable/`, où `--fetch` les
+  dépose) — **ne lance jamais rien automatiquement** (cohérent avec la
+  règle de confirmation : le technicien exécute lui-même les commandes
+  affichées, comme fait manuellement pendant l'étape 6).
+- **Journal** : `Field-Logs/{audit,hashchain}.log` sur la clé, même
+  format que `sonar_master.sh` (accès accordé/refusé, profil consulté,
+  note d'intervention en texte libre saisie par le technicien).
+- Testé : roundtrip génération + `bash -n` + smoke test en `--self-test`,
+  et un scénario complet manuel (mauvais PIN×3 → refus journalisé, bon
+  PIN → accès + identité + menu + note, journal vérifié).
+
+### Pas encore fait
+
+- Accréditation par niveau (voir ci-dessus) — v2.
+- Auto-détection robuste de la partition clé (v1 cherche sous
+  `/mnt`/`/media`/`/run/media` ou prend un chemin en argument — pas de
+  scan `lsblk` par label/contenu).
+- Lancement effectif des outils (v1 guide, ne lance jamais) — resterait
+  cohérent avec la discipline de confirmation même si automatisé un jour
+  (jamais sans accord explicite tracé).
+- Validation sur un vrai boot SystemRescue (fait manuellement pendant
+  l'étape 6 pour les *outils* ; `sonar_field.sh` lui-même pas encore
+  testé en conditions réelles sur la clé bootée, seulement en local).
 
 ## P2 — Maturité produit
 

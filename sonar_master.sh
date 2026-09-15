@@ -140,6 +140,7 @@ SONAR_POLICY_FILE="${SONAR_POLICY_FILE:-${SONAR_SECURITY_DIR}/Policies/policy.ts
 SONAR_AUDIT_LOG="${SONAR_AUDIT_LOG:-${SONAR_SECURITY_DIR}/Logs/audit.log}"
 SONAR_HASHCHAIN_LOG="${SONAR_HASHCHAIN_LOG:-${SONAR_SECURITY_DIR}/Logs/hashchain.log}"
 SONAR_MANIFEST="${SONAR_MANIFEST:-${SONAR_SECURITY_DIR}/MANIFEST.sha256}"
+SONAR_FIELD_PIN_HASH_FILE="${SONAR_FIELD_PIN_HASH_FILE:-${SONAR_SECURITY_DIR}/Vault/field_pin.sha256}"
 SONAR_ROLE="${SONAR_ROLE:-Technician}"
 
 # ----------------------------------------------------------------------------
@@ -957,6 +958,14 @@ Commandes indépendantes (à la place de --disk):
                                 journalise source+SHA-256 (audit + MANIFEST_
                                 FETCH.tsv). Refuse si le manifeste n'est pas
                                 scellé.
+  --field-pin-set <PIN>        [rôle VAULT] Définit le PIN qui protégera
+                                SONAR Field (second produit,
+                                Scripts/sonar_field.sh) sur la prochaine clé
+                                déployée — menu orienté tâche pour
+                                l'intervention sur le terrain une fois la
+                                clé bootée. Optionnel : sans PIN défini,
+                                SONAR Field prévient explicitement que
+                                l'accès n'est pas verrouillé.
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -1632,6 +1641,8 @@ copy_payload_final() {
     sonar_prepare_ventoy_theme "${mp}"
     generate_ventoy_json_final "${mp}"
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
+    sonar_export_field_files "${mp}"
+    [[ -s "${SONAR_FIELD_PIN_HASH_FILE}" ]] && cp -f "${SONAR_FIELD_PIN_HASH_FILE}" "${mp}/MANIFEST/FIELD_PIN.sha256"
     sonar_generate_build_watermark "${mp}"
     unmount_final "${mp}"
 }
@@ -1704,6 +1715,216 @@ esac
 VAULT_EOF
     chmod +x "${dest}/sonar-vault.sh"
     log_ok "Coffre chiffré autonome déployé: Scripts/sonar-vault.sh (gpg AES-256, jamais lié à la persistance/boot)."
+}
+
+# sonar_export_field_files MOUNT_POINT: dépose sur la clé tout ce dont
+# SONAR Field (second produit, sonar_field.sh — voir ROADMAP.md) a besoin
+# pour fonctionner SANS sonar_master.sh présent sur la machine cible :
+# les profils (mêmes données que --profile, exportées en TSV plutôt que
+# dupliquées), et le script lui-même. Le PIN de terrain (MANIFEST/
+# FIELD_PIN.sha256), s'il a été défini via --field-pin-set, est copié
+# séparément par l'appelant — optionnel, non bloquant si absent.
+sonar_export_field_files() {
+    local mp="$1"
+    mkdir -p "${mp}/MANIFEST" "${mp}/Scripts" "${mp}/Field-Logs"
+    printf '%s\n' "${SONAR_PROFILES_TSV}" > "${mp}/MANIFEST/PROFILES.tsv"
+    {
+        printf 'PROFILE\tSCENARIO\n'
+        local p
+        for p in ${SONAR_PROFILE_NAMES}; do
+            printf '%s\t%s\n' "$p" "$(sonar_profile_scenario "$p")"
+        done
+    } > "${mp}/MANIFEST/PROFILES_SCENARIOS.tsv"
+    cat > "${mp}/Scripts/sonar_field.sh" <<'FIELD_SCRIPT_EOF'
+#!/bin/bash
+# sonar_field.sh — SONAR Field (second produit, distinct de sonar_master.sh
+# qui a construit cette clé — voir ROADMAP.md, section "SONAR Field").
+#
+# Une fois la clé bootée sur la machine du client, ce script guide le
+# technicien vers les bons outils pour le profil choisi et journalise ce
+# qui a été consulté/tenté (même format de hashchain que sonar_master.sh)
+# pour que l'intervention reste explicable après coup. Il ne répare RIEN
+# automatiquement : c'est un guide + un journal, pas un orchestrateur qui
+# exécute des commandes destructrices tout seul.
+#
+# Usage: sonar_field.sh [CHEMIN_PARTITION_CLE]
+# Sans argument, cherche MANIFEST/PROFILES.tsv sous les points de montage
+# courants — sinon montez la partition manuellement et passez son chemin.
+
+set -uo pipefail
+
+SONAR_FIELD_VERSION="0.1.0"
+
+sonar_field_hash_str() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+sonar_field_iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date; }
+
+# sonar_field_audit EVENT [DETAILS] -> Field-Logs/{audit,hashchain}.log sur
+# la clé, même format que sonar_master.sh (TS\tROLE\tEVENT\tDETAILS[\tHASH])
+# pour qu'un cas (préparation + intervention) se relise comme une seule
+# histoire, pas deux journaux à recouper à la main.
+sonar_field_audit() {
+    local event="$1" details="${2:-}"
+    event="${event//$'\t'/ }"; event="${event//$'\n'/ }"
+    details="${details//$'\t'/ }"; details="${details//$'\n'/ }"
+    local ts role prev hash
+    ts="$(sonar_field_iso_now)"
+    role="Field:${SONAR_FIELD_IDENTITY:-non-identifie}"
+    mkdir -p "${SONAR_FIELD_LOG_DIR}" 2>/dev/null || return 0
+    printf '%s\t%s\t%s\t%s\n' "$ts" "$role" "$event" "$details" >> "${SONAR_FIELD_LOG_DIR}/audit.log" 2>/dev/null
+    prev="$(tail -n 1 "${SONAR_FIELD_LOG_DIR}/hashchain.log" 2>/dev/null | awk -F '\t' '{print $NF}')"
+    prev="${prev:-GENESIS}"
+    hash="$(sonar_field_hash_str "${prev}|${ts}|${role}|${event}|${details}")" || hash="UNAVAILABLE"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ts" "$role" "$event" "$details" "$hash" >> "${SONAR_FIELD_LOG_DIR}/hashchain.log" 2>/dev/null
+}
+
+# sonar_field_locate [CHEMIN]: trouve la partition de la clé (celle qui
+# contient MANIFEST/PROFILES.tsv) — via l'argument, sinon en cherchant
+# sous les points de montage usuels.
+sonar_field_locate() {
+    local cand
+    if [[ -n "${1:-}" ]]; then
+        cand="${1%/}"
+        [[ -f "${cand}/MANIFEST/PROFILES.tsv" ]] && { echo "$cand"; return 0; }
+        echo "[SONAR Field][ERREUR] ${cand}/MANIFEST/PROFILES.tsv introuvable." >&2
+        return 1
+    fi
+    for cand in /mnt/* /media/*/* /run/media/*/*; do
+        [[ -f "${cand}/MANIFEST/PROFILES.tsv" ]] && { echo "$cand"; return 0; }
+    done
+    return 1
+}
+
+# sonar_field_pin_gate KEY_PATH: si MANIFEST/FIELD_PIN.sha256 existe,
+# exige le PIN (3 essais) avant de continuer ; sinon avertit explicitement
+# que l'accès n'est pas verrouillé plutôt que de le prétendre en silence.
+sonar_field_pin_gate() {
+    local key="$1" pin_file="${1}/MANIFEST/FIELD_PIN.sha256"
+    if [[ ! -s "$pin_file" ]]; then
+        echo "[SONAR Field][ATTENTION] Aucun PIN configuré sur cette clé (--field-pin-set non utilisé au build) — accès libre, non identifié nominativement." >&2
+        return 0
+    fi
+    local expected attempt=1 pin
+    expected="$(cat "$pin_file")"
+    while [[ $attempt -le 3 ]]; do
+        read -r -s -p "PIN technicien : " pin; echo
+        if [[ "$(sonar_field_hash_str "$pin")" == "$expected" ]]; then
+            read -r -p "Identifiant (nom/matricule, pour le journal) : " SONAR_FIELD_IDENTITY
+            SONAR_FIELD_IDENTITY="${SONAR_FIELD_IDENTITY:-technicien}"
+            sonar_field_audit "FIELD_ACCESS_GRANTED" ""
+            return 0
+        fi
+        echo "PIN incorrect (tentative ${attempt}/3)."
+        attempt=$((attempt+1))
+    done
+    sonar_field_audit "FIELD_ACCESS_DENIED" "attempts=3"
+    echo "[SONAR Field] Trop de tentatives — accès refusé." >&2
+    return 1
+}
+
+sonar_field_profile_names() {
+    awk -F'\t' 'NR>1 {print $1}' "${SONAR_FIELD_KEY}/MANIFEST/PROFILES_SCENARIOS.tsv"
+}
+
+sonar_field_scenario() {
+    awk -F'\t' -v p="$1" 'NR>1 && $1==p {print $2; found=1} END{exit !found}' "${SONAR_FIELD_KEY}/MANIFEST/PROFILES_SCENARIOS.tsv"
+}
+
+sonar_field_tools() {
+    awk -F'\t' -v p="$1" 'NR>1 && $1==p {print $2"\t"$3}' "${SONAR_FIELD_KEY}/MANIFEST/PROFILES.tsv"
+}
+
+# sonar_field_find_tool TOOL: cherche un fichier dont le nom contient TOOL
+# (insensible a la casse) dans ISO/ et Portable/ (ou --fetch les depose) —
+# indique juste OU il est, ne l'ouvre/n'execute jamais.
+sonar_field_find_tool() {
+    local tool="$1"
+    find "${SONAR_FIELD_KEY}/ISO" "${SONAR_FIELD_KEY}/Portable" -iname "*${tool}*" 2>/dev/null
+}
+
+sonar_field_show_profile() {
+    local profile="$1" scenario tools tool why found
+    scenario="$(sonar_field_scenario "$profile")" || { echo "[SONAR Field] Profil inconnu."; return 1; }
+    tools="$(sonar_field_tools "$profile")"
+    echo
+    echo "=== ${profile} ==="
+    echo "Scenario : ${scenario}"
+    echo
+    echo "Outils :"
+    while IFS=$'\t' read -r tool why; do
+        [[ -z "$tool" ]] && continue
+        echo "  - ${tool}"
+        echo "      -> ${why}"
+        found="$(sonar_field_find_tool "$tool" | head -n1)"
+        if [[ -n "$found" ]]; then
+            echo "      trouve sur la cle : ${found}"
+        else
+            echo "      PAS trouve sur la cle (--fetch ${profile} pas fait au build ?)"
+        fi
+    done <<< "$tools"
+    if [[ "$profile" == "boot-repair" || "$profile" == "full" ]]; then
+        echo
+        echo "LIMITE CONNUE : reparation cote Windows (bootrec/bcdedit/DISM) non couverte sans WinPE fourni par l'operateur — voir docs/WINPE.md sur le depot source."
+    fi
+    echo
+    sonar_field_audit "FIELD_PROFILE_VIEWED" "profile=${profile}"
+    local note
+    read -r -p "Noter le resultat de cette intervention (une ligne, vide pour passer) : " note
+    [[ -n "$note" ]] && sonar_field_audit "FIELD_INTERVENTION_NOTE" "profile=${profile};note=${note}"
+}
+
+sonar_field_menu() {
+    local choice i p note
+    while true; do
+        echo
+        echo "============================================================"
+        echo " SONAR Field ${SONAR_FIELD_VERSION} — que dois-je depanner ?"
+        echo "============================================================"
+        i=1
+        local -a names=()
+        for p in $(sonar_field_profile_names); do
+            names+=("$p")
+            printf '  %d) %-16s %s\n' "$i" "$p" "$(sonar_field_scenario "$p")"
+            i=$((i+1))
+        done
+        echo "  q) Quitter"
+        read -r -p "Choix : " choice
+        [[ "$choice" == "q" ]] && break
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice>=1 && choice<=${#names[@]} )); then
+            sonar_field_show_profile "${names[$((choice-1))]}"
+        else
+            echo "Choix invalide."
+        fi
+    done
+}
+
+main() {
+    SONAR_FIELD_KEY="$(sonar_field_locate "${1:-}")" || {
+        echo "[SONAR Field][ERREUR] Partition de la cle SONAR introuvable (MANIFEST/PROFILES.tsv absent des points de montage courants)." >&2
+        echo "Montez-la manuellement puis relancez : $0 /chemin/vers/la/cle" >&2
+        exit 1
+    }
+    SONAR_FIELD_LOG_DIR="${SONAR_FIELD_KEY}/Field-Logs"
+    mkdir -p "${SONAR_FIELD_LOG_DIR}" 2>/dev/null || {
+        echo "[SONAR Field][ERREUR] Impossible d'ecrire sur ${SONAR_FIELD_KEY} (montee en lecture seule ?)." >&2
+        exit 1
+    }
+    sonar_field_pin_gate "${SONAR_FIELD_KEY}" || exit 1
+    sonar_field_menu
+    echo "Journal de cette session : ${SONAR_FIELD_LOG_DIR}/audit.log"
+}
+
+main "$@"
+FIELD_SCRIPT_EOF
+    chmod +x "${mp}/Scripts/sonar_field.sh" 2>/dev/null || true
 }
 
 generate_tool_index_final() {
@@ -3673,6 +3894,27 @@ sonar_fetch_profile() {
     [[ "$fail" -eq 0 ]]
 }
 
+# sonar_field_pin_set PIN: définit (rôle VAULT) le PIN qui protégera
+# SONAR Field sur la prochaine clé déployée — copié dans MANIFEST/
+# FIELD_PIN.sha256 par copy_payload_final si ce fichier existe. Un seul
+# PIN partagé pour cette v1 (identification "qui a touché la clé", pas
+# encore de niveaux d'accréditation différenciés — voir ROADMAP.md,
+# section SONAR Field, étape 7 pour ce qui reste à faire).
+sonar_field_pin_set() {
+    local pin="${1:-}"
+    sonar_require_role VAULT || return 1
+    [[ -n "$pin" ]] || { echo "[SONAR][ERROR] PIN vide refusé." >&2; return 2; }
+    if [[ "${#pin}" -lt 4 ]]; then
+        echo "[SONAR][ERROR] PIN trop court (minimum 4 caractères)." >&2
+        return 2
+    fi
+    mkdir -p "$(dirname "${SONAR_FIELD_PIN_HASH_FILE}")"
+    sonar_hash_str "$pin" > "${SONAR_FIELD_PIN_HASH_FILE}"
+    chmod 600 "${SONAR_FIELD_PIN_HASH_FILE}" 2>/dev/null || true
+    sonar_audit "FIELD_PIN_SET" "hash_file=${SONAR_FIELD_PIN_HASH_FILE}"
+    echo "[SONAR] PIN de terrain défini — sera copié sur la clé au prochain --disk (MANIFEST/FIELD_PIN.sha256)."
+}
+
 # === SONAR AI DRY-RUN REPORT ENGINE V1 ===
 SONAR_AI_REPORT_DIR="${SONAR_AI_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/AI_REPORT}"
 SONAR_AI_REPORT="${SONAR_AI_REPORT:-${SONAR_AI_REPORT_DIR}/ai_dry_run_report.tsv}"
@@ -3871,7 +4113,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.20.0-hardware-validation-complete"
+SONAR_VERSION="3.21.0-sonar-field-v1"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4255,6 +4497,43 @@ sonar_self_test_v2() {
             printf 'FAIL\tsonar_fetch_sha256_matches did not behave as expected\n'; errors=$((errors+1))
         fi
         rm -f "${_hash_tmp}"
+        grep -q '^sonar_export_field_files() {' "$self" && printf 'PASS\tSONAR Field export function present\n' || { printf 'FAIL\tSONAR Field export function missing\n'; errors=$((errors+1)); }
+        grep -q '^sonar_field_pin_set() {' "$self" && printf 'PASS\tSONAR Field PIN-set function present\n' || { printf 'FAIL\tSONAR Field PIN-set function missing\n'; errors=$((errors+1)); }
+        local _fld_dir
+        _fld_dir="$(mktemp -d)"
+        sonar_export_field_files "${_fld_dir}" >/dev/null 2>&1
+        if bash -n "${_fld_dir}/Scripts/sonar_field.sh" 2>/dev/null; then
+            printf 'PASS\tGenerated sonar_field.sh passes bash -n\n'
+        else
+            printf 'FAIL\tGenerated sonar_field.sh has a syntax error\n'; errors=$((errors+1))
+        fi
+        if [[ -s "${_fld_dir}/MANIFEST/PROFILES.tsv" && -s "${_fld_dir}/MANIFEST/PROFILES_SCENARIOS.tsv" ]]; then
+            printf 'PASS\tSONAR Field profile exports (PROFILES.tsv + PROFILES_SCENARIOS.tsv) present\n'
+        else
+            printf 'FAIL\tSONAR Field profile exports missing\n'; errors=$((errors+1))
+        fi
+        local _fld_out
+        _fld_out="$(echo q | bash "${_fld_dir}/Scripts/sonar_field.sh" "${_fld_dir}" 2>&1)"
+        if grep -q 'que dois-je depanner' <<<"${_fld_out}" && grep -q 'ATTENTION.*PIN' <<<"${_fld_out}"; then
+            printf 'PASS\tsonar_field.sh smoke test (menu displays, warns about unset PIN, quits cleanly)\n'
+        else
+            printf 'FAIL\tsonar_field.sh smoke test did not behave as expected\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_fld_dir}"
+        local _fps_root _fps_out
+        _fps_root="$(mktemp -d)"
+        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set abc 2>&1)"
+        if [[ ! -s "${_fps_root}/Secure/Vault/field_pin.sha256" ]] && grep -qi 'court' <<<"${_fps_out}"; then
+            printf 'PASS\t--field-pin-set rejects a too-short PIN\n'
+        else
+            printf 'FAIL\t--field-pin-set did not reject a too-short PIN\n'; errors=$((errors+1))
+        fi
+        if SONAR_ROOT="${_fps_root}" "$self" --field-pin-set 1234 >/dev/null 2>&1 && [[ -s "${_fps_root}/Secure/Vault/field_pin.sha256" ]]; then
+            printf 'PASS\t--field-pin-set accepts a valid PIN and writes the hash file\n'
+        else
+            printf 'FAIL\t--field-pin-set did not write the hash file for a valid PIN\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_fps_root}"
         echo
         echo "ERRORS=$errors"
         echo "WARNINGS=$warnings"
@@ -5166,6 +5445,7 @@ case "${1:-}" in
     --fetch-manifest-seal) if sonar_fetch_manifest_seal; then exit 0; else exit $?; fi ;;
     --fetch-manifest-verify-seal) if sonar_fetch_manifest_verify_seal; then exit 0; else exit $?; fi ;;
     --fetch) shift; if sonar_fetch_profile "${1:-}"; then exit 0; else exit $?; fi ;;
+    --field-pin-set) shift; if sonar_field_pin_set "${1:-}"; then exit 0; else exit $?; fi ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;

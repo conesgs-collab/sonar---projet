@@ -6,6 +6,89 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.21.0-sonar-field-v1] — 2026-09-15
+
+### Contexte
+Première implémentation de **SONAR Field**, le second produit décidé
+plus tôt cette session (voir commit dd0aadb et ROADMAP.md). Devenue
+possible maintenant que l'étape 3 (SystemRescue embarqué) est faite :
+on peut enfin écrire l'interface d'un environnement de boot qui existe
+réellement sur la clé, plutôt que de la deviner.
+
+Portée volontairement limitée pour ce premier jet : un guide + un
+journal, pas un orchestrateur qui exécute des commandes destructrices
+tout seul — cohérent avec la règle de fond du projet ("ne rien faire
+qu'on ne puisse pas expliquer après coup").
+
+### Ajouté
+- **`sonar_field.sh`** (nouveau, embarqué dans `sonar_master.sh` et
+  généré sur la clé via `sonar_export_field_files`, appelée depuis
+  `copy_payload_final` — même mécanisme de distribution que
+  `sonar-vault.sh`) :
+  - Localise la partition de la clé (argument, ou recherche sous
+    `/mnt`/`/media`/`/run/media`).
+  - **Identification par PIN** (optionnel) : si
+    `MANIFEST/FIELD_PIN.sha256` existe, exige le bon PIN (3 essais,
+    accès refusé et journalisé sinon) puis demande un identifiant
+    texte libre pour le journal. Sans PIN configuré, prévient
+    explicitement que l'accès n'est pas verrouillé plutôt que de le
+    prétendre en silence.
+  - **Menu orienté tâche** : liste les 6 profils avec leur scénario,
+    affiche pour le profil choisi ses outils + pourquoi + où ils se
+    trouvent sur la clé (recherche dans `ISO/`/`Portable/`) — ne lance
+    jamais rien automatiquement, le technicien exécute lui-même les
+    commandes, comme fait manuellement pendant la validation de
+    l'étape 6.
+  - **Journal** : `Field-Logs/{audit,hashchain}.log` sur la clé, même
+    format exact que `sonar_master.sh`
+    (`TS\tROLE\tEVENT\tDETAILS[\tHASH]`, même construction de hash
+    chaîné) — un cas (préparation + intervention) se relit comme une
+    seule histoire continue.
+- **`--field-pin-set <PIN>`** (rôle VAULT — voir note ci-dessous) :
+  définit le PIN de terrain, copié dans `MANIFEST/FIELD_PIN.sha256` au
+  prochain `--disk`. Refuse un PIN de moins de 4 caractères.
+- **`sonar_export_field_files`** : dépose `MANIFEST/PROFILES.tsv` et
+  `MANIFEST/PROFILES_SCENARIOS.tsv` (export TSV de
+  `SONAR_PROFILES_TSV` et de `sonar_profile_scenario()`) — mêmes
+  données que `--profile`, jamais dupliquées à la main.
+- 7 tests de régression `--self-test` : présence des fonctions, le
+  script généré passe `bash -n`, les exports TSV existent, smoke test
+  du menu (avertissement PIN absent + sortie propre), validation
+  longueur PIN, écriture du fichier de hash.
+
+### Trouvé en testant (pas un bug introduit ici — comportement existant)
+- La colonne `VAULT` de `policy.tsv` est en réalité en libre-service
+  pour tous les rôles authentifiés sauf `Viewer` (`Technician` a déjà
+  `RW` dessus) — pas un gardien "rôle élevé" comme le nom pourrait le
+  laisser penser. Comportement déjà utilisé tel quel par
+  `sonar_catalog_seal`/`sonar_fetch_manifest_seal` avant ce commit,
+  donc pas une régression de cette version ni quelque chose à corriger
+  ici — juste documenté pour ne pas se refaire piéger. Un premier test
+  de régression supposait le contraire (Technician refusé) et a été
+  corrigé pour tester la vraie garantie fournie (validation de longueur
+  du PIN) plutôt qu'une hypothèse fausse sur le RBAC.
+
+### Non fait dans cette version
+- Accréditation par niveau (Technician/Senior/Admin avec des profils
+  différents) — v1 répond à "qui a touché la clé", pas encore à "qui a
+  le droit de quoi". Reste la partie non close de l'ancienne étape 7.
+- Auto-détection robuste de la partition clé (scan `lsblk` par label/
+  contenu) — v1 cherche sous des points de montage usuels ou prend un
+  chemin en argument.
+- Lancement effectif des outils — resterait volontairement soumis à
+  confirmation explicite même automatisé un jour.
+- Test de `sonar_field.sh` sur un vrai boot SystemRescue — validé en
+  local (génération + exécution simulée) cette session, pas encore sur
+  la clé réellement bootée.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit`,
+`--self-test` (0 FAIL, 7 nouveaux tests inclus) sous WSL2 Ubuntu.
+Scénario complet manuel en plus des tests automatisés : mauvais PIN×3
+→ refus journalisé (`FIELD_ACCESS_DENIED`), bon PIN → accès accordé
+avec identité + menu affiché (`FIELD_ACCESS_GRANTED`), journal
+`Field-Logs/audit.log` vérifié ligne par ligne.
+
 ## [3.20.0-hardware-validation-complete] — 2026-09-15
 
 ### Contexte
