@@ -6,6 +6,61 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.24.0-winpe-builder] — 2026-09-15
+
+### Contexte
+Referme le principal écart réel identifié dans la décision de
+positionnement SONAR-SE v1 (commit précédent, quelques minutes plus
+tôt) : WinPE. Pas en redistribuant une image pré-construite (rejeté
+explicitement, voir `docs/WINPE.md`), mais en automatisant sa
+construction — ce que le script `sonar_master.sh` (Linux+root) ne peut
+structurellement pas faire lui-même, mais qu'un script compagnon
+Windows peut, puisque cette session dispose d'un accès PowerShell réel
+sur la machine hôte.
+
+### Ajouté
+- **`tools/Build-SonarSE-WinPE.ps1`** (nouveau) : télécharge et installe
+  le Windows ADK (Deployment Tools) + l'add-on WinPE depuis les liens
+  officiels Microsoft (élévation UAC requise, une fois par
+  installateur) s'ils ne sont pas déjà présents, puis exécute
+  `copype`/`MakeWinPEMedia` (élévation requise aussi, le montage DISM
+  l'exige) pour produire une ISO WinPE amd64 avec `bootrec`, `bcdedit`,
+  `diskpart` et DISM inclus par défaut. Paramètres `-OutputIso`,
+  `-WorkDir`, `-SkipAdkInstall`. Documentation intégrée
+  (`Get-Help -Full`).
+- `docs/WINPE.md` : réécrit pour refléter ce changement — le script est
+  maintenant le chemin recommandé, la construction manuelle devient une
+  section de référence, et une nouvelle section "Pourquoi cette
+  distinction" explique précisément pourquoi SONAR-SE construit pour
+  l'opérateur sans jamais redistribuer une image déjà construite
+  (limite de licence du Windows ADK, pas de paresse).
+- `--profile boot-repair`/`full` et `sonar_field.sh` : le message
+  "LIMITE CONNUE" pointe maintenant vers le script plutôt que vers un
+  simple renvoi de documentation ; `sonar_field.sh` détecte en plus
+  dynamiquement si un WinPE est déjà présent sur la clé bootée
+  (`ISO/*winpe*`) et l'affiche au lieu de la limite si c'est le cas.
+- `README.md`/`ROADMAP.md` (étape 4) mis à jour en conséquence.
+
+### Testé
+Bout en bout, en conditions réelles, sur cette machine :
+`bash -n`/`shellcheck --severity=error` (rien)/`--self-audit`/
+`--self-test` (0 FAIL) pour `sonar_master.sh` sous WSL2 Ubuntu. Pour le
+script PowerShell : ADK Deployment Tools installé avec succès (silencieux
+après une élévation UAC), add-on WinPE installé, `copype` puis
+`MakeWinPEMedia` exécutés avec succès (élévation requise), ISO produite
+(398 Mo, `SHA256=6ad61eabac27a9bfe2f15562f4c6a755664ae9cf767494808be4058479ecf3ed`),
+**attachée à une VM VirtualBox et
+démarrée avec succès** — invite de commande WinPE (`X:\Windows\
+System32>`) confirmée fonctionnelle par l'opérateur.
+
+### Non fait dans cette version
+- Personnalisation de l'image (pilotes, paquets optionnels WinPE-*) —
+  le script produit une image WinPE de base, suffisante pour
+  `bootrec`/`bcdedit`/`diskpart`/DISM mais pas enrichie davantage.
+- Test du WinPE construit sur du **matériel physique réel** (seulement
+  VM cette session) — cohérent avec la même limite déjà notée pour
+  `sonar_field.sh` en v3.21.0.
+
 ## [3.23.0-sonar-se-v1] — 2026-09-15
 
 ### Contexte

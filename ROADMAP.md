@@ -19,6 +19,13 @@ documentée. Décision : ne jamais ajouter ces bundles à `--fetch` ;
 l'opérateur télécharge et ajoute **lui-même**, sous sa responsabilité
 — même mécanisme de dépôt manuel qu'un WinPE construit à la main.
 
+**Suite le même jour** : le principal écart réel face à MediCat/Hiren's
+(WinPE) est refermé sans compromettre cette discipline —
+`tools/Build-SonarSE-WinPE.ps1` automatise sa construction à partir du
+Windows ADK officiel de Microsoft (testé de bout en bout : ADK installé,
+ISO générée, démarrage confirmé sur VM). Voir étape 4 et
+`docs/WINPE.md`.
+
 Priorisée pour un développeur solo. Règle d'ordre : **P0 avant P1, toujours**
 — en particulier, ne jamais commencer le refactor modulaire (P1) avant que
 la CI (P0) soit en place et verte. Sans elle, un refactor qui casse quelque
@@ -159,21 +166,26 @@ soit démarrer SONAR Field pour de vrai.
       Étape 0bis) plutôt que codé en dur, pour laisser `--disk` offline
       par défaut (pas de téléchargement réseau surprise pendant un
       déploiement).
-- [x] **Étape 4 — WinPE via Windows ADK, documentée comme non fournie**
-      (v3.18.0-winpe-step4-documented-gap, 2026-09-15) : confirmé
-      techniquement impossible à piloter depuis ce script (ADK est un
-      outillage Windows uniquement ; le script exige Linux+root via
-      `preflight_final` — les deux mondes ne se recoupent pas, ce n'est
-      pas un manque d'effort). Suivant l'instruction explicite de
-      l'auteur ("documenter plutôt que sauter en silence") :
-      `docs/WINPE.md` explique pourquoi, ce qui en dépend
-      (réparation côté Windows du profil `boot-repair`), et comment
-      l'opérateur construit et ajoute son propre WinPE (`copype` +
-      `MakeWinPEMedia`, puis dépôt dans `SOURCE_DIR/ISO/WinPE/` — même
-      mécanisme de copie récursive que le reste). `--profile
-      boot-repair`/`full` affichent désormais cette limite directement
-      ("LIMITE CONNUE"), pas seulement dans un fichier séparé qu'on
-      peut manquer.
+- [x] **Étape 4 — WinPE via Windows ADK** : deux temps.
+      - **v3.18.0** (2026-09-15) : confirmé techniquement impossible à
+        piloter *depuis `sonar_master.sh` lui-même* (ADK est un
+        outillage Windows uniquement ; le script exige Linux+root via
+        `preflight_final`). `docs/WINPE.md` documente pourquoi, ce qui
+        en dépend, et comment construire/ajouter un WinPE à la main.
+      - **v3.24.0 (même jour)** : va plus loin qu'une simple
+        documentation — `tools/Build-SonarSE-WinPE.ps1` automatise la
+        construction (télécharge et installe le Windows ADK officiel
+        si besoin, `copype` + `MakeWinPEMedia`) et produit une ISO
+        WinPE fonctionnelle (`bootrec`/`bcdedit`/`diskpart`/DISM
+        inclus). **Testé de bout en bout** : ADK installé, ISO générée
+        (398 Mo), démarrée avec succès sur VM VirtualBox — invite de
+        commande WinPE confirmée fonctionnelle. SONAR-SE ne redistribue
+        toujours pas de WinPE pré-construit (raison de licence,
+        expliquée dans `docs/WINPE.md`) — le script construit à partir
+        des propres téléchargements Microsoft de l'opérateur, sur sa
+        machine. `--profile boot-repair`/`full` et `sonar_field.sh`
+        pointent vers ce script et détectent dynamiquement si un WinPE
+        est déjà présent sur la clé.
 - [ ] **Étape 5 — déplacée vers SONAR Field** (section dédiée
       ci-dessous, 2026-09-15). Le menu orienté tâche n'est plus vu comme
       un script annexe dans l'environnement de boot de SONAR, mais comme

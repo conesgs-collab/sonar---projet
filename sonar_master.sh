@@ -1884,7 +1884,13 @@ sonar_field_show_profile() {
     done <<< "$tools"
     if [[ "$profile" == "boot-repair" || "$profile" == "full" ]]; then
         echo
-        echo "LIMITE CONNUE : reparation cote Windows (bootrec/bcdedit/DISM) non couverte sans WinPE fourni par l'operateur — voir docs/WINPE.md sur le depot source."
+        local winpe_found
+        winpe_found="$(find "${SONAR_FIELD_KEY}/ISO" -iname "*winpe*" 2>/dev/null | head -n1)"
+        if [[ -n "$winpe_found" ]]; then
+            echo "REPARATION WINDOWS (bootrec/bcdedit/DISM) : WinPE present sur cette cle -> ${winpe_found}"
+        else
+            echo "LIMITE CONNUE : reparation cote Windows (bootrec/bcdedit/DISM) non couverte — aucun WinPE sur cette cle. L'operateur peut en construire un avec tools/Build-SonarSE-WinPE.ps1 (voir docs/WINPE.md sur le depot source) et le deposer avant le prochain build."
+        fi
     fi
     echo
     sonar_field_audit "FIELD_PROFILE_VIEWED" "profile=${profile}"
@@ -3679,7 +3685,7 @@ sonar_profile_scenario() {
 sonar_profile_caveat() {
     case "$1" in
         boot-repair|full)
-            echo "Ce profil ne couvre que la reparation cote Linux (SystemRescue). La reparation cote Windows (bootrec/bcdedit/DISM) exige un WinPE, que SONAR ne construit pas — voir docs/WINPE.md." ;;
+            echo "Reparation cote Linux (SystemRescue) couverte d'office. Cote Windows (bootrec/bcdedit/DISM), exige un WinPE que SONAR-SE ne redistribue pas mais peut vous aider a construire : tools/Build-SonarSE-WinPE.ps1 (Windows ADK officiel Microsoft, PowerShell) puis deposer l'ISO dans SOURCE_DIR/ISO/WinPE/ — voir docs/WINPE.md." ;;
         *) : ;;
     esac
 }
@@ -4154,7 +4160,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.23.0-sonar-se-v1"
+SONAR_VERSION="3.24.0-winpe-builder"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
