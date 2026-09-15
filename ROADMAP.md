@@ -70,6 +70,18 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
       - [ ] Testé sur 2-3 machines différentes (BIOS legacy + UEFI) — un
             seul support testé jusqu'ici (UEFI + Secure Boot), pas encore
             de test en mode Legacy/CSM ni sur un autre modèle.
+      - [x] **Thème Ventoy personnalisé re-testé après correction
+            (2026-09-15) — la correction v3.12.0 (1024×768) ne suffit
+            PAS.** Réappliqué sur la clé physique (image + bloc `theme`
+            dans `ventoy.json`) et rebooté sur le même HP EliteBook 840
+            G3 : **même crash** `alloc magic is broken`, malgré la
+            réduction de taille précédemment jugée sûre. Conclusion :
+            la taille de l'image n'était pas (ou pas seule) la vraie
+            cause. Décision immédiate : thème repassé en **désactivé
+            par défaut** (`INCLUDE_VENTOY_THEME=false`, nouveau flag
+            `--ventoy-theme` pour l'activer explicitement) — voir
+            CHANGELOG v3.25.0. Cause racine réelle non résolue, reste
+            ouverte ci-dessous.
       **Mitigation logicielle en place depuis v3.5.0** : tout déploiement
       réel (`--disk` sans `--dry-run`) affiche un avertissement explicite
       et exige un acquiescement séparé (`JE COMPRENDS LE RISQUE` ou
@@ -326,6 +338,16 @@ vrai — plus besoin d'attendre :
 - Comparaison "temps constant" best-effort, pas formellement vérifiée
 - Fichier monolithique en attendant P1
 - Aucune gestion multi-technicien concurrente sur le hashchain/audit partagé
+- **Cause racine du crash GRUB du thème Ventoy non résolue** (2026-09-15) :
+  la réduction à 1024×768 (hypothèse "taille décodée trop grande pour le
+  tas GRUB en pré-boot") a été re-testée en vrai sur le HP EliteBook 840
+  G3 et **échoue toujours**, même erreur `alloc magic is broken`. Donc
+  soit le seuil réel est plus bas que 1024×768, soit la cause n'est pas
+  (uniquement) la taille décodée — profondeur de couleur/canal alpha du
+  PNG (Pillow produit du RGBA par défaut, pas RGB) à examiner en
+  premier. Mitigation en place : thème désactivé par défaut
+  (`--ventoy-theme` pour l'activer, à ses risques). Pas de piste
+  supplémentaire testée faute d'un second cycle de reboot matériel.
 
 ## Cadence suggérée (solo)
 

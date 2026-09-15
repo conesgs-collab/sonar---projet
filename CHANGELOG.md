@@ -6,6 +6,76 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.25.0-ventoy-theme-disabled-by-default] — 2026-09-15
+
+### Contexte
+Suite directe de v3.12.0 (2026-09-15, plus tôt le même jour). Cette
+version-là avait corrigé le crash GRUB (`alloc magic is broken`) en
+réduisant le fond d'écran Ventoy de 1920×1080 à 1024×768, avec un
+avertissement honnête dans le CHANGELOG : la correction n'avait été
+"validée qu'en isolation" (logique de redimensionnement testée hors
+ligne), pas par un vrai reboot avec le thème corrigé réactivé — le
+premier boot réussi s'était fait thème désactivé.
+
+Cette session, l'auteur a demandé de vérifier si le thème "SONAR - SE"
+s'affichait vraiment. Réponse : non, la clé physique n'avait même plus
+de thème actif du tout (désactivé depuis le 14/09, jamais réappliqué
+avec le correctif). **Réappliqué pour de vrai** (image 1024×768 +
+bloc `theme` dans `ventoy.json`) et rebooté sur le même HP EliteBook
+840 G3 qui avait révélé le bug initial.
+
+### Trouvé — la correction précédente ne suffit pas
+**Même crash** `alloc magic is broken`, avec l'image 1024×768
+pourtant considérée sûre. Ce n'est pas juste "pas encore vérifié" comme
+avant — c'est maintenant vérifié et **négatif**. La théorie initiale
+("taille décodée trop grande pour le tas GRUB en pré-boot", 1920×1080
+≈ 6 Mo décodé) reste plausible en soi, mais le seuil de sécurité
+supposé (1024×768) ne l'est pas, ou la cause n'est pas uniquement la
+taille décodée — piste non explorée à ce stade : Pillow (utilisé pour
+générer `Branding/default_background.png`) produit du RGBA par défaut
+(4 octets/pixel) plutôt que RGB (3 octets/pixel), ce qui changerait la
+taille décodée réelle sans changer les dimensions ni la taille du
+fichier sur disque.
+
+### Changé — sécurité par défaut, pas juste une note
+- **`INCLUDE_VENTOY_THEME` passe de `true` à `false` par défaut.** Le
+  thème personnalisé (celui-là précisément, mais aussi tout thème
+  opérateur par le même mécanisme) n'est plus inclus automatiquement à
+  chaque `--disk` — un dépôt utilisé tel quel, sans cette version,
+  aurait produit une clé qui plante au démarrage sur au moins une
+  machine réelle confirmée.
+- **`--ventoy-theme`** (nouveau) : active explicitement le thème, avec
+  un avertissement clair dans `--help` sur ce qui a été trouvé.
+  `--no-ventoy-theme` conservé pour compatibilité (sans effet, déjà le
+  défaut).
+- `docs/DEPLOYMENT.md` : section "Personnaliser le fond d'écran Ventoy"
+  réécrite en conséquence — plus de "non testé sur un vrai démarrage
+  physique" (c'est faux maintenant, c'est *testé et négatif*), remplacé
+  par l'avertissement précis et la procédure de retour en arrière.
+- `ROADMAP.md` : nouvelle entrée dans "Validation matérielle réelle"
+  documentant ce re-test négatif, et nouvelle entrée dans "Dette
+  technique connue" pour la cause racine non résolue (piste RGBA/RGB à
+  vérifier en premier lors d'un prochain cycle de test matériel).
+- **Clé physique (`E:`) remise dans un état qui boote** : thème
+  réappliqué puis retiré à nouveau après confirmation du crash — la clé
+  est revenue à son état fonctionnel connu (pas de thème) avant la fin
+  de cette session.
+
+### Testé
+Re-test réel sur HP EliteBook 840 G3 (même machine que v3.12.0) :
+thème réactivé (image 1024×768 + bloc `theme` conforme à
+`generate_ventoy_json_final`) → **crash confirmé** ; thème retiré →
+boot confirmé de nouveau fonctionnel. `bash -n`,
+`shellcheck --severity=error` (rien), `--self-audit`, `--self-test`
+pour le changement de défaut lui-même — à faire avant de commiter (voir
+ci-dessous).
+
+### Non résolu
+Cause racine du crash toujours inconnue avec certitude. Prochaine piste
+à tester (nécessite un autre cycle de reboot matériel) : régénérer
+`default_background.png` en RGB (sans canal alpha) plutôt que RGBA, et/
+ou tester une résolution encore plus petite (800×600).
+
 ## [3.24.0-winpe-builder] — 2026-09-15
 
 ### Contexte

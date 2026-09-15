@@ -746,7 +746,7 @@ GENERATE_README="${GENERATE_README:-true}"
 # its git history — same reasoning as Ventoy's own archive being
 # downloaded/locally-supplied rather than embedded). Silently skipped if
 # absent; never blocks a deploy.
-INCLUDE_VENTOY_THEME="${INCLUDE_VENTOY_THEME:-true}"
+INCLUDE_VENTOY_THEME="${INCLUDE_VENTOY_THEME:-false}"
 SONAR_VENTOY_TITLE="${SONAR_VENTOY_TITLE:-SONAR - SE}"
 SONAR_VENTOY_CREDIT="${SONAR_VENTOY_CREDIT:-Sekou SANOU - Burkina Faso}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -918,9 +918,16 @@ Autres:
                                 persistance Ventoy, jamais chiffrée par SONAR)
   --no-logging               Désactiver la journalisation principale
   --no-readme                Ne pas générer README
-  --no-ventoy-theme          Ne pas personnaliser le fond d'écran Ventoy
-                                (voir SOURCE_DIR/Branding/) ; sans effet si
-                                aucune image n'est fournie de toute façon
+  --ventoy-theme             Active le fond d'écran Ventoy personnalisé
+                                (voir SOURCE_DIR/Branding/) — DÉSACTIVÉ PAR
+                                DÉFAUT depuis le 2026-09-15 : un fond
+                                1024x768, censé être une taille sûre, a
+                                quand même fait planter GRUB ("alloc magic
+                                is broken") sur un HP EliteBook 840 G3 réel
+                                — voir CHANGELOG.md. N'activez qu'après
+                                avoir testé sur le matériel cible précis.
+  --no-ventoy-theme          Conservé pour compatibilité — sans effet,
+                                c'est déjà le comportement par défaut.
   --help|-h                  Afficher cette aide
 
 Commandes indépendantes (à la place de --disk):
@@ -1044,6 +1051,7 @@ parse_final_args() {
             --no-logging) INCLUDE_LOGGING=false; shift ;;
             --no-readme) GENERATE_README=false; shift ;;
             --no-ventoy-theme) INCLUDE_VENTOY_THEME=false; shift ;;
+            --ventoy-theme) INCLUDE_VENTOY_THEME=true; shift ;;
             --role) [[ $# -ge 2 ]] || error_exit "--role nécessite une valeur."; SONAR_ROLE="$2"; sonar_validate_role "$SONAR_ROLE"; shift 2 ;;
             --role-token) [[ $# -ge 2 ]] || error_exit "--role-token nécessite une valeur."; SONAR_ROLE_TOKEN="$2"; shift 2 ;;
             --security-status) SONAR_COMMAND="security-status"; shift ;;
@@ -4160,7 +4168,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.24.0-winpe-builder"
+SONAR_VERSION="3.25.0-ventoy-theme-disabled-by-default"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

@@ -274,9 +274,21 @@ copie :
 
 ### Personnaliser le fond d'écran Ventoy
 
-Optionnel, purement cosmétique. Déposez votre image dans
+**Désactivé par défaut depuis le 2026-09-15** (`--ventoy-theme` pour
+l'activer explicitement). Ce n'est pas une prudence théorique : un fond
+1024×768 (résolution VESA classique, censée être sûre en pré-boot) a
+quand même fait planter GRUB (`alloc magic is broken`) sur un HP
+EliteBook 840 G3 réel, **après** qu'une première correction (réduction
+depuis 1920×1080) ait été testée et se soit révélée insuffisante — voir
+`CHANGELOG.md`. N'activez `--ventoy-theme` qu'après un test réel sur
+le matériel cible précis, avec un plan de retour en arrière
+(`--no-ventoy-theme` ou édition manuelle de `ventoy/ventoy.json` pour
+retirer le bloc `"theme"`, comme documenté dans le CHANGELOG).
+
+Si vous l'activez : déposez votre image dans
 `SOURCE_DIR/Branding/background.png` (`.jpg`/`.jpeg` acceptés aussi) avant
-de lancer `--disk`. `sonar_prepare_ventoy_theme` la reprend automatiquement :
+de lancer `--disk --ventoy-theme`. `sonar_prepare_ventoy_theme` la reprend
+automatiquement :
 
 - Si `convert` (ImageMagick) est installé sur la machine de build, le
   titre et le crédit (`SONAR_VENTOY_TITLE`/`SONAR_VENTOY_CREDIT`,
@@ -288,14 +300,9 @@ de lancer `--disk`. `sonar_prepare_ventoy_theme` la reprend automatiquement :
   `file`, `gfxmode`, `boot_menu_language`, `ventoy_left/top/color`).
 - Sans ImageMagick, l'image est copiée telle quelle (sans texte incrusté)
   — jamais bloquant.
-- Sans image dans `Branding/`, rien ne se passe — comportement Ventoy par
-  défaut inchangé.
-- `--no-ventoy-theme` désactive complètement cette étape.
-
-**Non testé sur un vrai démarrage physique** (même réserve que le reste du
-projet — voir `ROADMAP.md`). GRUB affiche l'image telle quelle ; en cas de
-doute sur le rendu, testez d'abord sans texte incrusté (désinstallez
-ImageMagick temporairement, ou utilisez une image déjà finalisée).
+- Sans image dans `Branding/` **et** sans `--ventoy-theme`, rien ne se
+  passe — comportement Ventoy par défaut inchangé (c'est maintenant le
+  cas de figure par défaut).
 
 ---
 
