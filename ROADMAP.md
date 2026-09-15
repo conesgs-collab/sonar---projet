@@ -238,13 +238,16 @@ vrai — plus besoin d'attendre :
   exportés en TSV (`MANIFEST/PROFILES.tsv`,
   `MANIFEST/PROFILES_SCENARIOS.tsv`) — mêmes données que `--profile`,
   pas dupliquées à la main.
-- **Identification : un seul PIN partagé** (`--field-pin-set <PIN>`,
-  optionnel — sans PIN configuré, SONAR Field le dit explicitement au
-  lieu de prétendre être verrouillé). **Pas encore différencié par
-  niveau d'accréditation** (Technician/Senior/Admin chacun avec des
-  profils différents) — c'est la partie de l'ancienne étape 7 qui reste
-  à faire ; v1 répond à "qui a touché la clé", pas encore à "qui a le
-  droit de faire quoi".
+- **Identification par PIN, avec accréditation par niveau** (v2,
+  toujours 2026-09-15) : `--field-pin-set <NIVEAU> <PIN> [PROFILS]`,
+  `PROFILS` = `ALL` (défaut) ou une liste séparée par des virgules.
+  Plusieurs niveaux coexistent (`MANIFEST/FIELD_PINS.tsv`, une ligne
+  par niveau) ; le PIN saisi détermine à la fois l'identité journalisée
+  et les profils affichés dans le menu (filtré en conséquence) — un
+  Technicien limité à `boot-repair,data-recovery` ne voit même pas
+  `password-reset` dans sa liste. Sans aucun PIN configuré, SONAR Field
+  le dit explicitement au lieu de prétendre être verrouillé. C'était la
+  partie non close de l'ancienne étape 7 — maintenant faite.
 - **Menu orienté tâche** : liste les 6 profils avec leur scénario,
   affiche pour le profil choisi les outils + pourquoi + où ils se
   trouvent sur la clé (cherche dans `ISO/`/`Portable/`, où `--fetch` les
@@ -260,7 +263,6 @@ vrai — plus besoin d'attendre :
 
 ### Pas encore fait
 
-- Accréditation par niveau (voir ci-dessus) — v2.
 - Auto-détection robuste de la partition clé (v1 cherche sous
   `/mnt`/`/media`/`/run/media` ou prend un chemin en argument — pas de
   scan `lsblk` par label/contenu).

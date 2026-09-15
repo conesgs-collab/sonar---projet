@@ -6,6 +6,46 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.22.0-sonar-field-accreditation] — 2026-09-15
+
+### Contexte
+Comble la partie explicitement laissée ouverte par la v1
+(v3.21.0, quelques minutes plus tôt) : l'accréditation par niveau,
+héritée de l'ancienne étape 7 du recentrage. Objectif inchangé depuis
+la demande initiale : "chaque technicien s'identifie et n'accède qu'aux
+outils/profils correspondant à son niveau d'accréditation."
+
+### Changé (remplace le mécanisme v1, pas un ajout à côté)
+- **`--field-pin-set <NIVEAU> <PIN> [PROFILS]`** (au lieu de
+  `--field-pin-set <PIN>`) : `PROFILS` = `ALL` (défaut) ou une liste
+  séparée par des virgules parmi les 6 profils. Rejouer avec le même
+  `NIVEAU` met à jour sa ligne (PIN et/ou profils) sans toucher aux
+  autres niveaux déjà définis. Valide que chaque profil listé existe
+  réellement (refuse `profil-bidon` avec un message explicite) et que
+  le niveau/PIN ne sont pas vides ou trop courts (<4 caractères).
+- **`MANIFEST/FIELD_PINS.tsv`** (remplace `FIELD_PIN.sha256`) : une
+  ligne par niveau (`NIVEAU\tSHA256(PIN)\tPROFILS`), plusieurs niveaux
+  coexistent sur la même clé.
+- **`sonar_field.sh`** : le PIN saisi détermine maintenant à la fois
+  l'identité journalisée (`Field:technicien(NIVEAU)`) et les profils
+  affichés — le menu est filtré en conséquence (un niveau restreint à
+  `boot-repair,data-recovery` ne voit même pas les 4 autres profils,
+  pas seulement un accès bloqué après coup). Sans aucun PIN configuré :
+  comportement inchangé (accès libre, avertissement explicite).
+- 6 nouveaux tests de régression `--self-test` : validation niveau/PIN/
+  profil inconnu, accumulation de plusieurs niveaux sans écrasement,
+  et surtout un test de bout en bout confirmant que le menu affiché
+  diffère réellement selon le PIN saisi (niveau restreint vs niveau
+  `ALL`).
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit`,
+`--self-test` (0 FAIL, 11 tests SONAR Field au total dont les 6
+nouveaux) sous WSL2 Ubuntu. Le test de bout en bout le plus important
+vérifie le comportement observable réel (quels profils apparaissent
+dans le menu selon le PIN), pas seulement que les fonctions s'exécutent
+sans erreur.
+
 ## [3.21.0-sonar-field-v1] — 2026-09-15
 
 ### Contexte

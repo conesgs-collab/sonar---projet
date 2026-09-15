@@ -140,7 +140,7 @@ SONAR_POLICY_FILE="${SONAR_POLICY_FILE:-${SONAR_SECURITY_DIR}/Policies/policy.ts
 SONAR_AUDIT_LOG="${SONAR_AUDIT_LOG:-${SONAR_SECURITY_DIR}/Logs/audit.log}"
 SONAR_HASHCHAIN_LOG="${SONAR_HASHCHAIN_LOG:-${SONAR_SECURITY_DIR}/Logs/hashchain.log}"
 SONAR_MANIFEST="${SONAR_MANIFEST:-${SONAR_SECURITY_DIR}/MANIFEST.sha256}"
-SONAR_FIELD_PIN_HASH_FILE="${SONAR_FIELD_PIN_HASH_FILE:-${SONAR_SECURITY_DIR}/Vault/field_pin.sha256}"
+SONAR_FIELD_PINS_FILE="${SONAR_FIELD_PINS_FILE:-${SONAR_SECURITY_DIR}/Vault/field_pins.tsv}"
 SONAR_ROLE="${SONAR_ROLE:-Technician}"
 
 # ----------------------------------------------------------------------------
@@ -958,14 +958,18 @@ Commandes indépendantes (à la place de --disk):
                                 journalise source+SHA-256 (audit + MANIFEST_
                                 FETCH.tsv). Refuse si le manifeste n'est pas
                                 scellé.
-  --field-pin-set <PIN>        [rôle VAULT] Définit le PIN qui protégera
+  --field-pin-set <NIVEAU> <PIN> [PROFILS]
+                                [rôle VAULT] Définit un PIN de terrain pour
                                 SONAR Field (second produit,
-                                Scripts/sonar_field.sh) sur la prochaine clé
-                                déployée — menu orienté tâche pour
-                                l'intervention sur le terrain une fois la
-                                clé bootée. Optionnel : sans PIN défini,
-                                SONAR Field prévient explicitement que
-                                l'accès n'est pas verrouillé.
+                                Scripts/sonar_field.sh), associé à un
+                                NIVEAU (libre) et à la liste de PROFILS
+                                qu'il déverrouille : "ALL" (défaut) ou une
+                                liste séparée par des virgules (ex.
+                                "boot-repair,data-recovery"). Rejouer avec
+                                le même NIVEAU met à jour sa ligne.
+                                Optionnel : sans aucun PIN défini, SONAR
+                                Field prévient explicitement que l'accès
+                                n'est pas verrouillé.
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -1642,7 +1646,7 @@ copy_payload_final() {
     generate_ventoy_json_final "${mp}"
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
     sonar_export_field_files "${mp}"
-    [[ -s "${SONAR_FIELD_PIN_HASH_FILE}" ]] && cp -f "${SONAR_FIELD_PIN_HASH_FILE}" "${mp}/MANIFEST/FIELD_PIN.sha256"
+    [[ -s "${SONAR_FIELD_PINS_FILE}" ]] && cp -f "${SONAR_FIELD_PINS_FILE}" "${mp}/MANIFEST/FIELD_PINS.tsv"
     sonar_generate_build_watermark "${mp}"
     unmount_final "${mp}"
 }
@@ -1803,23 +1807,31 @@ sonar_field_locate() {
     return 1
 }
 
-# sonar_field_pin_gate KEY_PATH: si MANIFEST/FIELD_PIN.sha256 existe,
-# exige le PIN (3 essais) avant de continuer ; sinon avertit explicitement
-# que l'accès n'est pas verrouillé plutôt que de le prétendre en silence.
+# sonar_field_pin_gate KEY_PATH: si MANIFEST/FIELD_PINS.tsv existe (une
+# ligne par niveau : NIVEAU\tSHA256(PIN)\tPROFILS), exige un PIN
+# correspondant à l'une des lignes (3 essais au total) avant de
+# continuer ; sinon avertit explicitement que l'accès n'est pas
+# verrouillé plutôt que de le prétendre en silence. Le PIN saisi
+# détermine à la fois l'identité (niveau) et les profils autorisés —
+# pas de question séparée "quel niveau es-tu", un secret = une identité.
 sonar_field_pin_gate() {
-    local key="$1" pin_file="${1}/MANIFEST/FIELD_PIN.sha256"
-    if [[ ! -s "$pin_file" ]]; then
-        echo "[SONAR Field][ATTENTION] Aucun PIN configuré sur cette clé (--field-pin-set non utilisé au build) — accès libre, non identifié nominativement." >&2
+    local key="$1" pins_file="${1}/MANIFEST/FIELD_PINS.tsv"
+    if [[ ! -s "$pins_file" ]]; then
+        echo "[SONAR Field][ATTENTION] Aucun PIN configuré sur cette clé (--field-pin-set non utilisé au build) — accès libre, non identifié nominativement, tous profils visibles." >&2
+        SONAR_FIELD_ALLOWED_PROFILES="ALL"
         return 0
     fi
-    local expected attempt=1 pin
-    expected="$(cat "$pin_file")"
+    local attempt=1 pin hash line niveau expected profils
     while [[ $attempt -le 3 ]]; do
         read -r -s -p "PIN technicien : " pin; echo
-        if [[ "$(sonar_field_hash_str "$pin")" == "$expected" ]]; then
+        hash="$(sonar_field_hash_str "$pin")"
+        line="$(awk -F'\t' -v h="$hash" '$2==h {print; exit}' "$pins_file")"
+        if [[ -n "$line" ]]; then
+            IFS=$'\t' read -r niveau expected profils <<< "$line"
             read -r -p "Identifiant (nom/matricule, pour le journal) : " SONAR_FIELD_IDENTITY
-            SONAR_FIELD_IDENTITY="${SONAR_FIELD_IDENTITY:-technicien}"
-            sonar_field_audit "FIELD_ACCESS_GRANTED" ""
+            SONAR_FIELD_IDENTITY="${SONAR_FIELD_IDENTITY:-technicien}(${niveau})"
+            SONAR_FIELD_ALLOWED_PROFILES="$profils"
+            sonar_field_audit "FIELD_ACCESS_GRANTED" "niveau=${niveau};profils=${profils}"
             return 0
         fi
         echo "PIN incorrect (tentative ${attempt}/3)."
@@ -1891,10 +1903,14 @@ sonar_field_menu() {
         i=1
         local -a names=()
         for p in $(sonar_field_profile_names); do
+            if [[ "${SONAR_FIELD_ALLOWED_PROFILES:-ALL}" != "ALL" ]] && ! grep -qx "$p" <<< "$(tr ',' '\n' <<< "${SONAR_FIELD_ALLOWED_PROFILES}")"; then
+                continue
+            fi
             names+=("$p")
             printf '  %d) %-16s %s\n' "$i" "$p" "$(sonar_field_scenario "$p")"
             i=$((i+1))
         done
+        [[ ${#names[@]} -eq 0 ]] && echo "  (aucun profil autorisé pour ce niveau)"
         echo "  q) Quitter"
         read -r -p "Choix : " choice
         [[ "$choice" == "q" ]] && break
@@ -3894,25 +3910,50 @@ sonar_fetch_profile() {
     [[ "$fail" -eq 0 ]]
 }
 
-# sonar_field_pin_set PIN: définit (rôle VAULT) le PIN qui protégera
-# SONAR Field sur la prochaine clé déployée — copié dans MANIFEST/
-# FIELD_PIN.sha256 par copy_payload_final si ce fichier existe. Un seul
-# PIN partagé pour cette v1 (identification "qui a touché la clé", pas
-# encore de niveaux d'accréditation différenciés — voir ROADMAP.md,
-# section SONAR Field, étape 7 pour ce qui reste à faire).
+# sonar_field_pin_set NIVEAU PIN [PROFILS]: définit (rôle VAULT) un PIN
+# de terrain associé à un NIVEAU d'accréditation et à la liste de PROFILS
+# qu'il déverrouille dans SONAR Field — "ALL" (défaut) ou une liste
+# séparée par des virgules parmi boot-repair/data-recovery/malware/
+# disk-clone/password-reset/full. Rejouer avec le même NIVEAU met à jour
+# sa ligne (PIN et/ou profils) sans toucher aux autres niveaux déjà
+# définis — copié en bloc dans MANIFEST/FIELD_PINS.tsv par
+# copy_payload_final si ce fichier existe.
 sonar_field_pin_set() {
-    local pin="${1:-}"
+    local niveau profils
+    niveau="$(sonar_sanitize_value "${1:-}")"
+    local pin="${2:-}"
+    profils="${3:-ALL}"
     sonar_require_role VAULT || return 1
+    [[ -n "$niveau" ]] || { echo "[SONAR][ERROR] Niveau vide refusé." >&2; return 2; }
     [[ -n "$pin" ]] || { echo "[SONAR][ERROR] PIN vide refusé." >&2; return 2; }
     if [[ "${#pin}" -lt 4 ]]; then
         echo "[SONAR][ERROR] PIN trop court (minimum 4 caractères)." >&2
         return 2
     fi
-    mkdir -p "$(dirname "${SONAR_FIELD_PIN_HASH_FILE}")"
-    sonar_hash_str "$pin" > "${SONAR_FIELD_PIN_HASH_FILE}"
-    chmod 600 "${SONAR_FIELD_PIN_HASH_FILE}" 2>/dev/null || true
-    sonar_audit "FIELD_PIN_SET" "hash_file=${SONAR_FIELD_PIN_HASH_FILE}"
-    echo "[SONAR] PIN de terrain défini — sera copié sur la clé au prochain --disk (MANIFEST/FIELD_PIN.sha256)."
+    if [[ "$profils" != "ALL" ]]; then
+        local prof bad=""
+        local -a prof_arr=()
+        IFS=',' read -ra prof_arr <<< "$profils"
+        for prof in "${prof_arr[@]}"; do
+            sonar_profile_scenario "$prof" >/dev/null || bad="$prof"
+        done
+        if [[ -n "$bad" ]]; then
+            echo "[SONAR][ERROR] Profil inconnu dans la liste: '${bad}'. Profils disponibles: $(sonar_profile_names), ou 'ALL'." >&2
+            return 2
+        fi
+    fi
+    mkdir -p "$(dirname "${SONAR_FIELD_PINS_FILE}")"
+    local hash tmp
+    hash="$(sonar_hash_str "$pin")"
+    tmp="$(mktemp)"
+    if [[ -s "${SONAR_FIELD_PINS_FILE}" ]]; then
+        awk -F'\t' -v n="$niveau" 'BEGIN{OFS="\t"} $1!=n' "${SONAR_FIELD_PINS_FILE}" > "$tmp"
+    fi
+    printf '%s\t%s\t%s\n' "$niveau" "$hash" "$profils" >> "$tmp"
+    mv "$tmp" "${SONAR_FIELD_PINS_FILE}"
+    chmod 600 "${SONAR_FIELD_PINS_FILE}" 2>/dev/null || true
+    sonar_audit "FIELD_PIN_SET" "niveau=${niveau};profils=${profils}"
+    echo "[SONAR] PIN de terrain défini pour le niveau '${niveau}' (profils: ${profils}) — sera copié sur la clé au prochain --disk (MANIFEST/FIELD_PINS.tsv)."
 }
 
 # === SONAR AI DRY-RUN REPORT ENGINE V1 ===
@@ -4113,7 +4154,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.21.0-sonar-field-v1"
+SONAR_VERSION="3.22.0-sonar-field-accreditation"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4519,21 +4560,49 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tsonar_field.sh smoke test did not behave as expected\n'; errors=$((errors+1))
         fi
-        rm -rf "${_fld_dir}"
         local _fps_root _fps_out
         _fps_root="$(mktemp -d)"
-        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set abc 2>&1)"
-        if [[ ! -s "${_fps_root}/Secure/Vault/field_pin.sha256" ]] && grep -qi 'court' <<<"${_fps_out}"; then
+        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Technicien abc 2>&1)"
+        if [[ ! -s "${_fps_root}/Secure/Vault/field_pins.tsv" ]] && grep -qi 'court' <<<"${_fps_out}"; then
             printf 'PASS\t--field-pin-set rejects a too-short PIN\n'
         else
             printf 'FAIL\t--field-pin-set did not reject a too-short PIN\n'; errors=$((errors+1))
         fi
-        if SONAR_ROOT="${_fps_root}" "$self" --field-pin-set 1234 >/dev/null 2>&1 && [[ -s "${_fps_root}/Secure/Vault/field_pin.sha256" ]]; then
-            printf 'PASS\t--field-pin-set accepts a valid PIN and writes the hash file\n'
+        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Technicien 1234 boot-repair,data-recovery 2>&1)"
+        if [[ -s "${_fps_root}/Secure/Vault/field_pins.tsv" ]] && grep -q 'Technicien' "${_fps_root}/Secure/Vault/field_pins.tsv"; then
+            printf 'PASS\t--field-pin-set accepts a valid PIN+niveau+profils and writes the file\n'
         else
-            printf 'FAIL\t--field-pin-set did not write the hash file for a valid PIN\n'; errors=$((errors+1))
+            printf 'FAIL\t--field-pin-set did not write the pins file for a valid call\n'; errors=$((errors+1))
         fi
-        rm -rf "${_fps_root}"
+        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Technicien 1234 profil-bidon 2>&1)"
+        if ! grep -q 'profil-bidon' "${_fps_root}/Secure/Vault/field_pins.tsv" && grep -qi 'inconnu' <<<"${_fps_out}"; then
+            printf 'PASS\t--field-pin-set rejects an unknown profile name\n'
+        else
+            printf 'FAIL\t--field-pin-set did not reject an unknown profile name\n'; errors=$((errors+1))
+        fi
+        SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Admin 5678 >/dev/null 2>&1
+        if [[ "$(awk -F'\t' 'END{print NR}' "${_fps_root}/Secure/Vault/field_pins.tsv")" -eq 2 ]]; then
+            printf 'PASS\t--field-pin-set accumulates a second niveau without overwriting the first\n'
+        else
+            printf 'FAIL\t--field-pin-set did not accumulate a second niveau correctly\n'; errors=$((errors+1))
+        fi
+        # Bout en bout : niveau restreint ne voit que ses profils, niveau ALL les voit tous.
+        _fld_dir="$(mktemp -d)"
+        sonar_export_field_files "${_fld_dir}" >/dev/null 2>&1
+        cp "${_fps_root}/Secure/Vault/field_pins.tsv" "${_fld_dir}/MANIFEST/FIELD_PINS.tsv"
+        _fld_out="$(printf '1234\nTesteur\nq\n' | bash "${_fld_dir}/Scripts/sonar_field.sh" "${_fld_dir}" 2>&1)"
+        if grep -q 'boot-repair' <<<"${_fld_out}" && ! grep -q 'malware' <<<"${_fld_out}"; then
+            printf 'PASS\tRestricted niveau (Technicien) only sees its allowed profiles in the menu\n'
+        else
+            printf 'FAIL\tRestricted niveau did not filter the menu as expected\n'; errors=$((errors+1))
+        fi
+        _fld_out="$(printf '5678\nTesteur\nq\n' | bash "${_fld_dir}/Scripts/sonar_field.sh" "${_fld_dir}" 2>&1)"
+        if grep -q 'boot-repair' <<<"${_fld_out}" && grep -q 'malware' <<<"${_fld_out}"; then
+            printf 'PASS\tALL niveau (Admin) sees every profile in the menu\n'
+        else
+            printf 'FAIL\tALL niveau did not see every profile\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_fld_dir}" "${_fps_root}"
         echo
         echo "ERRORS=$errors"
         echo "WARNINGS=$warnings"
@@ -5445,7 +5514,7 @@ case "${1:-}" in
     --fetch-manifest-seal) if sonar_fetch_manifest_seal; then exit 0; else exit $?; fi ;;
     --fetch-manifest-verify-seal) if sonar_fetch_manifest_verify_seal; then exit 0; else exit $?; fi ;;
     --fetch) shift; if sonar_fetch_profile "${1:-}"; then exit 0; else exit $?; fi ;;
-    --field-pin-set) shift; if sonar_field_pin_set "${1:-}"; then exit 0; else exit $?; fi ;;
+    --field-pin-set) shift; if sonar_field_pin_set "${1:-}" "${2:-}" "${3:-ALL}"; then exit 0; else exit $?; fi ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;
