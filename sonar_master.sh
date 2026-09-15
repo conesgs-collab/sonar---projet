@@ -1,6 +1,6 @@
 #!/bin/bash
 #===============================================================================
-# SONAR MASTER — SCRIPT DE DÉPLOIEMENT AUTOMATISÉ - OUTIL DE MAINTENANCE IT PORTABLE
+# SONAR - SE — SCRIPT DE DÉPLOIEMENT AUTOMATISÉ - OUTIL DE MAINTENANCE IT PORTABLE
 #===============================================================================
 # Généré le        : 2026-08-15
 # Disque cible     : (obligatoire, fourni via --disk /dev/sdX)
@@ -875,7 +875,7 @@ prepare_workspace() {
 }
 usage_final() {
     cat <<'EOF'
-SONAR — moteur unique
+SONAR - SE — moteur unique
 
 Usage:
   sudo ./deploy_it_toolkit_SONAR_MASTER.sh --disk /dev/sdX [options]
@@ -2216,7 +2216,7 @@ sonar_cli() {
             sonar_verify_manifest || error_exit "Manifeste absent, vide, ou vérification échouée: ${SONAR_MANIFEST}"
             ;;
         deploy)
-            log "SONAR MASTER — moteur unique, catalogue conservé"
+            log "SONAR - SE — moteur unique"
             [[ "${DRY_RUN}" == "true" ]] && log "MODE DRY-RUN."
             for ((i=1;i<=BATCH_COUNT;i++)); do
                 deploy_single_disk_final "$i"
@@ -2224,7 +2224,7 @@ sonar_cli() {
                     read -r -p "Insérez le disque suivant puis Entrée..."
                 fi
             done
-            log "SONAR MASTER — TERMINÉ"
+            log "SONAR - SE — TERMINÉ"
             ;;
         *)
             error_exit "Commande Sonar inconnue: ${SONAR_COMMAND}"
@@ -4154,7 +4154,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.22.0-sonar-field-accreditation"
+SONAR_VERSION="3.23.0-sonar-se-v1"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

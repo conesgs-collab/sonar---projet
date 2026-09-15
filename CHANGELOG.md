@@ -6,6 +6,46 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.23.0-sonar-se-v1] — 2026-09-15
+
+### Contexte
+Demande explicite : officialiser le nom de produit "SONAR - SE" (déjà
+utilisé pour le thème Ventoy) partout, et positionner SONAR-SE comme
+alternative "plus professionnelle" à MediCat/Hiren's BootCD. Avant
+d'exécuter, vérifié la prémisse implicite ("plus complet" = imiter leur
+volume d'outils) — et corrigée : MediCat et Hiren's BootCD PE
+atteignent leur ampleur en redistribuant des centaines d'outils tiers
+sans revendiquer de licence dessus (leurs propres mentions légales
+l'affirment explicitement — "non affiliés, n'endossons aucune
+licence"). Adopter cette approche casserait la vraie différence de
+SONAR-SE : chaque outil `--fetch` est vérifié et sa provenance
+documentée.
+
+### Changé
+- Nom de produit "SONAR - SE" officialisé : titre `README.md`, bannière
+  `usage_final()` (`--help`), messages de fin de déploiement
+  (`SONAR MASTER — moteur unique/TERMINÉ` → `SONAR - SE — ...`, au
+  passage retiré la mention obsolète "catalogue conservé" qui référait
+  à l'ancien paradigme où le catalogue 981 était la source de vérité).
+  Le fichier reste `sonar_master.sh` — renommage de produit, pas de
+  dépôt.
+- **`docs/WINPE.md`** : nouvelle section documentant Hiren's BootCD PE
+  et MediCat USB comme alternatives **manuelles** à un WinPE construit
+  soi-même (l'opérateur les télécharge et les dépose lui-même, même
+  mécanisme que pour un WinPE fait main) — explicitement **jamais**
+  ajoutés à `--fetch`, avec la raison (licence non garantie par ces
+  deux projets pour les outils qu'ils embarquent, contrairement à
+  chaque entrée du manifeste `--fetch`).
+- `ROADMAP.md` : nouvelle section "SONAR - SE v1" documentant cette
+  décision de positionnement pour ne pas avoir à la retrancher plus
+  tard.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit`,
+`--self-test` (0 FAIL — aucun test ne dépendait des anciennes chaînes
+"SONAR MASTER") sous WSL2 Ubuntu. Vérifié manuellement que `--help`
+affiche bien la nouvelle bannière.
+
 ## [3.22.0-sonar-field-accreditation] — 2026-09-15
 
 ### Contexte

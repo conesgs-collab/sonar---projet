@@ -1,8 +1,10 @@
-# SONAR
+# SONAR - SE
 
 Outil de déploiement automatisé pour clé USB de maintenance IT (Ventoy +
 persistance + module forensique/backup/recovery + couche RBAC), en un seul
-script Bash auto-vérifiable.
+script Bash auto-vérifiable. Le script lui-même reste `sonar_master.sh`
+(pas de renommage de fichier, seulement du produit) — voir "Auteur" en bas
+de page.
 
 > **Ce que SONAR fait, et ne fait pas :** SONAR construit la clé et trace
 > son origine (déploiement Ventoy, manifeste SHA-256, filigrane de build,

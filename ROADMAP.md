@@ -1,5 +1,24 @@
 # Roadmap SONAR
 
+## SONAR - SE v1 (2026-09-15)
+
+Nom de produit officialisé (déjà utilisé pour le thème Ventoy depuis
+plus tôt dans le projet, maintenant repris partout : README, bannière
+`--help`, messages de fin de déploiement). Le fichier reste
+`sonar_master.sh` — c'est un renommage de produit, pas de dépôt/fichier.
+
+Décision de positionnement (demandée explicitement, tranchée le
+2026-09-15) : SONAR-SE vise à être *plus professionnel* que MediCat/
+Hiren's BootCD, pas *plus volumineux*. Les deux projets atteignent leur
+ampleur en redistribuant des centaines d'outils tiers sans revendiquer
+de licence dessus (leurs propres mentions légales le disent). Imiter
+ça casserait la vraie différence de SONAR-SE : chaque outil de
+`--fetch` est vérifié (SHA-256, souvent GPG amont) et sa provenance
+documentée. Décision : ne jamais ajouter ces bundles à `--fetch` ;
+`docs/WINPE.md` documente Hiren's BootCD PE/MediCat comme options que
+l'opérateur télécharge et ajoute **lui-même**, sous sa responsabilité
+— même mécanisme de dépôt manuel qu'un WinPE construit à la main.
+
 Priorisée pour un développeur solo. Règle d'ordre : **P0 avant P1, toujours**
 — en particulier, ne jamais commencer le refactor modulaire (P1) avant que
 la CI (P0) soit en place et verte. Sans elle, un refactor qui casse quelque

@@ -55,6 +55,35 @@ exige spécifiquement les outils Windows.
 Référence complète : [copype command line options](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/copype-command-line-options),
 [makewinpemedia command line options](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/makewinpemedia-command-line-options).
 
+## Alternative plus rapide : ISO communautaires déjà construites
+
+Construire son propre WinPE prend du temps. Deux projets communautaires
+distribuent déjà un environnement WinPE prêt à l'emploi, chargé d'outils
+de dépannage :
+
+- **[Hiren's BootCD PE](https://www.hirensbootcd.org/download/)** — ISO
+  unique (~3 Go), maintenu par la communauté, sans logiciel piraté.
+- **[MediCat USB](https://medicatusb.com/)** — plus large (WinPE +
+  collection d'ISO bootables + utilitaires portables), déjà pensé pour
+  Ventoy.
+
+**SONAR ne redistribue ni l'un ni l'autre, et ne les ajoutera jamais à
+`--fetch`.** Pas par principe rigide, mais parce que les deux projets le
+disent eux-mêmes explicitement dans leurs mentions légales : ils ne sont
+« affiliés à, ni endossés par » aucun des éditeurs des outils tiers
+qu'ils embarquent, et ne revendiquent aucune licence dessus. C'est un
+choix assumé et raisonnable pour un projet communautaire — mais
+`--fetch` de SONAR vérifie et documente la provenance (SHA-256, souvent
+signature GPG amont) de chaque outil qu'il télécharge ; automatiser la
+redistribution d'un bloc dont la licence de chaque composant est
+explicitement non-garantie casserait cette garantie pour tout ce qu'il
+distribue, pas seulement pour ce bloc-là.
+
+**Ce que vous pouvez faire à la place** : télécharger l'un ou l'autre
+vous-même, sous votre propre responsabilité (comme pour un WinPE
+construit à la main), puis l'ajouter à votre clé avec le même mécanisme
+que ci-dessous.
+
 ## L'ajouter à une clé construite par SONAR
 
 Aucune commande SONAR spécifique n'est nécessaire — le mécanisme déjà en
