@@ -1473,17 +1473,35 @@ sonar_prepare_ventoy_theme() {
     if [[ "$prebaked" == "true" ]]; then
         cp -f "$src" "${out}"
     elif command -v convert >/dev/null 2>&1; then
-        w="$(identify -format '%w' "$src" 2>/dev/null || echo 1024)"
-        if ! convert "$src" \
-                \( -size "${w}x110" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
-                -gravity south -fill white -pointsize 34 -annotate +0+58 "${SONAR_VENTOY_TITLE}" \
-                -gravity south -fill '#cccccc' -pointsize 18 -annotate +0+20 "${SONAR_VENTOY_CREDIT}" \
-                "${out}" 2>/dev/null; then
-            log "[SONAR] Filigrane du fond Ventoy : échec ImageMagick, copie de l'image telle quelle."
+        # -resize '1024x768>' shrinks only if larger, never enlarges — GRUB's
+        # own PNG decoder runs in the firmware's constrained pre-boot memory
+        # pool, and a full 1920x1080 24bpp background (~6MB decoded) crashed
+        # it outright ("alloc magic is broken", GRUB's own heap-corruption
+        # check) on real hardware (HP EliteBook 840 G3, 2026-09-15) — the
+        # boot never even reached Ventoy's menu. 1024x768 is the classic
+        # safe pre-boot VESA resolution; resizing here protects operator-
+        # supplied images the same way the shipped default was fixed.
+        local resized="${out_dir}/.resized.png"
+        # Resize first, to a temp file, then measure THAT — sizing the
+        # banner box from the pre-resize width would composite it onto a
+        # canvas narrower than the box itself once a large image shrinks.
+        if convert "$src" -resize '1024x768>' "${resized}" 2>/dev/null; then
+            w="$(identify -format '%w' "${resized}" 2>/dev/null || echo 1024)"
+            if ! convert "${resized}" \
+                    \( -size "${w}x110" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
+                    -gravity south -fill white -pointsize 34 -annotate +0+58 "${SONAR_VENTOY_TITLE}" \
+                    -gravity south -fill '#cccccc' -pointsize 18 -annotate +0+20 "${SONAR_VENTOY_CREDIT}" \
+                    "${out}" 2>/dev/null; then
+                log "[SONAR] Filigrane du fond Ventoy : échec ImageMagick, copie de l'image redimensionnée telle quelle."
+                cp -f "${resized}" "${out}"
+            fi
+            rm -f "${resized}"
+        else
+            log "[SONAR] Filigrane du fond Ventoy : échec ImageMagick, copie de l'image telle quelle (non redimensionnée)."
             cp -f "$src" "${out}"
         fi
     else
-        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés."
+        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés, ET sans redimensionnement de sécurité. Une image de grande résolution (ex: 1920x1080) a fait planter GRUB sur du vrai matériel (\"alloc magic is broken\", HP EliteBook 840 G3, 2026-09-15) — préférez une image ≤1024x768 si convert n'est pas disponible."
         cp -f "$src" "${out}"
     fi
     sonar_audit "VENTOY_THEME_INSTALLED" "source=${src}"
@@ -1513,11 +1531,16 @@ if os.path.isfile(theme_png):
     # Keys per Ventoy's own documented theme plugin (ventoy.net) — file is
     # relative to the Ventoy data partition root, same convention as ISO
     # paths above. sonar_prepare_ventoy_theme() is what actually put the
-    # PNG there (and burned the title/credit into it, if ImageMagick was
-    # available); this only wires it into ventoy.json.
+    # PNG there (and burned the title/credit into it, resized to a safe
+    # size if ImageMagick was available); this only wires it into
+    # ventoy.json. gfxmode leads with 1024x768 (not 1920x1080) since a
+    # full-HD background crashed GRUB's own PNG decoder on real hardware
+    # (HP EliteBook 840 G3, 2026-09-15 — see CHANGELOG.md) before Ventoy's
+    # menu ever appeared; 1024x768 is the resolution sonar_prepare_ventoy_
+    # theme() now targets, so this should match what's actually on disk.
     cfg["theme"] = {
         "file": "/ventoy/theme/background.png",
-        "gfxmode": "1920x1080,1024x768,800x600",
+        "gfxmode": "1024x768,800x600",
         "boot_menu_language": "fr",
         "ventoy_left": "10%",
         "ventoy_top": "38%",
@@ -3337,7 +3360,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.11.2-first-hardware-deploy-fixes"
+SONAR_VERSION="3.12.0-first-successful-boot"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

@@ -6,6 +6,65 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.12.0-first-successful-boot] — 2026-09-15
+
+### Contexte
+**Premier démarrage physique réussi de SONAR, de bout en bout** — HP
+EliteBook 840 G3, SSD externe USB (Realtek RTL9210 NVMe), Secure Boot
+activé. Ventoy affiche son menu, Alpine Linux démarre et se connecte
+(`root`, mot de passe vide — comportement standard d'Alpine en live boot,
+rien à voir avec SONAR). Le P0 "validation matérielle réelle" du
+ROADMAP passe enfin du déploiement seul au boot effectif.
+
+Le chemin pour y arriver a traversé plusieurs diagnostics, dans l'ordre :
+1. **Secure Boot (0x1A Security Violation)** — résolu par l'enrôlement
+   MOK (`ENROLL_THIS_KEY_IN_MOKMANAGER.cer` sur la partition VTOYEFI,
+   procédure standard Ventoy, indépendante du mot de passe BIOS).
+2. **Détection USB instable en pré-boot** — un cycle démarrage à froid
+   (extinction complète, pas juste redémarrage) a résolu la non-détection
+   intermittente du pont USB-NVMe par le firmware.
+3. **`alloc magic is broken` (crash GRUB)** — voir "Corrigé" ci-dessous,
+   c'est le vrai bug SONAR trouvé dans ce lot.
+
+### Corrigé
+- **Le fond d'écran Ventoy personnalisé (v3.11.0/3.11.1) faisait planter
+  GRUB avant même l'affichage du menu**, avec l'erreur interne
+  `alloc magic is broken` (corruption du tas mémoire de GRUB — son
+  propre décodeur PNG s'exécute dans la mémoire très contrainte du
+  pré-boot, et une image 1920×1080 24bpp (~6 Mo une fois décodée) a
+  suffi à le faire échouer sur ce matériel). Confirmé par test A/B en
+  direct sur la clé : désactiver le thème (`ventoy.json` sans le bloc
+  `"theme"`) a immédiatement débloqué le boot.
+  - `Branding/default_background.png` régénéré à **1024×768** (résolution
+    VESA classique, sûre en pré-boot) au lieu de 1920×1080 — fichier
+    divisé par ~2 (139 Ko → 65 Ko), mémoire décodée divisée par ~2,6.
+    Visuel aussi redessiné à la demande de l'auteur : un écran radar/
+    sonar vert classique (balayage, anneaux de portée, graduations en
+    degrés, quelques échos cibles) — plus cohérent avec le nom du projet
+    que le premier essai (dashboard mondial). Toujours généré via Python/
+    Pillow pour la même raison que la v3.11.1 : impossible d'extraire les
+    octets d'une image collée dans la conversation, donc recréation dans
+    l'esprit demandé plutôt qu'une reproduction exacte (32 Ko, 1024×768).
+  - `sonar_prepare_ventoy_theme()` : quand ImageMagick est disponible,
+    l'image fournie par l'opérateur est maintenant systématiquement
+    redimensionnée à `1024x768>` (réduit seulement si plus grand, jamais
+    agrandi) avant l'incrustation du titre/crédit — protège aussi les
+    futures images personnalisées, pas seulement celle livrée par défaut.
+  - `generate_ventoy_json_final` : `gfxmode` par défaut passé de
+    `"1920x1080,1024x768,800x600"` à `"1024x768,800x600"`, cohérent avec
+    la résolution que le thème cible désormais.
+  - Sans ImageMagick (pas de redimensionnement possible), le message de
+    log avertit désormais explicitement du risque avec cette référence
+    matérielle précise, au lieu de rester silencieux sur le danger.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
+`--self-test` (0 FAIL). Logique de redimensionnement à deux étapes
+(resize puis composite, mesure de largeur post-resize) validée en
+isolation. **Root cause confirmée en conditions réelles** (test A/B
+thème activé/désactivé sur le matériel qui a révélé le bug) — pas
+seulement une correction théorique.
+
 ## [3.11.2-first-hardware-deploy-fixes] — 2026-09-14
 
 ### Contexte

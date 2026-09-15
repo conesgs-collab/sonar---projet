@@ -32,13 +32,18 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
             corrigés dans la foulée (`AI_PROVIDER` non définie, `cp -a`
             incompatible avec exFAT) — voir CHANGELOG.md v3.11.2. Aucun
             des deux n'était détectable en `--dry-run`/`--self-test`.
-      - [ ] **Boot effectif non encore testé** — le déploiement réussit,
-            mais rien ne prouve encore que la clé démarre réellement
-            (Secure Boot, ordre de boot BIOS/UEFI spécifique à une
-            machine sont des causes d'échec indépendantes d'un
-            déploiement propre). Prochaine étape concrète.
+      - [x] **Boot effectif réussi** (2026-09-15, HP EliteBook 840 G3,
+            Secure Boot activé) — Ventoy affiche son menu, Alpine Linux
+            démarre. A révélé et fait corriger un vrai bug : le thème
+            Ventoy personnalisé (1920×1080) faisait planter GRUB
+            (`alloc magic is broken`) avant même l'affichage du menu —
+            voir CHANGELOG.md v3.12.0. Chemin complet : enrôlement MOK
+            pour Secure Boot, démarrage à froid pour la détection USB en
+            pré-boot, puis désactivation du thème pour isoler le crash
+            GRUB.
       - [ ] Testé sur 2-3 machines différentes (BIOS legacy + UEFI) — un
-            seul support testé jusqu'ici, pas encore une validation large.
+            seul support testé jusqu'ici (UEFI + Secure Boot), pas encore
+            de test en mode Legacy/CSM ni sur un autre modèle.
       **Mitigation logicielle en place depuis v3.5.0** : tout déploiement
       réel (`--disk` sans `--dry-run`) affiche un avertissement explicite
       et exige un acquiescement séparé (`JE COMPRENDS LE RISQUE` ou
