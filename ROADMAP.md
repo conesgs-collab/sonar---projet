@@ -156,12 +156,15 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       (référencé tel quel dans les commits/CHANGELOG existants) plutôt
       que renuméroté.
 - [ ] **Étape 6 — Validation matérielle des profils** : au moins 3
-      scénarios réels (boot Windows cassé réparé via `boot-repair`,
-      fichier supprimé récupéré via `data-recovery`, machine infectée
-      nettoyée via `malware`), documentés dans `CHANGELOG.md` — ce qui a
-      marché, ce qui a échoué, ce qui a surpris. Dépend de l'accès
-      matériel de l'opérateur. Reste une étape SONAR (le builder) :
-      valide que les outils *choisis* pour chaque profil fonctionnent
+      scénarios réels (boot cassé réparé via `boot-repair`, fichier
+      supprimé récupéré via `data-recovery`, machine infectée nettoyée
+      via `malware`), documentés dans `CHANGELOG.md` — ce qui a marché,
+      ce qui a échoué, ce qui a surpris. Dépend de l'accès matériel de
+      l'opérateur — protocole détaillé, prêt à suivre pas à pas,
+      préparé le 2026-09-15 : `docs/VALIDATION-ETAPE6.md` (injection de
+      panne, procédure de réparation, ce qu'il faut mesurer, gabarit
+      d'entrée CHANGELOG). Reste une étape SONAR (le builder) : valide
+      que les outils *choisis* pour chaque profil fonctionnent
       manuellement, indépendamment de l'existence ou non de SONAR Field.
 - [ ] **Étape 7 — déplacée vers SONAR Field** (section dédiée
       ci-dessous, 2026-09-15) — l'accréditation à l'usage de la clé
