@@ -920,10 +920,15 @@ Autres:
   --no-readme                Ne pas générer README
   --ventoy-theme             Active le fond d'écran Ventoy personnalisé
                                 (voir SOURCE_DIR/Branding/) — DÉSACTIVÉ PAR
-                                DÉFAUT depuis le 2026-09-15 : un fond
-                                1024x768, censé être une taille sûre, a
-                                quand même fait planter GRUB ("alloc magic
-                                is broken") sur un HP EliteBook 840 G3 réel
+                                DÉFAUT depuis le 2026-09-15. Trois tailles
+                                d'image radicalement différentes (6 Mo,
+                                2,25 Mo, 480 Ko décodés) ont produit le
+                                MÊME crash GRUB ("alloc magic is broken")
+                                sur un HP EliteBook 840 G3 réel — ce n'est
+                                probablement pas une question de taille
+                                d'image mais d'incompatibilité du module
+                                thème de Ventoy avec ce firmware. Réduire
+                                l'image ne corrigera vraisemblablement rien
                                 — voir CHANGELOG.md. N'activez qu'après
                                 avoir testé sur le matériel cible précis.
   --no-ventoy-theme          Conservé pour compatibilité — sans effet,
@@ -1550,25 +1555,31 @@ sonar_prepare_ventoy_theme() {
     if [[ "$prebaked" == "true" ]]; then
         cp -f "$src" "${out}"
     elif command -v convert >/dev/null 2>&1; then
-        # -resize '1024x768>' shrinks only if larger, never enlarges — GRUB's
-        # own PNG decoder runs in the firmware's constrained pre-boot memory
-        # pool, and a full 1920x1080 24bpp background (~6MB decoded) crashed
-        # it outright ("alloc magic is broken", GRUB's own heap-corruption
-        # check) on real hardware (HP EliteBook 840 G3, 2026-09-15) — the
-        # boot never even reached Ventoy's menu. 1024x768 is the classic
-        # safe pre-boot VESA resolution; resizing here protects operator-
-        # supplied images the same way the shipped default was fixed.
+        # -resize '800x600>' shrinks only if larger, never enlarges. This
+        # resize+palette pipeline is kept because it's strictly cheaper
+        # (never a regression) — NOT because it's confirmed to fix the
+        # actual crash. Real-hardware history (HP EliteBook 840 G3,
+        # 2026-09-15, see CHANGELOG v3.25.0/v3.26.0): THREE image variants
+        # tested, ~6MB decoded (1920x1080 RGB), ~2.25MB (1024x768 RGB), and
+        # ~480KB (800x600 indexed/palette, 1 byte/pixel) — all three
+        # produced the IDENTICAL "alloc magic is broken" crash. A 12x
+        # reduction in decoded image size made no observable difference,
+        # which is strong evidence the decoded-image-size theory is WRONG
+        # (or at best incomplete): the actual crash is more likely in
+        # Ventoy's gfxmenu theme module itself on this firmware, not in
+        # how large the PNG is. `--ventoy-theme` stays opt-in and
+        # documented as unreliable rather than "fixed by a smaller image".
         local resized="${out_dir}/.resized.png"
         # Resize first, to a temp file, then measure THAT — sizing the
         # banner box from the pre-resize width would composite it onto a
         # canvas narrower than the box itself once a large image shrinks.
-        if convert "$src" -resize '1024x768>' "${resized}" 2>/dev/null; then
-            w="$(identify -format '%w' "${resized}" 2>/dev/null || echo 1024)"
+        if convert "$src" -resize '800x600>' "${resized}" 2>/dev/null; then
+            w="$(identify -format '%w' "${resized}" 2>/dev/null || echo 800)"
             if ! convert "${resized}" \
                     \( -size "${w}x110" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
                     -gravity south -fill white -pointsize 34 -annotate +0+58 "${SONAR_VENTOY_TITLE}" \
                     -gravity south -fill '#cccccc' -pointsize 18 -annotate +0+20 "${SONAR_VENTOY_CREDIT}" \
-                    "${out}" 2>/dev/null; then
+                    -colors 256 "PNG8:${out}" 2>/dev/null; then
                 log "[SONAR] Filigrane du fond Ventoy : échec ImageMagick, copie de l'image redimensionnée telle quelle."
                 cp -f "${resized}" "${out}"
             fi
@@ -1578,7 +1589,7 @@ sonar_prepare_ventoy_theme() {
             cp -f "$src" "${out}"
         fi
     else
-        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés, ET sans redimensionnement de sécurité. Une image de grande résolution (ex: 1920x1080) a fait planter GRUB sur du vrai matériel (\"alloc magic is broken\", HP EliteBook 840 G3, 2026-09-15) — préférez une image ≤1024x768 si convert n'est pas disponible."
+        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés, ET sans redimensionnement de sécurité. ATTENTION : trois tailles d'image radicalement différentes ont produit le même crash GRUB (\"alloc magic is broken\") sur un HP EliteBook 840 G3 réel (2026-09-15) — la cause probable n'est pas la taille de l'image, --ventoy-theme reste risqué même avec une petite image. Voir CHANGELOG.md."
         cp -f "$src" "${out}"
     fi
     sonar_audit "VENTOY_THEME_INSTALLED" "source=${src}"
@@ -1608,16 +1619,17 @@ if os.path.isfile(theme_png):
     # Keys per Ventoy's own documented theme plugin (ventoy.net) — file is
     # relative to the Ventoy data partition root, same convention as ISO
     # paths above. sonar_prepare_ventoy_theme() is what actually put the
-    # PNG there (and burned the title/credit into it, resized to a safe
-    # size if ImageMagick was available); this only wires it into
-    # ventoy.json. gfxmode leads with 1024x768 (not 1920x1080) since a
-    # full-HD background crashed GRUB's own PNG decoder on real hardware
-    # (HP EliteBook 840 G3, 2026-09-15 — see CHANGELOG.md) before Ventoy's
-    # menu ever appeared; 1024x768 is the resolution sonar_prepare_ventoy_
-    # theme() now targets, so this should match what's actually on disk.
+    # PNG there (indexed/palette color, resized to a safe size if
+    # ImageMagick was available); this only wires it into ventoy.json.
+    # gfxmode leads with 800x600 (not 1024x768) since 1024x768 RGB
+    # truecolor (~2.25MB decoded) ALSO crashed GRUB's PNG decoder on real
+    # hardware (HP EliteBook 840 G3, 2026-09-15 — see CHANGELOG.md
+    # v3.25.0/v3.26.0) even after being resized down from 1920x1080 —
+    # 800x600 is the resolution sonar_prepare_ventoy_theme() now targets,
+    # so this should match what's actually on disk.
     cfg["theme"] = {
         "file": "/ventoy/theme/background.png",
-        "gfxmode": "1024x768,800x600",
+        "gfxmode": "800x600,1024x768",
         "boot_menu_language": "fr",
         "ventoy_left": "10%",
         "ventoy_top": "38%",
@@ -4168,7 +4180,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.25.0-ventoy-theme-disabled-by-default"
+SONAR_VERSION="3.26.0-ventoy-theme-root-cause-ruled-out"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

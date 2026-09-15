@@ -275,13 +275,18 @@ copie :
 ### Personnaliser le fond d'écran Ventoy
 
 **Désactivé par défaut depuis le 2026-09-15** (`--ventoy-theme` pour
-l'activer explicitement). Ce n'est pas une prudence théorique : un fond
-1024×768 (résolution VESA classique, censée être sûre en pré-boot) a
-quand même fait planter GRUB (`alloc magic is broken`) sur un HP
-EliteBook 840 G3 réel, **après** qu'une première correction (réduction
-depuis 1920×1080) ait été testée et se soit révélée insuffisante — voir
-`CHANGELOG.md`. N'activez `--ventoy-theme` qu'après un test réel sur
-le matériel cible précis, avec un plan de retour en arrière
+l'activer explicitement). Ce n'est pas une prudence théorique : sur un
+HP EliteBook 840 G3 réel, **trois tailles d'image radicalement
+différentes** ont été testées le même jour — 1920×1080 RGB (~6 Mo
+décodés), 1024×768 RGB (~2,25 Mo), puis 800×600 en PNG indexé/palette
+(~480 Ko, ~12x plus petit que la première) — et **les trois ont produit
+exactement le même crash GRUB** (`alloc magic is broken`). Conclusion :
+la taille de l'image décodée n'est probablement pas la vraie cause ; le
+module thème/gfxmenu de Ventoy lui-même semble incompatible avec ce
+firmware, indépendamment de l'image fournie — voir `CHANGELOG.md`
+v3.25.0/v3.26.0 pour le détail. Réduire encore l'image ne réglera
+vraisemblablement rien. N'activez `--ventoy-theme` qu'après un test réel
+sur le matériel cible précis, avec un plan de retour en arrière
 (`--no-ventoy-theme` ou édition manuelle de `ventoy/ventoy.json` pour
 retirer le bloc `"theme"`, comme documenté dans le CHANGELOG).
 

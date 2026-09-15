@@ -70,18 +70,23 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
       - [ ] Testé sur 2-3 machines différentes (BIOS legacy + UEFI) — un
             seul support testé jusqu'ici (UEFI + Secure Boot), pas encore
             de test en mode Legacy/CSM ni sur un autre modèle.
-      - [x] **Thème Ventoy personnalisé re-testé après correction
-            (2026-09-15) — la correction v3.12.0 (1024×768) ne suffit
-            PAS.** Réappliqué sur la clé physique (image + bloc `theme`
-            dans `ventoy.json`) et rebooté sur le même HP EliteBook 840
-            G3 : **même crash** `alloc magic is broken`, malgré la
-            réduction de taille précédemment jugée sûre. Conclusion :
-            la taille de l'image n'était pas (ou pas seule) la vraie
-            cause. Décision immédiate : thème repassé en **désactivé
-            par défaut** (`INCLUDE_VENTOY_THEME=false`, nouveau flag
-            `--ventoy-theme` pour l'activer explicitement) — voir
-            CHANGELOG v3.25.0. Cause racine réelle non résolue, reste
-            ouverte ci-dessous.
+      - [x] **Thème Ventoy personnalisé re-testé deux fois après
+            correction (2026-09-15) — la théorie "taille d'image"
+            est écartée.** Trois essais réels sur le même HP EliteBook
+            840 G3 le même jour : 1920×1080 RGB (~6 Mo décodés, crash
+            initial v3.11.x), 1024×768 RGB (~2,25 Mo, correction
+            v3.12.0 réappliquée pour de vrai — **crash identique**),
+            800×600 PNG indexé/palette (~480 Ko, ~12x plus petit —
+            **crash identique une troisième fois**). Conclusion :
+            réduire l'image, même radicalement, ne change rien —
+            la vraie cause est probablement le module thème/gfxmenu de
+            Ventoy lui-même sur ce firmware, pas la taille de l'image.
+            Décision : thème repassé en **désactivé par défaut**
+            (`INCLUDE_VENTOY_THEME=false`, nouveau flag `--ventoy-theme`
+            pour l'activer explicitement, avertissement mis à jour) —
+            voir CHANGELOG v3.25.0/v3.26.0. Cause racine réelle non
+            résolue (hors de portée d'une correction SONAR-SE), voir
+            "Dette technique connue" ci-dessous.
       **Mitigation logicielle en place depuis v3.5.0** : tout déploiement
       réel (`--disk` sans `--dry-run`) affiche un avertissement explicite
       et exige un acquiescement séparé (`JE COMPRENDS LE RISQUE` ou
@@ -338,16 +343,23 @@ vrai — plus besoin d'attendre :
 - Comparaison "temps constant" best-effort, pas formellement vérifiée
 - Fichier monolithique en attendant P1
 - Aucune gestion multi-technicien concurrente sur le hashchain/audit partagé
-- **Cause racine du crash GRUB du thème Ventoy non résolue** (2026-09-15) :
-  la réduction à 1024×768 (hypothèse "taille décodée trop grande pour le
-  tas GRUB en pré-boot") a été re-testée en vrai sur le HP EliteBook 840
-  G3 et **échoue toujours**, même erreur `alloc magic is broken`. Donc
-  soit le seuil réel est plus bas que 1024×768, soit la cause n'est pas
-  (uniquement) la taille décodée — profondeur de couleur/canal alpha du
-  PNG (Pillow produit du RGBA par défaut, pas RGB) à examiner en
-  premier. Mitigation en place : thème désactivé par défaut
-  (`--ventoy-theme` pour l'activer, à ses risques). Pas de piste
-  supplémentaire testée faute d'un second cycle de reboot matériel.
+- **Cause racine du crash GRUB du thème Ventoy non résolue — théorie de
+  la taille d'image probablement écartée** (2026-09-15) : trois tests
+  réels sur le même HP EliteBook 840 G3 le même jour — 1920×1080 RGB
+  (~6 Mo décodés, crash), 1024×768 RGB (~2,25 Mo, crash), 800×600 PNG
+  indexé/palette (~480 Ko, ~12x plus petit, **crash identique**).
+  L'hypothèse RGBA a aussi été vérifiée et écartée (l'image était déjà
+  en RGB pur, `color_type=2`, pas d'alpha). Une réduction de taille
+  décodée par 12x n'a fait aucune différence observable : la cause la
+  plus probable n'est plus la taille de l'image mais une incompatibilité
+  du module thème/gfxmenu de Ventoy lui-même avec ce firmware précis —
+  hors de portée d'une correction SONAR-SE (code tiers). Mitigation en
+  place, jugée définitive pour l'instant : thème désactivé par défaut
+  (`--ventoy-theme` pour l'activer, à ses risques, avec avertissement
+  mis à jour dans `--help`). Piste non explorée si quelqu'un veut
+  creuser un jour : reporter en amont à Ventoy, ou tester sur un second
+  modèle de machine pour savoir si c'est spécifique à ce HP EliteBook
+  ou général.
 
 ## Cadence suggérée (solo)
 

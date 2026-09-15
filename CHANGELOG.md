@@ -6,6 +6,80 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.26.0-ventoy-theme-root-cause-ruled-out] — 2026-09-15
+
+### Contexte
+Suite immédiate de v3.25.0 (quelques minutes plus tôt, même session).
+Après avoir désactivé le thème par défaut suite à l'échec du correctif
+1024×768, l'hypothèse de travail restait "c'est une question de taille
+d'image décodée, juste le seuil de v3.12.0 était trop optimiste".
+Testée directement : l'image par défaut a été régénérée en **PNG
+indexé/palette 800×600** (1 octet/pixel au lieu de 3 pour RGB
+truecolor, ~480 Ko décodés au lieu de ~2,25 Mo) — une réduction de
+~12x par rapport à ce qui avait crashé quelques minutes plus tôt.
+Réappliquée sur la clé physique, rebootée sur le même HP EliteBook
+840 G3.
+
+### Trouvé — la théorie "taille d'image" ne tient plus
+**Même crash**, `alloc magic is broken`, identique aux deux essais
+précédents. Sur les trois tailles testées le même jour (6 Mo, 2,25 Mo,
+480 Ko décodés — un facteur 12 entre la plus grande et la plus petite),
+**aucune différence de comportement observée**. Au passage, l'hypothèse
+RGBA (canal alpha doublant la mémoire décodée, Pillow générant du RGBA
+par défaut) a aussi été vérifiée directement dans les octets du PNG
+(`color_type=2` = RGB pur, pas d'alpha) et écartée avant même ce
+troisième test.
+
+**Conclusion révisée** : la taille de l'image décodée n'est
+probablement pas la cause du crash, ou en tout cas pas la cause
+principale. L'explication la plus plausible maintenant est une
+incompatibilité du module thème/gfxmenu de Ventoy lui-même avec le
+firmware de cette machine précise — un problème potentiellement côté
+Ventoy/GRUB, hors de portée d'une correction dans `sonar_master.sh`
+(code tiers qu'on ne maintient pas).
+
+### Changé
+- Pipeline de génération du thème (`sonar_prepare_ventoy_theme`) :
+  cible maintenant 800×600 + `-colors 256`/PNG8 (palette) au lieu de
+  1024×768 RGB truecolor. Gardé malgré l'échec du test : c'est
+  strictement moins coûteux en mémoire décodée (jamais une régression),
+  même si ce n'est plus présenté comme "le correctif" — juste une
+  amélioration qui ne suffit pas à elle seule. Validé fonctionnellement
+  (pipeline complet resize+incrustation+palette testé avec une vraie
+  image 1920×1080 via ImageMagick réel, sortie confirmée en PNG indexé
+  800×450 — voir "Testé").
+- `gfxmode` par défaut dans `ventoy.json` : `"800x600,1024x768"` (ordre
+  inversé, la résolution la plus petite d'abord).
+- Avertissements `--help`/logs mis à jour pour refléter la vraie
+  histoire (trois tailles testées, même crash) plutôt que de laisser
+  entendre qu'une image plus petite réglerait le problème.
+- `docs/DEPLOYMENT.md`, `ROADMAP.md` : section et entrées mises à jour
+  avec la conclusion révisée. Hypothèse RGBA retirée de "Dette
+  technique connue" (vérifiée fausse, pas juste non testée).
+- **Clé physique (`E:`) à nouveau remise dans son état fonctionnel
+  connu** (thème retiré) après confirmation du troisième crash.
+
+### Testé
+Re-test réel sur HP EliteBook 840 G3 (même machine que les deux essais
+précédents) : image 800×600 indexée réappliquée → **crash confirmé une
+troisième fois** ; thème retiré → boot confirmé de nouveau fonctionnel.
+Séparément, le pipeline `sonar_prepare_ventoy_theme` lui-même (chemin
+opérateur, pas le chemin "prebaked") a été testé fonctionnellement sous
+WSL2 avec ImageMagick réel : image 1920×1080 en entrée → sortie
+800×450 (ratio préservé) confirmée en PNG indexé (`color_type=3`) via
+lecture directe des octets IHDR — le code fait ce qu'il est censé
+faire, même si ça ne résout pas le crash sous-jacent. `bash -n`,
+`shellcheck --severity=error` (rien), `--self-audit`, `--self-test`
+(0 FAIL) sous WSL2 Ubuntu.
+
+### Non résolu
+Cause racine toujours inconnue. Best guess actuel : bug/incompatibilité
+Ventoy 1.1.17 × ce firmware précis, pas quelque chose que
+`sonar_master.sh` peut corriger. Le thème reste opt-in
+(`--ventoy-theme`), avec avertissement honnête. Piste pour une
+prochaine fois : reporter en amont à Ventoy, ou tester sur un second
+modèle de machine pour savoir si c'est spécifique à ce HP EliteBook.
+
 ## [3.25.0-ventoy-theme-disabled-by-default] — 2026-09-15
 
 ### Contexte
