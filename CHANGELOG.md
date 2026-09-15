@@ -6,6 +6,96 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.15.0-profiles-step1] — 2026-09-15
+
+### Contexte
+Recentrage stratégique demandé explicitement : SONAR a grandi en surface
+(catalogue de 981 outils, couche IA, smart advisor, profil builder) sans
+grandir en profondeur (les outils qui dépannent réellement une machine).
+Sur les quatre étapes d'une vraie boîte à outils de dépannage —
+1) savoir quoi inclure, 2) l'acquérir et le vérifier, 3) l'organiser sur
+la clé, 4) prouver ce qui s'y trouve — SONAR était fort sur (3), avait un
+peu de (4), et ne faisait **rien** pour (1) et (2). Le catalogue de 981
+outils documentait l'écosystème sans jamais dire ce qui allait
+réellement sur la clé, et rien ne le téléchargeait de façon ciblée et
+vérifiée.
+
+Cette version est l'**étape 1** d'un plan en 6 étapes (voir
+`ROADMAP.md`) : remplacer le catalogue comme source de vérité du
+déploiement par un petit nombre de profils de dépannage fermés,
+documentés, testés. Un commit par étape, comme demandé — celui-ci ne
+touche qu'à l'étape 1 (curation), pas au téléchargement (étape 2,
+`--fetch`, pas encore implémenté) ni à quoi que ce soit d'autre. Résisté
+à la tentation d'élargir.
+
+### Ajouté
+- **`--profile [NOM|list]`** : six profils fermés et documentés —
+  `boot-repair`, `data-recovery`, `malware`, `disk-clone`,
+  `password-reset`, `full` (union des cinq précédents). Pour chacun :
+  scénario concret, liste d'outils, et **pourquoi** ceux-là précisément
+  (voir `SONAR_PROFILES_TSV` dans `sonar_master.sh`, ou
+  `docs/CATALOG.md`). Tous les outils choisis sont librement
+  téléchargeables et redistribuables (pas de compte, pas de licence
+  commerciale) — condition nécessaire pour que l'étape 2 (`--fetch`)
+  puisse les récupérer sans jamais demander d'identifiants tiers.
+  Plusieurs des outils cités initialement par l'auteur en exemple
+  (R-Studio Portable, Macrium Reflect, EasyUEFI, Malwarebytes, ESET
+  Online Scanner) ont été substitués par des équivalents libres pour
+  cette raison : SystemRescue (regroupe GParted/TestDisk/ddrescue/ClamAV
+  dans un seul support Linux maintenu), TestDisk+PhotoRec
+  (cgsecurity.org), GNU ddrescue, ClamAV, Clonezilla, GParted Live,
+  chntpw.
+- Trois tests de régression `--self-test` : les six profils se
+  documentent sans erreur, un nom de profil inconnu est rejeté, et le
+  profil `full` contient bien l'union des outils des cinq autres
+  (vérifié via la présence de SystemRescue, ClamAV et chntpw dans sa
+  sortie).
+
+### Changé (gel, rien de supprimé)
+- **Catalogue embarqué (981 outils, `SONAR_CATALOGUE_EMBEDDED`)** :
+  gelé comme base de connaissance consultable. `docs/CATALOG.md` et
+  `README.md` reformulés pour le dire explicitement — ce catalogue ne
+  décide plus de ce qui va sur la clé, les profils `--profile` le
+  font. Rien n'est supprimé : `--catalog-download*`,
+  `--catalog-seal`/`--catalog-verify-seal` restent fonctionnels.
+- **Couche IA (`--ai`, `--ai-download`, `--ollama-audit`, etc.)** et
+  **`--smart-advisor`/`--mission-report`** : marqués `[EXPÉRIMENTAL]`
+  dans `--help`, sans changement de comportement — gelés, pas
+  développés davantage tant que les étapes 1-3 ne sont pas terminées.
+- **`--builder [PROFILE]`** (profils MINIMAL/TECHNICIAN/RECOVERY/
+  FORENSIC/ADMIN/FULL/CUSTOM) : marqué `[EXPÉRIMENTAL/GELÉ]` dans
+  `--help` — concept distinct des nouveaux profils de dépannage
+  `--profile`, à ne pas confondre. Ce qu'il construisait avant reste
+  disponible, juste plus la direction du projet.
+- `README.md` : bandeau de statut corrigé (le déploiement matériel réel
+  a depuis réussi — voir v3.11.2/v3.12.0 — l'ancien texte affirmait
+  encore "jamais testé sur boot réel") et nouvelle formule explicite :
+  *"SONAR construit la clé et trace son origine. Les outils qui
+  dépannent sont ceux des profils --profile X. SONAR ne répare rien
+  lui-même."*
+
+### Non fait dans cette version (volontairement)
+- **Étape 2 (`--fetch`, téléchargement vérifié par manifeste signé
+  GPG/HMAC)** : pas commencée. Les URLs/checksums réels des outils
+  ci-dessus ont été identifiés par recherche (SystemRescue publie un
+  `.sha256` et un `.asc` GPG ; ClamAV publie un `.sig` ; TestDisk/
+  PhotoRec sont livrés dans la même archive cgsecurity.org) mais ne
+  sont pas encore encodés dans le script — les coder maintenant sans
+  les vérifier un par un serait risquer un manifeste signé mais faux,
+  pire qu'un manifeste absent.
+- **Étapes 3 à 6** (SystemRescue embarqué par défaut, WinPE/ADK, menu
+  orienté tâche, validation matérielle des profils) : pas commencées,
+  voir `ROADMAP.md`.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien, binaire statique
+koalaman/shellcheck v0.10.0 — `apt`/`shellcheck` indisponible sans sudo
+interactif dans cette session WSL), `--self-audit`, `--self-test`
+(0 FAIL, warnings inchangés) — exécutés sous WSL2 Ubuntu (Python réel,
+pas le stub WindowsApps). Les six profils vérifiés manuellement en plus
+des tests automatisés (`--profile list`, `--profile boot-repair`,
+`--profile bogus` pour confirmer le rejet).
+
 ## [3.14.0-rbac-security-audit] — 2026-09-15
 
 ### Contexte

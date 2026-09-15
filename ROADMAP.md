@@ -90,6 +90,50 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
         DESTRUCTIVE/FORENSIC ci-dessus restent ouvertes, elles demandent
         une décision produit/matérielle, pas juste du code.
 
+## P0bis — Recentrage stratégique (curation + acquisition)
+
+Demandé explicitement le 2026-09-15 : le catalogue de 981 outils
+documentait l'écosystème du dépannage sans jamais dire ce qui allait
+réellement sur la clé, et rien ne le téléchargeait de façon ciblée et
+vérifiée. Six étapes, un commit par étape, pas de nouvelle fonctionnalité
+hors de ce périmètre tant qu'elles ne sont pas faites.
+
+- [x] **Étape 1 — Profils de dépannage fermés et documentés**
+      (v3.15.0-profiles-step1, 2026-09-15) : `--profile
+      boot-repair|data-recovery|malware|disk-clone|password-reset|full`,
+      scénario + outils + pourquoi pour chacun. Catalogue 981 gelé comme
+      base de connaissance (`docs/CATALOG.md`), plus source de vérité du
+      déploiement. IA/smart-advisor/`--builder` marqués `[EXPÉRIMENTAL]`
+      dans `--help` sans suppression.
+- [ ] **Étape 2 — `--fetch <profil>`** : télécharge chaque outil du
+      profil depuis une URL connue, vérifie le SHA-256 contre un
+      manifeste **signé** (GPG ou HMAC via le secret de build existant,
+      `sonar_hmac_sha256_file`), refuse sur non-correspondance, journalise
+      source+SHA-256 dans `MANIFEST/`. URLs/checksums déjà identifiés
+      pour SystemRescue (`.sha256` + `.asc` GPG), ClamAV (`.sig`),
+      TestDisk/PhotoRec (cgsecurity.org) — pas encore encodés dans le
+      script (voir CHANGELOG v3.15.0, section "Non fait").
+- [ ] **Étape 3 — Environnement de boot complet** : intégrer SystemRescue
+      par défaut dans les profils `boot-repair` et `disk-clone`
+      (téléchargement + vérification SHA-256 + signature GPG amont).
+- [ ] **Étape 4 — WinPE via Windows ADK** : la pièce qui différencie
+      MediCat/Hiren's/Strelec. Techniquement impossible à piloter depuis
+      ce script (ADK est un outillage Windows uniquement ; le script
+      exige Linux+root via `preflight_final`). Si trop lourd à court
+      terme : documenter explicitement que SONAR ne fournit pas de WinPE
+      et que l'opérateur doit en fournir un — ne pas sauter cette étape
+      en silence.
+- [ ] **Étape 5 — Menu orienté tâche** ("Boot cassé ? Récupération ?
+      Malware ? Clone ?") plutôt qu'orienté fichier — probablement un
+      script dans l'environnement de boot embarqué (étape 3), Ventoy/GRUB
+      seul ne permettant pas facilement ce branchement.
+- [ ] **Étape 6 — Validation matérielle des profils** : au moins 3
+      scénarios réels (boot Windows cassé réparé via `boot-repair`,
+      fichier supprimé récupéré via `data-recovery`, machine infectée
+      nettoyée via `malware`), documentés dans `CHANGELOG.md` — ce qui a
+      marché, ce qui a échoué, ce qui a surpris. Dépend de l'accès
+      matériel de l'opérateur.
+
 ## P2 — Maturité produit
 
 - [ ] Signature GPG des releases + page de release officielle

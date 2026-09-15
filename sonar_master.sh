@@ -902,7 +902,7 @@ Sécurité:
   --build-manifest [DIR]     Générer un manifeste SHA-256
   --verify-manifest          Vérifier le manifeste SHA-256
 
-IA:
+IA [EXPÉRIMENTAL — gelé depuis 2026-09-15, hors périmètre de --profile] :
   --ai MODE                  off|auto|local|online (défaut: auto)
   --ai-model MODEL           Modèle local/serveur
   --ai-endpoint URL          Endpoint compatible OpenAI
@@ -938,6 +938,12 @@ Commandes indépendantes (à la place de --disk):
                                 pas d'IA, pas d'URL codée en dur ; couverture
                                 partielle par nature (rien ne peut auto-
                                 télécharger un logiciel commercial/sous licence)
+  --profile [NOM|list]        Profils de dépannage fermés et documentés :
+                                boot-repair|data-recovery|malware|disk-clone|
+                                password-reset|full — scénario, outils, et
+                                POURQUOI ceux-là (pas le catalogue 981, qui
+                                n'est qu'une base de connaissance). Sans
+                                argument (ou "list") : vue d'ensemble.
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -951,11 +957,14 @@ Couche opérationnelle V2:
                                 Génère la chaîne de possession pour une
                                 acquisition (croise l'audit et le hashchain)
   --network-diagnostic        Rapport réseau non intrusif
-  --builder [PROFILE]         Construire un support logiciel local
+  --builder [PROFILE]         [EXPÉRIMENTAL/GELÉ — concept distinct de
+                                --profile ; profils MINIMAL/TECHNICIAN/
+                                RECOVERY/FORENSIC/ADMIN/FULL/CUSTOM]
+                                Construire un support logiciel local
   --release-report            Générer le rapport de release
   --dependencies-report       Générer le rapport des dépendances
 
-Intelligence & intégrité (moteur déterministe, aucun appel LLM):
+Intelligence & intégrité (moteur déterministe, aucun appel LLM) [EXPÉRIMENTAL] :
   --smart-advisor              Analyse croisée (dépendances, hashchain, manifeste,
                                 couverture catalogue, scellé, rôle) + score priorisé
   --mission-report              Rapport de mission unique (advisor + dépendances)
@@ -3360,6 +3369,112 @@ sonar_catalog_download_final() {
 }
 
 
+# === SONAR TROUBLESHOOTING PROFILES V1 ===
+# Recentrage strategique (2026-09-15) : le catalogue de reference embarque
+# (981 outils, SONAR_CATALOGUE_EMBEDDED) documente ce qui EXISTE dans
+# l'ecosysteme du depannage ; il ne dit pas ce qui va reellement sur la
+# cle, et rien ne le telechargeait jusqu'ici de facon ciblee et verifiee.
+# A partir de cette version, ce qui va sur la cle est decide par un petit
+# nombre de profils FERMES, documentes, avec une raison explicite par
+# outil. Le catalogue 981 reste consultable comme base de connaissance
+# (voir docs/CATALOG.md) mais n'est plus la source de verite du
+# deploiement — cette source de verite, ce sont les profils ci-dessous.
+#
+# Chaque outil est choisi pour etre librement telechargeable et
+# redistribuable (pas de compte, pas de licence commerciale) : c'est ce
+# qui rend --fetch (etape 2 de la feuille de route) possible sans jamais
+# demander a l'operateur un identifiant/mot de passe pour un tiers.
+#
+# Format: PROFILE\tTOOL\tWHY (une ligne par outil ; un outil peut
+# apparaitre dans plusieurs profils, ex. SystemRescue dans boot-repair ET
+# disk-clone — c'est voulu, ca mutualise le support de boot). "full"
+# n'est pas repete ligne par ligne ici : c'est l'union calculee des cinq
+# autres profils (voir sonar_profile_tools full).
+SONAR_PROFILES_TSV="$(cat <<'PROFILES_EOF'
+PROFILE	TOOL	WHY
+boot-repair	SystemRescue	Environnement de boot Linux maintenu activement (Arch-based, ISO signee GPG, ~1.3 Go) regroupant GParted, TestDisk, ddrescue et ClamAV dans un seul support — base commune de ce profil et du profil disk-clone.
+boot-repair	GParted	Inspection et reparation de la table de partitions (inclus dans SystemRescue) — necessaire quand le boot casse a cause d'une table de partitions endommagee.
+boot-repair	TestDisk	Reconstruction de secteur de boot / table de partitions (inclus dans SystemRescue, aussi telechargeable seul sur cgsecurity.org) — c'est son cas d'usage d'origine.
+data-recovery	TestDisk	Recuperation de partitions et systemes de fichiers a partir d'un disque endommage ou mal reformate.
+data-recovery	PhotoRec	Recuperation de fichiers par recherche de signatures (file carving), independante des metadonnees du systeme de fichiers — complementaire a TestDisk quand la structure elle-meme est perdue. Livre dans la meme archive que TestDisk (cgsecurity.org).
+data-recovery	ddrescue	Cree une image secteur par secteur d'un disque en train de mourir AVANT toute tentative de recuperation — etape standard qui evite d'aggraver les dommages en ecrivant/lisant a repetition sur le disque source.
+malware	ClamAV	Seul moteur antivirus open-source majeur, librement redistribuable et a signatures mises a jour (freshclam) — Malwarebytes et ESET Online Scanner ecartes : logiciels proprietaires non redistribuables librement, plusieurs exigent un compte en ligne, donc non automatisables par --fetch.
+disk-clone	SystemRescue	Meme environnement de boot que boot-repair (mutualisation du support) — fournit le shell Linux pour piloter Clonezilla/GParted/ddrescue depuis une seule cle.
+disk-clone	Clonezilla	Clonage/imagerie de disque ou partition, standard open-source du secteur, supporte de nombreux systemes de fichiers.
+disk-clone	GParted	Redimensionnement et gestion de partitions independamment d'un clonage complet (inclus dans SystemRescue).
+disk-clone	ddrescue	Clonage secteur par secteur d'un disque physiquement defaillant, avant ou a la place d'un clonage logique classique.
+password-reset	chntpw	Seul outil libre maintenu de longue date qui edite directement la ruche registre SAM de Windows pour reinitialiser un mot de passe de compte local hors-ligne — support minuscule (~18 Mo), integrable sans alourdir la cle.
+PROFILES_EOF
+)"
+
+SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset full"
+
+sonar_profile_names() { echo "${SONAR_PROFILE_NAMES}"; }
+
+sonar_profile_scenario() {
+    case "$1" in
+        boot-repair) echo "Windows ou Linux ne demarre plus : MBR/GPT ou bootloader corrompu, table de partitions endommagee, fichiers systeme casses empechant le demarrage." ;;
+        data-recovery) echo "Fichiers supprimes ou partition/systeme de fichiers endommage : recuperer des donnees avant qu'elles ne soient ecrasees ou que le disque ne lache completement." ;;
+        malware) echo "Machine infectee : analyser et nettoyer depuis l'exterieur du systeme d'exploitation infecte, la ou le malware ne peut ni se cacher ni se defendre." ;;
+        disk-clone) echo "Migration ou sauvegarde bloc-a-bloc d'un disque : remplacement de disque, image avant intervention risquee, ou disque physiquement defaillant a cloner avant qu'il ne lache." ;;
+        password-reset) echo "Compte Windows local verrouille (mot de passe perdu, poste recupere sans compte admin) : reinitialisation hors-ligne du mot de passe." ;;
+        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les cinq scenarios." ;;
+        *) return 1 ;;
+    esac
+}
+
+# sonar_profile_tools PROFILE -> lines "TOOL\tWHY" (dedupliquees pour "full").
+sonar_profile_tools() {
+    local profile="${1:-}"
+    if [[ "$profile" == "full" ]]; then
+        awk -F'\t' 'NR>1 {print $2"\t"$3}' <<<"${SONAR_PROFILES_TSV}" | awk -F'\t' '!seen[$1]++'
+    else
+        awk -F'\t' -v p="$profile" 'NR>1 && $1==p {print $2"\t"$3}' <<<"${SONAR_PROFILES_TSV}"
+    fi
+}
+
+# sonar_profile_list_all: vue d'ensemble des profils (nom + scenario en une ligne).
+sonar_profile_list_all() {
+    echo "Profils de depannage SONAR disponibles :"
+    echo
+    local p
+    for p in ${SONAR_PROFILE_NAMES}; do
+        printf '  %-14s %s\n' "$p" "$(sonar_profile_scenario "$p")"
+    done
+    echo
+    echo "Detail complet (outils + justification) : --profile <nom>"
+}
+
+# sonar_profile_doc PROFILE -> scenario + outils + pourquoi, pour un profil precis.
+sonar_profile_doc() {
+    local profile="${1:-}" scenario tools
+    scenario="$(sonar_profile_scenario "$profile")" || {
+        echo "[SONAR][ERROR] Profil inconnu: '${profile}'. Profils disponibles: $(sonar_profile_names)" >&2
+        return 2
+    }
+    tools="$(sonar_profile_tools "$profile")"
+    if [[ -z "$tools" ]]; then
+        echo "[SONAR][ERROR] Profil '${profile}' sans outil defini (bug interne)." >&2
+        return 3
+    fi
+    echo "=== Profil SONAR: ${profile} ==="
+    echo
+    echo "Scenario: ${scenario}"
+    echo
+    echo "Outils et justification :"
+    while IFS=$'\t' read -r tool why; do
+        [[ -z "$tool" ]] && continue
+        printf -- '  - %s\n      -> %s\n' "$tool" "$why"
+    done <<< "$tools"
+    echo
+    echo "NOTE: le catalogue de 981 outils embarque (--help pour SONAR_CATALOGUE_EMBEDDED)"
+    echo "      reste une base de connaissance consultable ; ce profil, pas ce catalogue,"
+    echo "      decide de ce qui va reellement sur la cle."
+    echo "NOTE: telechargement verifie (--fetch ${profile}) : etape 2 de la feuille de"
+    echo "      route, pas encore implementee dans cette version — voir ROADMAP.md."
+    sonar_audit "PROFILE_DOC_VIEWED" "profile=${profile}"
+}
+
 # === SONAR AI DRY-RUN REPORT ENGINE V1 ===
 SONAR_AI_REPORT_DIR="${SONAR_AI_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/AI_REPORT}"
 SONAR_AI_REPORT="${SONAR_AI_REPORT:-${SONAR_AI_REPORT_DIR}/ai_dry_run_report.tsv}"
@@ -3558,7 +3673,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.14.0-rbac-security-audit"
+SONAR_VERSION="3.15.0-profiles-step1"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -3885,6 +4000,26 @@ sonar_self_test_v2() {
             printf 'FAIL\tBuild watermark generation/verification/tamper-detection did not behave as expected\n'; errors=$((errors+1))
         fi
         rm -rf "${_wm_root}" "${_wm_mp}"
+        grep -q '^SONAR_PROFILES_TSV=' "$self" && printf 'PASS\tTroubleshooting profiles module present\n' || { printf 'FAIL\tTroubleshooting profiles module missing\n'; errors=$((errors+1)); }
+        local _prof _prof_ok=true
+        for _prof in boot-repair data-recovery malware disk-clone password-reset full; do
+            if ! "$self" --profile "${_prof}" >/dev/null 2>&1; then
+                printf 'FAIL\tProfile "%s" failed to document\n' "${_prof}"; errors=$((errors+1)); _prof_ok=false
+            fi
+        done
+        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll six troubleshooting profiles document scenario + tools\n'
+        if "$self" --profile bogus-profile >/dev/null 2>&1; then
+            printf 'FAIL\tUnknown profile name was NOT rejected\n'; errors=$((errors+1))
+        else
+            printf 'PASS\tUnknown profile name is rejected\n'
+        fi
+        local _full_out
+        _full_out="$("$self" --profile full 2>/dev/null)"
+        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}"; then
+            printf 'PASS\tProfile "full" is the union of all profiles\n'
+        else
+            printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))
+        fi
         echo
         echo "ERRORS=$errors"
         echo "WARNINGS=$warnings"
@@ -4785,6 +4920,14 @@ case "${1:-}" in
     --catalog-download-resolve) if sonar_catalog_resolve_apt; then exit 0; else exit $?; fi ;;
     --catalog-download-dry-run) if sonar_catalog_download_final --dry-run; then exit 0; else exit $?; fi ;;
     --catalog-download) if sonar_catalog_download_final; then exit 0; else exit $?; fi ;;
+    --profile)
+        shift
+        if [[ -z "${1:-}" || "${1:-}" == "list" ]]; then
+            if sonar_profile_list_all; then exit 0; else exit $?; fi
+        else
+            if sonar_profile_doc "${1:-}"; then exit 0; else exit $?; fi
+        fi
+        ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;

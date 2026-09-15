@@ -4,11 +4,21 @@ Outil de déploiement automatisé pour clé USB de maintenance IT (Ventoy +
 persistance + module forensique/backup/recovery + couche RBAC), en un seul
 script Bash auto-vérifiable.
 
-> **Statut : CANDIDATE.** Validé par tests automatisés (`--self-audit`,
-> `--self-test`) et par des runs `--dry-run` sur périphérique bloc réel
-> (`/dev/loop`). **Jamais encore testé sur un vrai déploiement USB /
-> boot réel.** Voir `CHANGELOG.md` (section "Non résolu") et `ROADMAP.md`
-> avant tout usage en production.
+> **Ce que SONAR fait, et ne fait pas :** SONAR construit la clé et trace
+> son origine (déploiement Ventoy, manifeste SHA-256, filigrane de build,
+> verrou de rôle, journal d'audit chaîné). **Les outils qui dépannent
+> réellement une machine sont ceux des profils `--profile <nom>`
+> (`boot-repair`, `data-recovery`, `malware`, `disk-clone`,
+> `password-reset`, `full`) — SONAR ne répare rien lui-même.** Le
+> catalogue de 981 outils (`docs/CATALOG.md`) est une base de
+> connaissance consultable, pas la source de vérité de ce qui va sur la
+> clé.
+
+> **Statut : validé sur un premier déploiement matériel réel** (SSD USB
+> externe, boot UEFI + Secure Boot confirmé — voir `ROADMAP.md` section
+> P0). Testé sur une seule machine/configuration à ce jour ; pas encore
+> sur BIOS legacy ni sur un second modèle. Voir `CHANGELOG.md` avant tout
+> usage en production sur du matériel inconnu.
 
 ## Démarrage rapide
 
@@ -40,6 +50,11 @@ git config core.hooksPath hooks/
 # pas d'IA, couverture partielle par nature (voir CHANGELOG.md v3.13.0)
 ./sonar_master.sh --catalog-download-resolve   # rapport seul, rien à télécharger
 ./sonar_master.sh --catalog-download           # télécharge vers SOURCE_DIR/Portable/AptPackages
+
+# Profils de dépannage fermés et documentés (scénario + outils + pourquoi) —
+# c'est CECI, pas le catalogue 981, qui décide de ce qui va sur la clé
+./sonar_master.sh --profile                    # vue d'ensemble des 6 profils
+./sonar_master.sh --profile boot-repair        # détail d'un profil précis
 
 # Voir toutes les commandes disponibles
 ./sonar_master.sh --help
@@ -78,7 +93,8 @@ mais l'authenticité n'est pas confirmable.
 ## Avant tout déploiement réel sur disque
 
 Guide détaillé, étape par étape : [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
-Liste complète des 981 outils couverts (73 domaines) :
+Base de connaissance de référence (981 outils, 73 domaines — **pas** la
+source de vérité du déploiement, voir `--profile` ci-dessus) :
 [`docs/CATALOG.md`](docs/CATALOG.md).
 
 ```bash
