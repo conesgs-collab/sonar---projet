@@ -6,11 +6,19 @@ l'ordre exact des opérations internes (`preflight_final` →
 `deploy_single_disk_final`), pour qu'un opérateur sache précisément à quoi
 s'attendre et où se trouve chaque garde-fou.
 
-> **Rappel important (voir `CHANGELOG.md` v3.5.0)** : ce build n'a jamais
-> été validé sur un démarrage physique réel. Le pipeline ci-dessous a été
-> testé de bout en bout sur périphérique bloc (`/dev/loop`), pas sur un
-> vrai boot BIOS/UEFI. Le garde-fou de l'étape 6 vous le rappellera à
-> chaque déploiement réel tant que ce point ne sera pas levé.
+> **Rappel important (voir `ROADMAP.md`, section P0)** : validé sur un
+> premier déploiement matériel réel avec boot UEFI + Secure Boot effectif
+> (2026-09-14/15) — une seule machine/configuration testée à ce jour, pas
+> encore de BIOS legacy ni de second modèle. Le garde-fou de l'étape 6
+> continue de s'afficher à chaque déploiement réel, quel que soit
+> l'historique de succès précédent.
+>
+> **Ce que SONAR met sur la clé, et ce qu'il n'y met pas par défaut** :
+> le déploiement copie tel quel le contenu de `--source` (voir Étape 0bis
+> ci-dessous) — SONAR ne devine pas quels outils vous voulez, il organise
+> et trace ce que vous lui donnez. Pour que les profils de dépannage
+> (`--profile`) soient réellement utilisables une fois la clé bootée,
+> récupérez leurs outils avec `--fetch` **avant** `--disk` (Étape 0bis).
 
 ---
 
@@ -39,6 +47,42 @@ s'attendre et où se trouve chaque garde-fou.
    encore, mais un `ISO/` vide donnera un `--self-test` avec des
    avertissements. `Branding/background.png` (ou `.jpg`/`.jpeg`) est
    optionnel — voir « Personnaliser le fond d'écran Ventoy » plus bas.
+
+---
+
+## Étape 0bis — Récupérer les outils des profils (recommandé)
+
+Sans cette étape, la clé se déploiera normalement mais les profils de
+dépannage (`--profile boot-repair`, etc.) resteront vides de tout outil
+réellement utilisable sur le terrain — voir `README.md` : "SONAR
+construit la clé et trace son origine. Les outils qui dépannent sont
+ceux des profils `--profile X`."
+
+1. Une seule fois par machine de build, scellez le manifeste de
+   téléchargement (rôle VAULT requis pour la création du scellé) :
+   ```bash
+   sudo SONAR_ROLE=Vault SONAR_ROLE_TOKEN="<jeton Vault>" \
+       ./sonar_master.sh --fetch-manifest-seal
+   ```
+2. Avant `--disk`, récupérez les outils du ou des profils visés (vers
+   votre dossier `--source`, donc **avant** de le passer à `--disk`) :
+   ```bash
+   SONAR_ROOT=. SOURCE_DIR=./SONAR_SOURCE \
+       ./sonar_master.sh --fetch boot-repair
+   ```
+   Chaque outil est téléchargé, son SHA-256 vérifié contre le manifeste
+   scellé (fichier supprimé et commande en échec sur non-correspondance
+   — jamais un fichier non vérifié qui traîne), et tracé dans
+   `SOURCE_DIR/.../FETCH/MANIFEST_FETCH.tsv` + l'audit. Répétez pour
+   chaque profil voulu, ou une seule fois avec `--fetch full` pour tout
+   récupérer d'un coup.
+3. **Rien d'autre à faire** : les fichiers récupérés atterrissent dans
+   `SOURCE_DIR/ISO/Fetched/` ou `SOURCE_DIR/Portable/Fetched/` (selon le
+   type), et l'Étape 10 (`copy_payload_final`) copie **tout**
+   `SOURCE_DIR/ISO` et `SOURCE_DIR/Portable` récursivement sur la clé —
+   aucune étape de déploiement séparée n'est nécessaire pour que
+   Ventoy voie ces ISO (son `VTOY_DEFAULT_SEARCH_ROOT` scanne `/ISO`
+   récursivement par défaut).
 
 ---
 
@@ -209,7 +253,9 @@ pour qu'on n'arrive à cette ligne qu'en toute connaissance de cause.
 copie :
 
 - `ISO/`, `Portable/`, `Scripts/`, `Drivers/`, `macOS/` depuis votre
-  dossier source
+  dossier source — **récursivement**, donc `ISO/Fetched/` et
+  `Portable/Fetched/` produits par `--fetch` (Étape 0bis) sont inclus
+  sans configuration supplémentaire
 - Le catalogue d'outils et son index
 - **`Scripts/sonar-vault.sh`** — coffre chiffré autonome (gpg AES-256),
   sauf si `--no-veracrypt` a été passé (voir `CHANGELOG.md` v3.9.0 pour
@@ -314,6 +360,9 @@ montage automatique par Ventoy au démarrage).
 ## Résumé visuel de l'ordre des opérations
 
 ```
+--fetch <profil> (recommandé, Étape 0bis — récupère les outils dans --source)
+    │
+    ▼
 Brancher USB
     │
     ▼

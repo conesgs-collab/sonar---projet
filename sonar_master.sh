@@ -3508,7 +3508,7 @@ sonar_profile_doc() {
 # confiance GPG multi-fournisseurs re-vérifiée en continu).
 SONAR_FETCH_MANIFEST_TSV="$(cat <<'FETCH_EOF'
 TOOL	URL	SHA256	SIG_URL	SIG_TYPE	NOTES
-SystemRescue	https://fastly-cdn.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso	ad4d670b72859d887c7960142a9a9d36a3e50446694a035e254442f65d6e7572	https://www.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso.asc	gpg	SHA-256 source: fichier .sha256 officiel (HTTPS, system-rescue.org). Signature GPG .asc disponible ; non re-verifiee ici (ISO ~1.3 Go, cle fdupoux).
+SystemRescue	https://fastly-cdn.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso	ad4d670b72859d887c7960142a9a9d36a3e50446694a035e254442f65d6e7572	https://www.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso.asc	gpg	SHA-256 et signature GPG verifies en direct sur l'ISO complete (1,3 Go) cette session (cle Francois Dupoux, fingerprint 0FF11AF0...8320B897) : gpg: Good signature. Les deux methodes de verification concordent.
 TestDisk	https://www.cgsecurity.org/testdisk-7.2.linux26-x86_64.tar.bz2	19669b6d36314d6e531efdf836c768574e8a556d1e9db3c8f3c4e93a5092cb1c		none	Couvre aussi PhotoRec (meme archive). Aucun .sha256/.sig publie par cgsecurity.org ; SHA-256 calcule localement apres telechargement HTTPS depuis le domaine officiel.
 ddrescue	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz	2264622d309d6c87a1cfc19148292b8859a688e9bc02d4702f5cd4f288745542	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz.sig	gpg	Signature GPG verifiee cette session (cle Antonio Diaz, via gnu-keyring.gpg officiel de gnu.org).
 ClamAV	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb	28d6efc5b4423e7830c3559339552eb53870a9eac51ac4efb37d60530d329886	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb.sig	gpg	Signature GPG verifiee cette session (cle Cisco Talos). Paquet .deb : extraire avec 'ar x clamav*.deb && tar xf data.tar.*' (pas besoin de dpkg, fonctionne sur SystemRescue/Arch).
@@ -3853,7 +3853,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.16.0-fetch-step2"
+SONAR_VERSION="3.17.0-boot-env-step3"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

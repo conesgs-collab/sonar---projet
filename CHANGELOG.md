@@ -6,6 +6,66 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.17.0-boot-env-step3] — 2026-09-15
+
+### Contexte
+Étape 3/6 du recentrage : "intégrer SystemRescue par défaut dans les
+profils `boot-repair` et `disk-clone`". En creusant, deux choses très
+différentes se cachaient derrière cette phrase — l'une déjà faite sans
+le savoir, l'autre une vraie réserve de sécurité laissée ouverte au
+commit précédent.
+
+### Trouvé (pas un bug — une vérification de ce qui existait déjà)
+- **L'intégration "par défaut" ne demandait aucun nouveau code.**
+  `copy_payload_final` (Étape 10 du déploiement) copie déjà
+  `SOURCE_DIR/ISO` vers la clé avec `cp -a` (récursif), et le
+  `ventoy.json` généré par `generate_ventoy_json_final` fixe déjà
+  `VTOY_DEFAULT_SEARCH_ROOT` sur `/ISO` — que Ventoy scanne
+  récursivement par défaut. Conséquence directe : tout fichier déposé
+  par `--fetch boot-repair` (ou `disk-clone`) dans `ISO/Fetched/`
+  atterrit sur la clé et devient une entrée de boot Ventoy sans code de
+  "câblage" supplémentaire entre `--fetch` et `--disk`. Vérifié en
+  lisant le pipeline existant, pas supposé.
+- Décision délibérée de **ne pas** faire déclencher `--fetch`
+  automatiquement par `--disk` : `--disk` reste utilisable hors-ligne
+  par défaut (cohérent avec `--catalog-download`/`--ai-download`, déjà
+  des commandes séparées) — un déploiement ne doit jamais lancer un
+  téléchargement réseau à l'insu de l'opérateur.
+
+### Corrigé — vraie réserve de sécurité fermée
+- **Signature GPG de SystemRescue vérifiée en direct sur l'ISO
+  complète** (1,3 Go, pas seulement sur le fichier `.sha256` comme au
+  commit v3.16.0, qui documentait explicitement cette limite). Téléchargé
+  intégralement, SHA-256 recontrôlé (identique à la valeur figée dans
+  `SONAR_FETCH_MANIFEST_TSV`), signature `.asc` vérifiée contre la clé
+  publique officielle (Francois Dupoux, fingerprint `0FF1 1AF0 81E9
+  8345 5948 1203 7091 115F 8320 B897`) : `gpg: Good signature`. Les
+  deux méthodes de vérification (SHA-256 vendeur + GPG) concordent —
+  colonne `NOTES` de l'entrée `SystemRescue` mise à jour en conséquence.
+
+### Ajouté (documentation)
+- **`docs/DEPLOYMENT.md`** : nouvelle "Étape 0bis — Récupérer les
+  outils des profils", qui explique concrètement le fonctionnement
+  ci-dessus (`--fetch-manifest-seal` une fois, puis `--fetch <profil>`
+  avant `--disk`) et pourquoi aucune étape de déploiement séparée n'est
+  nécessaire. Bandeau d'avertissement en tête de document corrigé (il
+  affirmait encore "jamais testé sur boot réel", obsolète depuis
+  v3.11.2/v3.12.0) et complété avec la même formule de périmètre que
+  `README.md`.
+
+### Non fait dans cette version (volontairement)
+- **Étape 4** (WinPE/ADK), **étape 6** (validation matérielle des
+  profils) : pas commencées. **Étapes 5 et 7** : reclassées "SONAR
+  Field" (second produit, voir ROADMAP.md et le commit dd0aadb) —
+  n'appartiennent plus au plan de SONAR lui-même.
+
+### Testé
+`bash -n`, `shellcheck --severity=error` (rien), `--self-audit`,
+`--self-test` (0 FAIL) sous WSL2 Ubuntu. Vérification SHA-256 + GPG de
+SystemRescue effectuée sur un téléchargement réel et complet de l'ISO
+(pas simulée, pas déduite) — voir ci-dessus pour l'empreinte de clé et
+le résultat exact de `gpg --verify`.
+
 ## [3.16.0-fetch-step2] — 2026-09-15
 
 ### Contexte

@@ -119,9 +119,21 @@ hors de ce périmètre tant qu'elles ne sont pas faites.
       v3.16.0). Testé de bout en bout en conditions réelles
       (téléchargement + vérification effectifs, pas seulement en
       isolation).
-- [ ] **Étape 3 — Environnement de boot complet** : intégrer SystemRescue
-      par défaut dans les profils `boot-repair` et `disk-clone`
-      (téléchargement + vérification SHA-256 + signature GPG amont).
+- [x] **Étape 3 — Environnement de boot complet** (v3.17.0-boot-env-step3,
+      2026-09-15) : le SHA-256 ET la signature GPG amont de SystemRescue
+      (cle Francois Dupoux) ont été vérifiés en direct sur l'ISO complète
+      (1,3 Go, pas seulement sur un fichier `.sha256` — fermait une
+      réserve explicitement laissée ouverte au CHANGELOG v3.16.0).
+      L'intégration "par défaut" elle-même ne demandait pas de nouveau
+      code de déploiement : `copy_payload_final` copie déjà
+      `SOURCE_DIR/ISO` récursivement (`cp -a`), et `VTOY_DEFAULT_
+      SEARCH_ROOT` de Ventoy scanne `/ISO` récursivement par défaut —
+      donc tout ce que `--fetch boot-repair`/`--fetch disk-clone` dépose
+      dans `ISO/Fetched/` atterrit sur la clé et devient bootable sans
+      étape supplémentaire. Documenté dans `docs/DEPLOYMENT.md` (nouvelle
+      Étape 0bis) plutôt que codé en dur, pour laisser `--disk` offline
+      par défaut (pas de téléchargement réseau surprise pendant un
+      déploiement).
 - [ ] **Étape 4 — WinPE via Windows ADK** : la pièce qui différencie
       MediCat/Hiren's/Strelec. Techniquement impossible à piloter depuis
       ce script (ADK est un outillage Windows uniquement ; le script
