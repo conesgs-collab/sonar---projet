@@ -118,12 +118,17 @@ refuse le disque de boot du système et exige une confirmation explicite
 sonar_master.sh     Le script (point d'entrée unique pour l'instant)
 CHANGELOG.md          Historique des versions
 ROADMAP.md             Ce qui reste à faire, priorisé
-.github/workflows/       CI : bash -n + self-audit + self-test à chaque push
+.github/workflows/       Workflow CI prêt (bash -n + self-audit + self-test)
 ```
 
+**La CI n'est pas encore active** : le workflow `.github/workflows/ci.yml`
+existe et est prêt, mais ce dépôt n'a pas encore de remote Git distant —
+il n'a donc jamais été réellement déclenché par un push. Voir `ROADMAP.md`
+(P0) pour le statut actuel.
+
 Le script reste monolithique pour le moment — voir `ROADMAP.md` pour le plan
-de découpage modulaire (prévu **après** la mise en place de la CI, jamais
-avant, pour garder un filet de sécurité pendant le refactor).
+de découpage modulaire (prévu **après** la mise en place effective de la
+CI, jamais avant, pour garder un filet de sécurité pendant le refactor).
 
 ## Sécurité — verrou de rôle
 

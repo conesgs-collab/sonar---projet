@@ -10,9 +10,11 @@ propre suite de tests, intégrée directement.
   hashchain (intégrité + falsification simulée), verrou de rôle (émission,
   révocation, expiration), modules recovery/backup/forensic/catalogue.
 
-La CI (`.github/workflows/ci.yml`) lance les deux, plus un run complet
-`--disk --dry-run` sur un vrai périphérique `/dev/loop` (pas juste un
-fichier), à chaque push.
+Le workflow CI (`.github/workflows/ci.yml`) est écrit et lance les deux,
+plus un run complet `--disk --dry-run` sur un vrai périphérique
+`/dev/loop` (pas juste un fichier) — mais il n'est pas encore actif : ce
+dépôt n'a pas de remote Git distant, donc rien ne l'a jamais réellement
+déclenché. Voir `ROADMAP.md` (P0) pour le statut actuel.
 
 ## Pourquoi pas Bats ou un vrai framework ?
 

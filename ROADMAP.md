@@ -288,7 +288,7 @@ réutiliser).
   même philosophie un-seul-fichier (contrainte réelle : doit tourner
   dans un rescue Linux minimal, sans gestionnaire de paquets fiable).
 
-### v1 implémentée (2026-09-15, voir CHANGELOG)
+### 3.21.0 — implémentée (2026-09-15, voir CHANGELOG)
 
 Étape 3 (SystemRescue) étant faite, l'interface a pu être écrite pour de
 vrai — plus besoin d'attendre :
@@ -298,7 +298,7 @@ vrai — plus besoin d'attendre :
   exportés en TSV (`MANIFEST/PROFILES.tsv`,
   `MANIFEST/PROFILES_SCENARIOS.tsv`) — mêmes données que `--profile`,
   pas dupliquées à la main.
-- **Identification par PIN, avec accréditation par niveau** (v2,
+- **Identification par PIN, avec accréditation par niveau** (3.22.0,
   toujours 2026-09-15) : `--field-pin-set <NIVEAU> <PIN> [PROFILS]`,
   `PROFILS` = `ALL` (défaut) ou une liste séparée par des virgules.
   Plusieurs niveaux coexistent (`MANIFEST/FIELD_PINS.tsv`, une ligne
@@ -321,7 +321,7 @@ vrai — plus besoin d'attendre :
   et un scénario complet manuel (mauvais PIN×3 → refus journalisé, bon
   PIN → accès + identité + menu + note, journal vérifié).
 
-### v3 — validation réelle sur la clé physique (2026-09-16, voir CHANGELOG)
+### 3.28.0 — validation réelle sur la clé physique (2026-09-16, voir CHANGELOG)
 
 Nouvelle commande `--field-export <MONTAGE>` (met à jour SONAR Field sur
 une clé existante sans repasser par `--disk`) utilisée pour tester
@@ -342,7 +342,7 @@ propre après test (PINs/journaux de test retirés).
 - Lancement effectif des outils (v1 guide, ne lance jamais) — resterait
   cohérent avec la discipline de confirmation même si automatisé un jour
   (jamais sans accord explicite tracé).
-- ~~Boot réel de l'environnement de secours~~ **FAIT (v4, 2026-09-16,
+- ~~Boot réel de l'environnement de secours~~ **FAIT (3.29.0, 2026-09-16,
   voir CHANGELOG)** : SystemRescue réellement booté en VM (pas WSL2)
   avec une partition FAT32 réelle attachée, portant les vrais fichiers
   exportés par `--field-export`. Résultat : **SystemRescue ne monte

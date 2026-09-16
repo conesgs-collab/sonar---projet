@@ -1290,7 +1290,6 @@ sans aucun changement de configuration.
 `bash -n`, `shellcheck --severity=error` (rien), `--self-audit` (14/14),
 `--self-test` (0 FAIL). Chemin de repli vers l'image par défaut du dépôt
 validé en isolation (copie verbatim, sans retraitement).
-son propre historique en commentaire.
 
 ## [3.11.0-ventoy-branding] — 2026-09-14
 
@@ -1581,7 +1580,19 @@ vérification, aurait été trompé.
 - self-audit et self-test : aucune régression, 2 nouveaux tests PASS dès
   le premier lancement.
 
+---
 
+**Note sur les entrées suivantes** : les changements ci-dessous (jusqu'à
+`[3.3.0-role-lock]`) sont réels — pas des doublons ni du bruit — mais
+n'ont pas de numéro de version individuel identifiable. Ils viennent
+d'une migration verbatim de l'historique qui vivait à l'origine dans
+l'en-tête de `sonar_master.sh`, où ils n'étaient déjà pas versionnés
+séparément (juste accumulés chronologiquement). Plutôt que d'inventer
+des numéros de version que je ne peux pas vérifier, ils restent groupés
+ici, dans l'ordre chronologique (plus récent en premier, comme le reste
+du fichier), entre leurs deux vrais points d'ancrage connus :
+`[3.10.2-audit-integrity]` (2026-08-18) au-dessus et
+`[3.3.0-role-lock]` (2026-08-16) en dessous.
 
 ### Contexte
 Suite aux deux drapeaux morts trouvés ce soir (module status, VeraCrypt),
@@ -1916,18 +1927,36 @@ plans, forensic workspace, diagnostic réseau, builder, rapports).
 
 ---
 
-## Non résolu / dette connue
+## Non résolu / dette connue (état au 2026-08-14, à la toute première
+version de ce fichier — PÉRIMÉ, conservé pour l'historique)
 
-Ce qui manque encore pour que l'outil soit considéré mature — voir aussi
-`ROADMAP.md` :
+Cette liste décrivait la dette connue au moment de la toute première
+version de `sonar_master.sh` (`3.1.0-final-integrated` et antérieur,
+juste en dessous). Presque tous ces points ont depuis été traités ou
+invalidés par des entrées bien plus récentes **au-dessus** dans ce même
+fichier (rappel : le plus récent est en haut) — notamment le premier
+boot réel (`3.11.2`/`3.12.0`), la validation matérielle complète
+(`3.19.0`/`3.20.0`), le HMAC (`3.6.0`, déjà noté barré ci-dessous), et
+la chaîne de possession forensique (voir plus haut, "Ajouté"). **Pour
+l'état réellement actuel de la dette technique, voir `ROADMAP.md`**, la
+seule source tenue à jour sur ce sujet — pas cette section.
 
-- **Jamais testé sur du vrai matériel.** Tout ce qui est validé l'a été en
-  `--dry-run` et sur `/dev/loop`, jamais un vrai boot Ventoy/Secure Boot.
+- ~~Jamais testé sur du vrai matériel.~~ Faux depuis `3.11.2`/`3.12.0`
+  (premier boot réel) et confirmé à plus grande échelle en
+  `3.19.0`/`3.20.0`.
 - Hachage à clé (SHA-256), pas un HMAC formel. ~~Résolu en v3.6.0~~
-- Aucun audit de sécurité externe / pentest.
-- Fichier monolithique (~3800 lignes) — refactor modulaire à faire une fois
-  la CI en place (jamais avant, pour garder un filet de sécurité).
-- Pas de chaîne de distribution signée (GPG) des releases.
-- Portabilité Windows/macOS en trompe-l'œil (mentions PowerShell, cœur 100% Bash).
-- Pas de documentation utilisateur ni de modèle de chaîne de possession
-  (chain of custody) pour le module forensique.
+- Aucun audit de sécurité externe / pentest. (Toujours vrai à ce jour.)
+- Fichier monolithique (~3800 lignes à l'époque, nettement plus
+  aujourd'hui) — refactor modulaire toujours pas fait, voir `ROADMAP.md`
+  P1 pour la décision de séquençage actuelle (CI d'abord).
+- Pas de chaîne de distribution signée (GPG) des releases. (Toujours
+  vrai à ce jour.)
+- Portabilité Windows/macOS en trompe-l'œil (mentions PowerShell, cœur
+  100% Bash). (Nuancé depuis : `tools/Build-SonarSE-WinPE.ps1` est un
+  vrai script PowerShell compagnon, mais reste un outil séparé, pas une
+  portabilité du script principal.)
+- ~~Pas de documentation utilisateur ni de modèle de chaîne de
+  possession (chain of custody) pour le module forensique.~~ Le modèle
+  de chaîne de possession existe depuis l'entrée juste au-dessus
+  (`--forensic-chain-of-custody`). La documentation utilisateur au-delà
+  du `--help` intégré reste, elle, non faite (voir `ROADMAP.md` P2).

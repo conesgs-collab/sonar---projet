@@ -878,7 +878,7 @@ usage_final() {
 SONAR - SE — moteur unique
 
 Usage:
-  sudo ./deploy_it_toolkit_SONAR_MASTER.sh --disk /dev/sdX [options]
+  sudo ./sonar_master.sh --disk /dev/sdX [options]
 
 Déploiement:
   --disk DEV                 Disque USB cible (obligatoire)
@@ -1768,9 +1768,10 @@ VAULT_EOF
 # SONAR Field (second produit, sonar_field.sh — voir ROADMAP.md) a besoin
 # pour fonctionner SANS sonar_master.sh présent sur la machine cible :
 # les profils (mêmes données que --profile, exportées en TSV plutôt que
-# dupliquées), et le script lui-même. Le PIN de terrain (MANIFEST/
-# FIELD_PIN.sha256), s'il a été défini via --field-pin-set, est copié
-# séparément par l'appelant — optionnel, non bloquant si absent.
+# dupliquées), et le script lui-même. Le(s) PIN de terrain (MANIFEST/
+# FIELD_PINS.tsv), s'ils ont été définis via --field-pin-set <NIVEAU>
+# <PIN> [PROFILS], sont copiés séparément par l'appelant — optionnel,
+# non bloquant si absent.
 sonar_export_field_files() {
     local mp="$1"
     mkdir -p "${mp}/MANIFEST" "${mp}/Scripts" "${mp}/Field-Logs"
