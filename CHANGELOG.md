@@ -6,6 +6,68 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.29.0-sonar-field-real-boot-validation] — 2026-09-16
+
+### Contexte
+Suite immédiate de v3.28.0 (même jour) : cette dernière validait la
+logique de `sonar_field.sh` sur des fichiers réels, mais via WSL2 (qui
+monte les partitions différemment d'un vrai rescue Linux bootée) —
+le "Non résolu" explicitement noté était de savoir si SystemRescue,
+une fois réellement démarré, monte automatiquement la partition de
+données à un chemin que `sonar_field_locate` détecte
+(`/mnt/*`, `/media/*/*`, `/run/media/*/*`).
+
+### Testé — vrai boot SystemRescue en VM
+Construit un disque de test minimal (200 Mo, une seule partition
+FAT32, sans Ventoy — suffisant pour isoler la question du montage
+automatique) contenant les vrais fichiers produits par
+`--field-export` (profils, `sonar_field.sh`, un PIN de test). Attaché
+à une VM VirtualBox, bootée pour de vrai sur l'ISO SystemRescue déjà
+présente sur la clé physique (pas une image jetable).
+
+**Résultat : SystemRescue ne monte rien automatiquement en mode
+console** — `lsblk` après le boot confirme qu'aucune partition n'a de
+`MOUNTPOINT` renseigné. Le gap d'auto-détection déjà listé dans
+"Pas encore fait" est donc confirmé réel, pas juste une prudence
+théorique.
+
+Suite du test, montage manuel (`mount /dev/sdb1 /mnt/sonarfield`,
+le repli déjà annoncé par le script lui-même) puis `sonar_field.sh`
+exécuté **avec un clavier réellement tapé dans la VM** (pas de stdin
+simulé) : PIN accepté, identité saisie, menu à 6 profils affiché,
+profil `boot-repair` consulté, journal/hashchain écrits sur la
+partition puis relus (`cat Field-Logs/hashchain.log`) — comportement
+identique à la validation WSL2 de v3.28.0, confirmant que cette
+dernière n'était pas un artefact de l'environnement de test.
+
+Incident de méthode rencontré et corrigé en cours de route : les
+premières commandes tapées via `VBoxManage controlvm keyboardputstring`
+sont sorties déformées (`mkdir` → `,kdir`, `/` → `!`, `sonarfield` →
+`sonqrfield`) — la VM avait `loadkeys fr` (AZERTY) actif alors que
+`keyboardputstring` envoie des scancodes positionnels US (QWERTY).
+Corrigé en renvoyant `loadkeys us` (tapé lui-même via la substitution
+inverse Q↔A le temps que la disposition change), avant de reprendre
+les commandes normalement.
+
+### Changé
+- `ROADMAP.md` : la case "boot réel de l'environnement de secours"
+  passe de "pas encore fait" à fait, avec le résultat (négatif sur
+  l'auto-montage, positif sur tout le reste une fois monté).
+- `sonar_field.sh` (embarqué dans `sonar_master.sh`) : aucun changement
+  de code — ce round de test visait à vérifier le comportement
+  existant, pas à le modifier. Le message d'erreur de
+  `sonar_field_locate` ("Montez-la manuellement puis relancez") s'avère
+  être le chemin normal sur SystemRescue en mode console, pas un cas
+  de repli rare.
+- SONAR_VERSION -> 3.29.0-sonar-field-real-boot-validation
+
+### Non résolu
+Auto-détection de la partition clé reste à construire (scan `lsblk`
+par label/contenu, ou lancer `startx` + un gestionnaire de fichiers qui
+monte automatiquement — SystemRescue le propose mais ce n'est pas le
+mode par défaut). Priorité basse : le repli manuel fonctionne et est
+déjà documenté à l'écran par le script lui-même.
+
 ## [3.28.0-sonar-field-real-hardware-validation] — 2026-09-16
 
 ### Contexte

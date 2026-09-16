@@ -342,13 +342,17 @@ propre après test (PINs/journaux de test retirés).
 - Lancement effectif des outils (v1 guide, ne lance jamais) — resterait
   cohérent avec la discipline de confirmation même si automatisé un jour
   (jamais sans accord explicite tracé).
-- **Boot réel de l'environnement de secours** : la v3 valide la logique
-  de `sonar_field.sh` sur des données réelles (via WSL2, qui monte la
-  clé différemment d'un vrai rescue Linux bootée), mais pas encore si
-  SystemRescue, une fois réellement booté sur la machine cible, monte
-  automatiquement la partition Ventoy à un chemin que
-  `sonar_field_locate` détecte — nécessiterait un vrai boot (matériel ou
-  VM) de l'ISO SystemRescue avec la clé attachée.
+- ~~Boot réel de l'environnement de secours~~ **FAIT (v4, 2026-09-16,
+  voir CHANGELOG)** : SystemRescue réellement booté en VM (pas WSL2)
+  avec une partition FAT32 réelle attachée, portant les vrais fichiers
+  exportés par `--field-export`. Résultat : **SystemRescue ne monte
+  rien automatiquement** en mode console (`lsblk` confirme, aucune
+  `MOUNTPOINT`) — confirme que l'auto-détection listée juste au-dessus
+  reste un vrai gap, pas une inquiétude théorique. Montage manuel puis
+  `sonar_field.sh` exécuté pour de vrai : PIN saisi au clavier réel,
+  menu affiché, profil consulté, journal/hashchain écrits et relus
+  depuis la clé — tout confirmé fonctionnel une fois monté, seule
+  l'étape de montage automatique manque.
 
 ## P2 — Maturité produit
 

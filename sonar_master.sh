@@ -4203,7 +4203,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.28.0-sonar-field-real-hardware-validation"
+SONAR_VERSION="3.29.0-sonar-field-real-boot-validation"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
