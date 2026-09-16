@@ -954,14 +954,20 @@ Commandes indépendantes (à la place de --disk):
   --profile [NOM|list]        Profils de dépannage fermés et documentés :
                                 boot-repair|data-recovery|malware|disk-clone|
                                 password-reset|hardware-diagnostic|
-                                peripherals-network|full — scénario, outils,
-                                et POURQUOI ceux-là (pas le catalogue 1003,
-                                qui n'est qu'une base de connaissance).
-                                peripherals-network est différent des autres
-                                par nature : s'utilise depuis un PC déjà
-                                démarré (câble branché sur un téléphone
-                                Android), pas depuis le menu de boot Ventoy.
-                                Sans argument (ou "list") : vue d'ensemble.
+                                peripherals-network|general-os|full —
+                                scénario, outils, et POURQUOI ceux-là (pas le
+                                catalogue 1003, qui n'est qu'une base de
+                                connaissance). peripherals-network et
+                                general-os sont différents des autres par
+                                nature : peripherals-network s'utilise depuis
+                                un PC déjà démarré (câble branché sur un
+                                téléphone Android), pas depuis le menu de
+                                boot Ventoy ; general-os n'est pas un
+                                scénario de dépannage mais un choix de
+                                distributions Linux généralistes (bureau/
+                                serveur/forensique) pour réinstallation ou
+                                préférence opérateur. Sans argument (ou
+                                "list") : vue d'ensemble.
   --fetch-manifest-seal       [rôle VAULT] Scelle (HMAC, secret de build) le
                                 manifeste de téléchargement (URL+SHA256 par
                                 outil) — à exécuter une fois avant tout
@@ -1602,9 +1608,26 @@ sonar_prepare_ventoy_theme() {
             cp -f "$src" "${out}"
         fi
     else
-        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés, ET sans redimensionnement de sécurité. ATTENTION : trois tailles d'image radicalement différentes ont produit le même crash GRUB (\"alloc magic is broken\") sur un HP EliteBook 840 G3 réel (2026-09-15) — la cause probable n'est pas la taille de l'image, --ventoy-theme reste risqué même avec une petite image. Voir CHANGELOG.md."
+        log "[SONAR] ImageMagick (convert) absent — fond Ventoy déployé sans titre/crédit incrustés, ET sans redimensionnement de sécurité."
         cp -f "$src" "${out}"
     fi
+    # Cause racine du crash "alloc magic is broken" identifiee le
+    # 2026-09-16 (voir CHANGELOG.md) : la cle "file" de ventoy.json doit
+    # pointer vers un fichier theme.txt (script de thème GRUB2), PAS
+    # directement vers l'image PNG — documentation officielle
+    # ventoy.net/en/plugin_theme.html, exemple `"file":
+    # "/ventoy/theme/blur/theme.txt"`. generate_ventoy_json_final()
+    # pointait par erreur "file" directement sur background.png : GRUB
+    # tentait alors de PARSER les octets binaires du PNG comme un script
+    # de thème, ce qui explique pourquoi la taille de l'image n'a jamais
+    # eu d'influence sur le crash (3 tailles radicalement différentes,
+    # même échec identique — la taille n'était jamais la variable en
+    # cause). theme.txt minimal : une seule directive necessaire pour
+    # afficher l'image de fond, syntaxe GRUB2 standard.
+    cat > "${out_dir}/theme.txt" <<THEME_TXT_EOF
+desktop-image: "background.png"
+title-text: ""
+THEME_TXT_EOF
     sonar_audit "VENTOY_THEME_INSTALLED" "source=${src}"
 }
 
@@ -1627,21 +1650,21 @@ cfg={"control":[
  "persistence":[]}
 for i,img in enumerate(ubuntu[:n],1):
     cfg["persistence"].append({"image":img,"backend":[f"/persistence/env{i}.dat"]})
-theme_png = os.path.join(mp, "ventoy", "theme", "background.png")
-if os.path.isfile(theme_png):
+theme_txt = os.path.join(mp, "ventoy", "theme", "theme.txt")
+if os.path.isfile(theme_txt):
     # Keys per Ventoy's own documented theme plugin (ventoy.net) — file is
     # relative to the Ventoy data partition root, same convention as ISO
-    # paths above. sonar_prepare_ventoy_theme() is what actually put the
-    # PNG there (indexed/palette color, resized to a safe size if
-    # ImageMagick was available); this only wires it into ventoy.json.
-    # gfxmode leads with 800x600 (not 1024x768) since 1024x768 RGB
-    # truecolor (~2.25MB decoded) ALSO crashed GRUB's PNG decoder on real
-    # hardware (HP EliteBook 840 G3, 2026-09-15 — see CHANGELOG.md
-    # v3.25.0/v3.26.0) even after being resized down from 1920x1080 —
-    # 800x600 is the resolution sonar_prepare_ventoy_theme() now targets,
-    # so this should match what's actually on disk.
+    # paths above. "file" DOIT pointer vers theme.txt (script de thème
+    # GRUB2), pas vers l'image PNG directement — cause racine du crash
+    # "alloc magic is broken" identifiee le 2026-09-16 (voir CHANGELOG.md
+    # et le commentaire dans sonar_prepare_ventoy_theme, qui genere ce
+    # theme.txt). sonar_prepare_ventoy_theme() est ce qui depose a la
+    # fois background.png (indexed/palette, redimensionne si ImageMagick
+    # disponible) et theme.txt (qui reference background.png via
+    # desktop-image) ; ce bloc-ci se contente de cabler theme.txt dans
+    # ventoy.json.
     cfg["theme"] = {
-        "file": "/ventoy/theme/background.png",
+        "file": "/ventoy/theme/theme.txt",
         "gfxmode": "800x600,1024x768",
         "boot_menu_language": "fr",
         "ventoy_left": "10%",
@@ -3718,10 +3741,21 @@ hardware-diagnostic	Prime95	Stress-test CPU/alimentation intensif (GIMPS) — co
 boot-repair	BlueScreenView	Analyse automatiquement les fichiers de vidage (.dmp) apres un ecran bleu pour identifier le pilote/module responsable — cible la reparation au lieu de deviner. Freeware NirSoft (personnel et commercial), aucun compte requis.
 boot-repair	Rufus	Cree une cle USB d'installation Windows amorcable a partir d'une ISO — utile quand le diagnostic conclut a une reinstallation plutot qu'une reparation. Open source (GPLv3), binaires signes Authenticode (editeur verifie : Akeo Consulting) en plus du telechargement direct GitHub.
 peripherals-network	Android Platform Tools	adb (debug USB) et fastboot (mode bootloader) — diagnostic et reparation basique d'un telephone Android depuis un PC fonctionnel, cable branche (redemarrage force, effacement cache, reinstallation systeme si un firmware officiel est disponible). Ne s'utilise PAS depuis le menu de boot Ventoy : necessite un PC deja demarre normalement (Windows/Linux), le telephone est la cible, pas la cle. iOS hors de portee (ecosysteme Apple verrouille, aucun outil libre equivalent). Officiel Google (dl.google.com), licence Android SDK.
+general-os	Alpine Linux	Distribution Linux minimaliste (musl/busybox) — utile pour un depannage reseau/systeme tres bas niveau ou un environnement le plus leger possible est prefere a SystemRescue. Open source, alpinelinux.org.
+general-os	Arch Linux	Environnement Linux "rolling release" avec les outils/pilotes les plus recents — utile quand SystemRescue (base plus ancienne) ne reconnait pas un peripherique tres recent. Open source, archlinux.org.
+general-os	Debian (DVD complet)	Distribution Linux stable de reference, hors ligne (DVD complet, pas besoin de reseau pour l'installation) — choix pertinent pour une reinstallation complete plutot qu'un depannage. Open source, debian.org.
+general-os	Debian (netinst)	Meme distribution que ci-dessus, image d'installation reseau minimale (~700 Mo au lieu de ~3,7 Go) — pour une reinstallation quand la bande passante ou l'espace sur la cle est limite. Open source, debian.org.
+general-os	Ubuntu Server	Distribution Linux orientee serveur, tres repandue en entreprise — pertinent pour reinstaller ou depanner un serveur Linux specifiquement (par opposition a un poste de travail). Open source, ubuntu.com.
+general-os	Linux Mint	Distribution Linux orientee utilisateur final (bureau Cinnamon), interface familiere pour un utilisateur venant de Windows — pertinent si le choix final est de migrer un poste vers Linux plutot que de le reparer. Open source, linuxmint.com.
+general-os	Fedora Workstation	Distribution Linux de bureau, cycle de developpement rapide, proche de l'amont (upstream) — alternative a Linux Mint pour un profil plus technique. Open source, fedoraproject.org.
+general-os	Fedora KDE	Meme distribution que Fedora Workstation, environnement de bureau KDE Plasma au lieu de GNOME — au choix selon la preference de l'utilisateur final. Open source, fedoraproject.org.
+general-os	Fedora Server	Meme distribution, edition serveur — pertinent pour reinstaller/depanner un serveur Linux avec un cycle plus recent qu'Ubuntu Server. Open source, fedoraproject.org.
+general-os	Manjaro	Distribution basee sur Arch Linux mais avec une installation graphique simplifiee — compromis entre la fraicheur d'Arch et la facilite d'installation d'Ubuntu/Mint. Open source, manjaro.org.
+general-os	CAINE	Distribution Linux specialisee forensique (Computer Aided INvestigative Environment) — analyse d'un disque en lecture seule par defaut, chaine de possession, pertinent pour un cas qui deborde du cadre non-destructif habituel de SONAR. Open source, caine-live.net.
 PROFILES_EOF
 )"
 
-SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network full"
+SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network general-os full"
 
 sonar_profile_names() { echo "${SONAR_PROFILE_NAMES}"; }
 
@@ -3734,7 +3768,8 @@ sonar_profile_scenario() {
         password-reset) echo "Compte Windows local verrouille (mot de passe perdu, poste recupere sans compte admin) : reinitialisation hors-ligne du mot de passe." ;;
         hardware-diagnostic) echo "Plantages, ecrans bleus ou instabilite aleatoires sans cause logicielle evidente : ecarter ou confirmer une RAM defaillante avant de perdre du temps a reinstaller un systeme sain." ;;
         peripherals-network) echo "Telephone Android en panne (boot loop, systeme corrompu) diagnostique depuis un PC fonctionnel, cable branche — PAS un scenario de boot sur la cle, profil different des six precedents par nature." ;;
-        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les sept scenarios." ;;
+        general-os) echo "Pas un scenario de depannage : choix de distributions Linux generalistes (bureau, serveur, forensique) pour une reinstallation complete ou une preference operateur — chaque outil documente pourquoi CETTE distribution plutot qu'une autre, mais aucune n'est choisie pour resoudre un symptome precis comme les profils ci-dessus." ;;
+        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les huit scenarios/categories." ;;
         *) return 1 ;;
     esac
 }
@@ -3844,6 +3879,17 @@ Prime95	https://download.mersenne.ca/gimps/v30/30.19/p95v3019b20.win64.zip	d9475
 BlueScreenView	https://www.nirsoft.net/utils/bluescreenview.zip	15ba3b0ca0a1ff21e89715da52ecc5918177b97ce40903d299fd591909e7b3ab		none	Freeware NirSoft (usage personnel et commercial libre — seule exception connue chez NirSoft concerne un autre outil, NK2Edit). SHA-256 calcule localement apres telechargement direct depuis nirsoft.net. Windows uniquement.
 Rufus	https://github.com/pbatard/rufus/releases/download/v4.15/rufus-4.15.exe	84c8a437f8af89257524478489e5c85f1edf25f761d299e2bcde46ac0afbe106		none	Open source GPLv3 (github.com/pbatard/rufus). L'auteur ne publie pas de SHA-256 statique par choix deliberateur (FAQ officielle) : le binaire est signe Authenticode (editeur verifie "Akeo Consulting"), verifie automatiquement par Windows au lancement — assurance au moins equivalente a un hash publie. SHA-256 calcule localement quand meme, comme reference. Windows uniquement.
 Android Platform Tools	https://dl.google.com/android/repository/platform-tools-latest-windows.zip	45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99		none	URL officielle Google (dl.google.com, meme domaine que les releases Android Studio). Licence Android SDK (contrat Google, pas open-source au sens strict, mais usage libre sans compte). "latest" dans l'URL : Google ne publie pas d'URL versionnee stable ni de somme officielle pour ce point d'entree — SHA-256 calcule localement au moment du telechargement, revalide a chaque --fetch (pas de garantie de stabilite dans le temps contrairement aux autres entrees de ce manifeste, a re-verifier si le contenu change).
+Alpine Linux	https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/alpine-standard-3.24.1-x86_64.iso	f4dd613206676c62949144c8ad75fc64582099f444dd1485bae104a60f51dd26		none	SHA-256 publie sur le domaine officiel (fichier .sha256 a cote de l'ISO, dl-cdn.alpinelinux.org) et recoupe localement apres telechargement.
+Arch Linux	https://geo.mirror.pkgbuild.com/iso/latest/archlinux-2026.09.01-x86_64.iso	be8458032f8105e60ee2a3067f950b6e3c007ee51b38dac50e8b48e765561c91		none	SHA-256 publie sur le miroir officiel geo.mirror.pkgbuild.com (redirection vers un miroir proche gere par le projet Arch, sha256sums.txt) et recoupe localement.
+Debian (DVD complet)	https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd/debian-13.7.0-amd64-DVD-1.iso	347b6c67a3cc0b7ddb60b178f683470c4e2b7ac426c996d9337a2ff36c1a32d2		none	SHA-256 publie sur le domaine officiel (cdimage.debian.org, SHA256SUMS) et recoupe localement.
+Debian (netinst)	https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso	a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355		none	Meme source/verification que Debian DVD complet.
+Ubuntu Server	https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-live-server-amd64.iso	cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927		none	SHA-256 publie sur le domaine officiel (releases.ubuntu.com, SHA256SUMS) et recoupe localement.
+Linux Mint	https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso	a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4		none	ISO et sha256sum.txt recuperes sur mirrors.kernel.org (miroir officiel liste sur linuxmint.com/edition.php, kernel.org est une infrastructure de confiance etablie) et recoupe localement. Linux Mint lui-meme ne publie pas de checksum sur son propre domaine, seulement sur ses miroirs officiels.
+Fedora Workstation	https://download.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/x86_64/iso/Fedora-Workstation-Live-44-1.7.x86_64.iso	1620295f6a00c27c3208f0c00b8ece4eab1ec69b9002152d97488bf26a426ddf		none	SHA-256 publie sur le domaine officiel (download.fedoraproject.org, fichier CHECKSUM signe PGP) et recoupe localement.
+Fedora KDE	https://download.fedoraproject.org/pub/fedora/linux/releases/44/KDE/x86_64/iso/Fedora-KDE-Desktop-Live-44-1.7.x86_64.iso	c8295961d4c41adbf785a31a17c21a971d3b7415fda72dcad0c11c49577bf03a		none	Meme source/verification que Fedora Workstation.
+Fedora Server	https://download.fedoraproject.org/pub/fedora/linux/releases/44/Server/x86_64/iso/Fedora-Server-dvd-x86_64-44-1.7.iso	85837793bfa36db6bc709b4cecd2ec116951b87d9c53c3d95eb2fac8dcf7cf1f		none	Meme source/verification que Fedora Workstation.
+Manjaro	https://download.manjaro.org/gnome/26.1.0/manjaro-gnome-26.1.0-minimal-260812-linux618.iso	c95ab4fcce563edf5bd780dfad7a60d6e62f260473d772eee75a690f0c6f1861		none	SHA-256 publie sur le domaine officiel (download.manjaro.org, fichier .sha256 a cote de l'ISO) et recoupe localement.
+CAINE	https://www.caine-live.net/Downloads/caine14.0.iso	2702226cf9ee131ee54e9649d6d90008f3fe851ba35939f43ae8cb614a00d564		none	SHA-256 publie sur le domaine officiel (caine-live.net) et recoupe localement.
 FETCH_EOF
 )"
 
@@ -4238,7 +4284,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.34.0-peripherals-network-profile"
+SONAR_VERSION="3.35.0-ventoy-theme-real-root-cause-found"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4527,6 +4573,36 @@ sonar_self_test_v2() {
         else
             printf 'WARN\tVault helper round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
         fi
+        # Ventoy theme : verifie que "file" dans ventoy.json pointe vers
+        # theme.txt (script GRUB2), pas directement vers l'image PNG —
+        # cause racine du crash "alloc magic is broken" identifiee le
+        # 2026-09-16 (voir CHANGELOG.md). Structurel seulement : confirme
+        # que SONAR genere les bons fichiers/references, pas que GRUB les
+        # accepte reellement (ca, seul un vrai boot le confirme).
+        local _vt_src _vt_mp _vt_json
+        _vt_src="$(mktemp -d)"; _vt_mp="$(mktemp -d)"
+        mkdir -p "${_vt_src}/Branding"
+        printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf\xc0\x00\x00\x00\x03\x00\x01\x8f\xdb\x8e\xb0\x00\x00\x00\x00IEND\xaeB`\x82' > "${_vt_src}/Branding/background.png"
+        ( SOURCE_DIR="${_vt_src}"; SONAR_ROOT="${_vt_src}"; INCLUDE_VENTOY_THEME=true
+          SONAR_VENTOY_TITLE="Test"; SONAR_VENTOY_CREDIT="Test"
+          log() { :; }; sonar_audit() { :; }
+          source <(sed -n '/^sonar_prepare_ventoy_theme() {/,/^}/p' "$self")
+          sonar_prepare_ventoy_theme "${_vt_mp}" ) >/dev/null 2>&1
+        if [[ -s "${_vt_mp}/ventoy/theme/theme.txt" ]] && grep -q 'desktop-image' "${_vt_mp}/ventoy/theme/theme.txt" && [[ -s "${_vt_mp}/ventoy/theme/background.png" ]]; then
+            printf 'PASS\tVentoy theme.txt generated with desktop-image directive\n'
+        else
+            printf 'FAIL\tVentoy theme.txt missing or malformed\n'; errors=$((errors+1))
+        fi
+        ( PERSISTENCE_COUNT=0
+          source <(sed -n '/^generate_ventoy_json_final() {/,/^}/p' "$self")
+          generate_ventoy_json_final "${_vt_mp}" ) >/dev/null 2>&1
+        _vt_json="${_vt_mp}/ventoy/ventoy.json"
+        if [[ -s "${_vt_json}" ]] && grep -q '"file": "/ventoy/theme/theme.txt"' "${_vt_json}"; then
+            printf 'PASS\tventoy.json theme.file points to theme.txt, not to the raw PNG\n'
+        else
+            printf 'FAIL\tventoy.json theme.file does not point to theme.txt as expected\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_vt_src}" "${_vt_mp}"
         grep -q '^sonar_generate_build_watermark() {' "$self" && printf 'PASS\tBuild watermark module present\n' || { printf 'FAIL\tBuild watermark module missing\n'; errors=$((errors+1)); }
         local _wm_root _wm_mp
         _wm_root="$(mktemp -d)"; _wm_mp="$(mktemp -d)"
@@ -4567,12 +4643,12 @@ sonar_self_test_v2() {
         rm -rf "${_wm_root}" "${_wm_mp}"
         grep -q '^SONAR_PROFILES_TSV=' "$self" && printf 'PASS\tTroubleshooting profiles module present\n' || { printf 'FAIL\tTroubleshooting profiles module missing\n'; errors=$((errors+1)); }
         local _prof _prof_ok=true
-        for _prof in boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network full; do
+        for _prof in boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network general-os full; do
             if ! "$self" --profile "${_prof}" >/dev/null 2>&1; then
                 printf 'FAIL\tProfile "%s" failed to document\n' "${_prof}"; errors=$((errors+1)); _prof_ok=false
             fi
         done
-        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll eight troubleshooting profiles document scenario + tools\n'
+        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll nine troubleshooting profiles document scenario + tools\n'
         if "$self" --profile bogus-profile >/dev/null 2>&1; then
             printf 'FAIL\tUnknown profile name was NOT rejected\n'; errors=$((errors+1))
         else
@@ -4580,7 +4656,7 @@ sonar_self_test_v2() {
         fi
         local _full_out
         _full_out="$("$self" --profile full 2>/dev/null)"
-        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}" && grep -q 'Rufus' <<<"${_full_out}" && grep -q 'Process Explorer' <<<"${_full_out}" && grep -q 'Android Platform Tools' <<<"${_full_out}"; then
+        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}" && grep -q 'Rufus' <<<"${_full_out}" && grep -q 'Process Explorer' <<<"${_full_out}" && grep -q 'Android Platform Tools' <<<"${_full_out}" && grep -q 'CAINE' <<<"${_full_out}"; then
             printf 'PASS\tProfile "full" is the union of all profiles\n'
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))

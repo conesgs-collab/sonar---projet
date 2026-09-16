@@ -6,6 +6,72 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.35.0-ventoy-theme-real-root-cause-found] — 2026-09-16
+
+### Contexte
+L'auteur a partagé deux vidéos YouTube sur la personnalisation Ventoy
+en demandant de s'en inspirer. La première (IT-Connect/Florian) est un
+tuto Ventoy général, sans rapport direct. La seconde ("Personnaliser
+votre clé USB multi-boot Ventoy", Les Tutoriels d'Amine, 2020) utilise
+de vrais thèmes GRUB2 communautaires (gnome-look.org) via le plugin
+thème officiel de Ventoy — ce qui a mené à consulter la documentation
+officielle (ventoy.net/en/plugin_theme.html) pour comprendre comment
+ces thèmes complets sont structurés, en comparaison de l'approche
+"juste une image de fond" utilisée jusqu'ici par SONAR-SE.
+
+### Trouvé — la vraie cause du crash "alloc magic is broken"
+La documentation officielle du plugin thème Ventoy est explicite :
+la clé `"file"` du bloc `theme` dans `ventoy.json` doit pointer vers
+un fichier **`theme.txt`** (script de thème GRUB2, ex. `"file":
+"/ventoy/theme/blur/theme.txt"`), **jamais directement vers une image**.
+
+Or `generate_ventoy_json_final()` pointait `"file"` directement sur
+`/ventoy/theme/background.png` — une image, pas un script. GRUB
+tentait alors de PARSER les octets binaires du PNG comme s'il
+s'agissait d'un script de directives de thème. Ça explique
+parfaitement ce qui avait été observé (et documenté comme "non
+résolu") en v3.25.0/v3.26.0 : **trois tailles d'image radicalement
+différentes (6 Mo, 2,25 Mo, 480 Ko décodés) ont produit le crash
+identique** — parce que la taille de l'image n'a jamais été la
+variable en cause. Le problème était structurel dès la première
+octet lue, pas une question de mémoire allouée pour décoder une image.
+
+### Corrigé
+- `sonar_prepare_ventoy_theme()` : génère maintenant un `theme.txt`
+  minimal (`desktop-image: "background.png"` + `title-text: ""`,
+  syntaxe GRUB2 standard) à côté de l'image, en plus de l'image
+  elle-même.
+- `generate_ventoy_json_final()` : `"file"` pointe désormais vers
+  `/ventoy/theme/theme.txt` au lieu de `/ventoy/theme/background.png`
+  directement.
+- Deux nouveaux tests `--self-test` (aucune couverture automatisée
+  n'existait avant pour cette zone) : vérifient structurellement que
+  `theme.txt` est généré avec la directive `desktop-image`, et que
+  `ventoy.json` référence bien `theme.txt` et non l'image brute.
+  Confirment que SONAR produit les bons fichiers — pas encore que GRUB
+  les accepte réellement, seul un vrai boot le confirmera.
+
+### Appliqué sur la clé physique, en attente de test réel
+`E:\ventoy\theme\theme.txt` créé et `E:\ventoy\ventoy.json` mis à jour
+manuellement pour pointer vers lui (même changement que produirait
+`--disk`, appliqué directement sans reformater Ventoy). **Pas encore
+rebooté sur le HP EliteBook 840 G3** — après trois échecs confirmés
+sur cette même machine (v3.25.0/v3.26.0), cette découverte reste une
+piste forte et bien étayée par la documentation officielle, pas une
+victoire déclarée avant un vrai test.
+
+### Testé
+`bash -n` + `--self-audit` (14 PASS, 0 FAIL) + `--self-test` (0
+ERRORS, les 2 nouveaux tests PASS) sous WSL2.
+
+### Non résolu
+Confirmation par un vrai boot sur matériel réel — à faire dès que
+possible. Si ça fonctionne, `--ventoy-theme` pourra repasser d'opt-in
+à activé par défaut ; si ça échoue encore, ce sera la première fois
+que l'hypothèse "mauvaise structure du fichier référencé" (plutôt que
+"taille d'image" ou "firmware incompatible") aura été testée et
+écartée avec preuve, pas juste supposée.
+
 ## [3.34.0-peripherals-network-profile] — 2026-09-16
 
 ### Contexte

@@ -84,9 +84,19 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
             Décision : thème repassé en **désactivé par défaut**
             (`INCLUDE_VENTOY_THEME=false`, nouveau flag `--ventoy-theme`
             pour l'activer explicitement, avertissement mis à jour) —
-            voir CHANGELOG v3.25.0/v3.26.0. Cause racine réelle non
-            résolue (hors de portée d'une correction SONAR-SE), voir
-            "Dette technique connue" ci-dessous.
+            voir CHANGELOG v3.25.0/v3.26.0.
+      - [ ] **Cause racine réelle trouvée (2026-09-16), pas encore
+            reconfirmée par un vrai boot.** La documentation officielle
+            Ventoy (`ventoy.net/en/plugin_theme.html`) précise que la clé
+            `"file"` du bloc `theme` doit pointer vers un fichier
+            `theme.txt` (script GRUB2), pas directement vers une image —
+            SONAR-SE pointait par erreur vers l'image PNG elle-même.
+            Explique exactement pourquoi la taille de l'image n'a jamais
+            eu d'influence (GRUB tentait de parser les octets binaires du
+            PNG comme un script, quelle que soit sa taille). Corrigé —
+            voir CHANGELOG v3.35.0 — et appliqué manuellement sur la clé
+            physique, mais **pas encore re-testé sur le HP EliteBook 840
+            G3**. Ne pas cocher tant que ce test réel n'a pas confirmé.
       **Mitigation logicielle en place depuis v3.5.0** : tout déploiement
       réel (`--disk` sans `--dry-run`) affiche un avertissement explicite
       et exige un acquiescement séparé (`JE COMPRENDS LE RISQUE` ou
@@ -395,23 +405,19 @@ propre après test (PINs/journaux de test retirés).
 - Comparaison "temps constant" best-effort, pas formellement vérifiée
 - Fichier monolithique en attendant P1
 - Aucune gestion multi-technicien concurrente sur le hashchain/audit partagé
-- **Cause racine du crash GRUB du thème Ventoy non résolue — théorie de
-  la taille d'image probablement écartée** (2026-09-15) : trois tests
-  réels sur le même HP EliteBook 840 G3 le même jour — 1920×1080 RGB
-  (~6 Mo décodés, crash), 1024×768 RGB (~2,25 Mo, crash), 800×600 PNG
-  indexé/palette (~480 Ko, ~12x plus petit, **crash identique**).
-  L'hypothèse RGBA a aussi été vérifiée et écartée (l'image était déjà
-  en RGB pur, `color_type=2`, pas d'alpha). Une réduction de taille
-  décodée par 12x n'a fait aucune différence observable : la cause la
-  plus probable n'est plus la taille de l'image mais une incompatibilité
-  du module thème/gfxmenu de Ventoy lui-même avec ce firmware précis —
-  hors de portée d'une correction SONAR-SE (code tiers). Mitigation en
-  place, jugée définitive pour l'instant : thème désactivé par défaut
-  (`--ventoy-theme` pour l'activer, à ses risques, avec avertissement
-  mis à jour dans `--help`). Piste non explorée si quelqu'un veut
-  creuser un jour : reporter en amont à Ventoy, ou tester sur un second
-  modèle de machine pour savoir si c'est spécifique à ce HP EliteBook
-  ou général.
+- **Cause racine du crash GRUB du thème Ventoy — trouvée le 2026-09-16,
+  pas encore reconfirmée par un vrai boot.** Trois tests réels
+  (2026-09-15) avec des tailles d'image radicalement différentes
+  (1920×1080 RGB ~6 Mo décodés, 1024×768 RGB ~2,25 Mo, 800×600 indexé
+  ~480 Ko) avaient tous produit le crash identique, écartant la théorie
+  de la taille. En s'inspirant de tutoriels sur la personnalisation
+  Ventoy (2026-09-16), lecture de la documentation officielle
+  (`ventoy.net/en/plugin_theme.html`) : la clé `"file"` doit pointer
+  vers un `theme.txt` (script GRUB2), pas directement vers l'image —
+  exactement l'erreur que faisait SONAR-SE. Corrigé (CHANGELOG
+  v3.35.0), appliqué manuellement sur la clé physique, mais pas encore
+  re-testé sur le HP EliteBook 840 G3. À confirmer par un vrai boot
+  avant de considérer ce point résolu.
 
 ## Cadence suggérée (solo)
 
