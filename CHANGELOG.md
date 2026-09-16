@@ -6,6 +6,71 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.32.0-recovered-tooling-from-divergent-lineage] — 2026-09-16
+
+### Contexte
+L'auteur a signalé une archive locale, `SONAR_PROJECT_v3.11.0.zip`,
+demandant de s'inspirer du travail précédent. Vérification faite avant
+d'agir : `git log --all` sur ce dépôt ne trouve ces chemins nulle part
+— l'archive vient d'une lignée du projet distincte, qui a divergé avant
+d'atteindre ce dépôt (dont le premier commit local est
+"v3.4.0-role-lock-identity") et qui n'a jamais été fusionnée ici.
+Comparaison complète des deux arborescences : l'archive a poussé plus
+loin sur la maturité de projet (script de release signé GPG, connexion
+GitHub sécurisée, plan de découpage modulaire écrit) ; ce dépôt-ci a
+poussé plus loin sur la capacité réelle (WinPE, branding Ventoy,
+validation matérielle, catalogue 1003 outils). Aucune des deux lignées
+n'est un sur-ensemble de l'autre.
+
+### Ajouté
+- **`scripts/setup-github.sh`** (récupéré, inchangé sur le fond) :
+  connecte le dépôt local à un remote GitHub — active le hook
+  pre-commit, configure `origin` (via `gh` CLI si authentifié, sinon
+  instructions manuelles), stage les fichiers. **Ne pousse jamais rien
+  automatiquement** — s'arrête à `git add`, affiche les étapes
+  manuelles restantes. Un seul exemple de tag codé en dur (version
+  3.10.1 périmée) généralisé en placeholder.
+- **`scripts/release.sh`** (récupéré, une correction) : génère une
+  release signée GPG (tarball + SHA-256 + signature détachée),
+  vérifie les signatures produites, affiche les instructions de
+  vérification pour l'utilisateur final. Référence corrigée :
+  `--health-check` (n'existe plus dans le script actuel) remplacé par
+  `--self-audit && --self-test` (les vraies commandes de validation
+  actuelles). Exemple de version mis à jour (3.10.1 → 3.31.0).
+- **`lib/README.md`** (récupéré, mis à jour) : plan de découpage
+  modulaire déjà détaillé (`core.sh`/`security.sh`/`deploy.sh`/
+  `operational.sh`/`catalog.sh`/`reports.sh`, ordre d'extraction, règle
+  "un commit par module + self-test après chaque module", garde-fou
+  "pas avant que la CI soit verte" — correspond exactement à la
+  décision de séquençage déjà prise dans ce dépôt). Compteur de lignes
+  mis à jour (4 385 → 5 608 lignes actuelles) ; estimations par module
+  explicitement marquées comme datant du plan d'origine, à
+  recalculer au moment réel du découpage plutôt que recopiées comme si
+  elles étaient à jour.
+
+### Changé
+- `ROADMAP.md` : les deux items P1 (découpage modulaire) et P2
+  (signature GPG des releases) référencent maintenant ces outils
+  récupérés et leur provenance exacte.
+
+### Non fait (délibérément)
+`docs/USER_GUIDE.md` (périmé — écrit avant SONAR Field, `--fetch`,
+`--profile`, aurait fallu le réécrire plutôt que le copier) et
+`docs/HARDWARE_TEST_MATRIX.md` (modèle vierge utile pour de futurs
+tests, mais contient une hypothèse déjà démontrée fausse cette session
+— "persistance montée automatiquement au boot", contredit par la
+validation SystemRescue de v3.29.0) laissés de côté sans les
+intégrer tels quels. `PRESENTATION_SONAR.html`,
+`docs/DEPLOYMENT.html` et `.github/workflows/ci-windows.yml.stub` non
+évalués (hors du périmètre demandé).
+
+### Testé
+`bash -n` sur les deux scripts récupérés (syntaxe correcte). Pas de
+changement dans `sonar_master.sh` cette entrée — uniquement de
+nouveaux fichiers indépendants (outillage), aucune validation
+`--self-audit`/`--self-test` nécessaire au-delà de la confirmation
+qu'aucun fichier suivi n'a été modifié par erreur.
+
 ## [3.31.0-crystaldiskinfo-added] — 2026-09-16
 
 ### Contexte

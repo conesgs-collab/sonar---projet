@@ -99,7 +99,10 @@ P0 ouvert en parallèle, pas une condition bloquante pour le reste.
 - [ ] Découpage modulaire (`lib/core.sh`, `lib/security.sh`, `lib/deploy.sh`,
       `lib/operational.sh`, `lib/catalog.sh`) — refactor mécanique, testé à
       chaque étape avec `--self-audit`/`--self-test`, jamais en un seul gros
-      commit
+      commit. Plan détaillé déjà écrit : `lib/README.md` (ordre
+      d'extraction, règles, garde-fou "pas avant que la CI soit verte")
+      — récupéré le 2026-09-16 d'une lignée antérieure divergente du
+      dépôt, jamais fusionnée dans l'historique Git actuel.
 - [ ] `shellcheck` intégré à la CI une fois le découpage fait (plus
       exploitable sur des fichiers de taille raisonnable que sur un
       monolithe de 3800 lignes)
@@ -365,7 +368,14 @@ propre après test (PINs/journaux de test retirés).
 
 ## P2 — Maturité produit
 
-- [ ] Signature GPG des releases + page de release officielle
+- [ ] Signature GPG des releases + page de release officielle — outillage
+      prêt (`scripts/release.sh`, tarball + SHA-256 + signature GPG),
+      récupéré le 2026-09-16 d'une archive `SONAR_PROJECT_v3.11.0.zip`
+      d'une lignée antérieure divergente du dépôt (jamais fusionnée dans
+      l'historique Git actuel). Reste à faire : premier tag + première
+      exécution réelle, une fois un remote GitHub en place
+      (`scripts/setup-github.sh`, même provenance — connexion sécurisée,
+      ne pousse jamais automatiquement).
 - [ ] Documentation utilisateur complète (au-delà du `--help` intégré)
 - [x] Modèle de chaîne de possession (chain of custody) formalisé pour le
       module forensique — `--forensic-chain-of-custody` (v3.8.0), croise
