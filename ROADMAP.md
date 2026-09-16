@@ -321,6 +321,19 @@ vrai — plus besoin d'attendre :
   et un scénario complet manuel (mauvais PIN×3 → refus journalisé, bon
   PIN → accès + identité + menu + note, journal vérifié).
 
+### v3 — validation réelle sur la clé physique (2026-09-16, voir CHANGELOG)
+
+Nouvelle commande `--field-export <MONTAGE>` (met à jour SONAR Field sur
+une clé existante sans repasser par `--disk`) utilisée pour tester
+`sonar_field.sh` **depuis les fichiers réellement exportés sur la clé
+physique** — pas une copie temporaire, pas un bac à sable `--self-test`.
+Scénarios PIN valide (menu complet), PIN restreint (menu filtré à 2
+profils), 3 PIN erronés (refus journalisé) tous confirmés en conditions
+réelles ; hashchain recalculé indépendamment (sha256 manuel) et
+correspond exactement à ce que le script a écrit sur la clé — le
+mécanisme d'intégrité n'est pas cosmétique. Clé remise dans un état
+propre après test (PINs/journaux de test retirés).
+
 ### Pas encore fait
 
 - Auto-détection robuste de la partition clé (v1 cherche sous
@@ -329,9 +342,13 @@ vrai — plus besoin d'attendre :
 - Lancement effectif des outils (v1 guide, ne lance jamais) — resterait
   cohérent avec la discipline de confirmation même si automatisé un jour
   (jamais sans accord explicite tracé).
-- Validation sur un vrai boot SystemRescue (fait manuellement pendant
-  l'étape 6 pour les *outils* ; `sonar_field.sh` lui-même pas encore
-  testé en conditions réelles sur la clé bootée, seulement en local).
+- **Boot réel de l'environnement de secours** : la v3 valide la logique
+  de `sonar_field.sh` sur des données réelles (via WSL2, qui monte la
+  clé différemment d'un vrai rescue Linux bootée), mais pas encore si
+  SystemRescue, une fois réellement booté sur la machine cible, monte
+  automatiquement la partition Ventoy à un chemin que
+  `sonar_field_locate` détecte — nécessiterait un vrai boot (matériel ou
+  VM) de l'ISO SystemRescue avec la clé attachée.
 
 ## P2 — Maturité produit
 

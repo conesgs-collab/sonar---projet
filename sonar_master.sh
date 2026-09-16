@@ -982,6 +982,14 @@ Commandes indépendantes (à la place de --disk):
                                 Optionnel : sans aucun PIN défini, SONAR
                                 Field prévient explicitement que l'accès
                                 n'est pas verrouillé.
+  --field-export <MONTAGE>     Met à jour SONAR Field (MANIFEST/PROFILES*.
+                                tsv, Scripts/sonar_field.sh, MANIFEST/
+                                FIELD_PINS.tsv si défini) sur une clé déjà
+                                déployée, sans repasser par --disk (ne
+                                touche ni Ventoy ni ISO/Portable). Utile
+                                pour rafraîchir une clé existante après un
+                                --field-pin-set, ou après une mise à jour
+                                de sonar_field.sh lui-même.
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -1669,6 +1677,21 @@ copy_payload_final() {
     [[ -s "${SONAR_FIELD_PINS_FILE}" ]] && cp -f "${SONAR_FIELD_PINS_FILE}" "${mp}/MANIFEST/FIELD_PINS.tsv"
     sonar_generate_build_watermark "${mp}"
     unmount_final "${mp}"
+}
+
+# sonar_field_export MOUNT_POINT: met à jour SONAR Field (profils, script,
+# PIN) sur une clé déjà déployée, SANS repasser par --disk (donc sans
+# retoucher Ventoy ni le contenu ISO/Portable déjà en place). Commande
+# indépendante — mêmes deux lignes que copy_payload_final, isolées pour
+# pouvoir rafraîchir juste la partie SONAR Field d'une clé existante.
+sonar_field_export() {
+    local mp="${1:-}"
+    [[ -n "$mp" ]] || { echo "[SONAR][ERROR] --field-export nécessite un point de montage." >&2; return 2; }
+    [[ -d "$mp" ]] || { echo "[SONAR][ERROR] '${mp}' n'est pas un dossier accessible." >&2; return 2; }
+    sonar_export_field_files "${mp}"
+    [[ -s "${SONAR_FIELD_PINS_FILE}" ]] && cp -f "${SONAR_FIELD_PINS_FILE}" "${mp}/MANIFEST/FIELD_PINS.tsv"
+    sonar_audit "FIELD_EXPORT" "mount=${mp}"
+    echo "[SONAR] Fichiers SONAR Field mis à jour sur ${mp} (MANIFEST/PROFILES*.tsv, Scripts/sonar_field.sh$([[ -s "${SONAR_FIELD_PINS_FILE}" ]] && echo ", MANIFEST/FIELD_PINS.tsv"))."
 }
 
 # sonar_generate_vault_helper DEST_DIR: writes a small standalone helper
@@ -4180,7 +4203,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.27.0-winpe-powershell-known-limitation"
+SONAR_VERSION="3.28.0-sonar-field-real-hardware-validation"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4628,6 +4651,24 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tALL niveau did not see every profile\n'; errors=$((errors+1))
         fi
+        # --field-export : commande indépendante (pas d'appel direct à
+        # sonar_export_field_files) — teste le vrai chemin de dispatch CLI,
+        # y compris la validation d'arguments et la copie du fichier PINs.
+        local _fe_out _fe_dir
+        _fe_out="$("$self" --field-export 2>&1)"
+        if [[ $? -ne 0 || -n "$(grep -i 'nécessite un point de montage' <<<"${_fe_out}")" ]]; then
+            printf 'PASS\t--field-export rejects a missing mount-point argument\n'
+        else
+            printf 'FAIL\t--field-export did not reject a missing argument\n'; errors=$((errors+1))
+        fi
+        _fe_dir="$(mktemp -d)"
+        _fe_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-export "${_fe_dir}" 2>&1)"
+        if [[ -s "${_fe_dir}/MANIFEST/PROFILES.tsv" && -x "${_fe_dir}/Scripts/sonar_field.sh" && -s "${_fe_dir}/MANIFEST/FIELD_PINS.tsv" ]]; then
+            printf 'PASS\t--field-export writes profiles, script and PINs file to an existing key\n'
+        else
+            printf 'FAIL\t--field-export did not write the expected files\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_fe_dir}"
         rm -rf "${_fld_dir}" "${_fps_root}"
         echo
         echo "ERRORS=$errors"
@@ -5541,6 +5582,7 @@ case "${1:-}" in
     --fetch-manifest-verify-seal) if sonar_fetch_manifest_verify_seal; then exit 0; else exit $?; fi ;;
     --fetch) shift; if sonar_fetch_profile "${1:-}"; then exit 0; else exit $?; fi ;;
     --field-pin-set) shift; if sonar_field_pin_set "${1:-}" "${2:-}" "${3:-ALL}"; then exit 0; else exit $?; fi ;;
+    --field-export) shift; if sonar_field_export "${1:-}"; then exit 0; else exit $?; fi ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;

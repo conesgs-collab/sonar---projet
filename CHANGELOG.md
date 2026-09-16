@@ -6,6 +6,68 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.28.0-sonar-field-real-hardware-validation] — 2026-09-16
+
+### Contexte
+Jusqu'ici, `sonar_field.sh` n'avait été validé qu'en bac à sable
+(`--self-test`, sur des répertoires temporaires générés par le même
+run) — jamais exécuté depuis les fichiers réellement exportés sur une
+clé physique. Objectif de cette session : un test de bout en bout réel,
+pas simulé.
+
+### Ajouté
+- `sonar_master.sh --field-export <MONTAGE>` : nouvelle commande
+  indépendante qui met à jour SONAR Field (`MANIFEST/PROFILES*.tsv`,
+  `Scripts/sonar_field.sh`, `MANIFEST/FIELD_PINS.tsv` si un PIN est
+  défini) sur une clé déjà déployée, **sans repasser par `--disk`** —
+  ne touche ni Ventoy ni `ISO/`/`Portable/`. Comblait un vrai manque :
+  avant cette commande, la seule façon de rafraîchir SONAR Field sur
+  une clé existante était de refaire un `--disk` complet (donc
+  potentiellement retoucher Ventoy), ce qui était disproportionné pour
+  juste mettre à jour un PIN ou le script lui-même.
+- Couverture `--self-test` pour `--field-export` (argument manquant
+  rejeté ; écriture réelle des trois fichiers vérifiée).
+
+### Testé — validation réelle sur la clé physique (pas en bac à sable)
+1. Deux PINs de terrain définis via `--field-pin-set` (Technicien/ALL,
+   Stagiaire/boot-repair+data-recovery).
+2. Déployés sur la clé physique via `--field-export /mnt/e` (WSL2, clé
+   montée en E: côté Windows) — `MANIFEST/PROFILES.tsv`,
+   `PROFILES_SCENARIOS.tsv`, `FIELD_PINS.tsv` et `Scripts/sonar_field.sh`
+   confirmés présents et corrects sur la clé.
+3. `sonar_field.sh` exécuté **directement depuis la clé physique**
+   (pas une copie temporaire) : PIN Technicien → menu complet (6
+   profils), profil `boot-repair` consulté → outils localisés
+   correctement sur la clé réelle (`SystemRescue` trouvé,
+   `GParted`/`TestDisk` signalés absents car empaquetés dans l'ISO, pas
+   en fichiers séparés — comportement honnête, pas un faux positif) →
+   message "LIMITE CONNUE" WinPE correctement affiché (aucun WinPE
+   présent sur cette clé).
+4. PIN Stagiaire → menu correctement filtré à 2 profils seulement
+   (boot-repair, data-recovery) — confirmé que le filtrage par niveau
+   fonctionne en conditions réelles, pas juste en test unitaire.
+5. 3 PIN erronés consécutifs → accès refusé, journalisé
+   `FIELD_ACCESS_DENIED` avec l'identité `non-identifie` (correcte :
+   l'identifiant n'est demandé qu'après un PIN valide).
+6. **Hashchain recalculé indépendamment** (sha256 manuel, hors du
+   script) à partir des deux premières lignes du journal réel —
+   correspond exactement aux hachages écrits par `sonar_field.sh` sur
+   la clé. Confirme que le mécanisme d'intégrité n'est pas cosmétique.
+7. Clé remise dans un état propre après le test : PINs et journaux de
+   test retirés (`MANIFEST/FIELD_PINS.tsv`, `Field-Logs/*.log`) —
+   `PROFILES*.tsv` et `Scripts/sonar_field.sh` laissés en place
+   (contenu légitime, pas des artefacts de test).
+
+### Non résolu
+Cette validation couvre la logique de `sonar_field.sh` lui-même sur
+des données réelles, mais pas encore la couche "environnement de
+secours" : est-ce que SystemRescue (l'ISO réellement présente sur la
+clé) monte automatiquement la partition de données Ventoy à l'un des
+chemins que `sonar_field_locate` cherche (`/mnt/*`, `/media/*/*`,
+`/run/media/*/*`) une fois réellement booté ? Non testé ici (le test
+utilisait WSL2, qui monte différemment) — nécessiterait un vrai boot
+(matériel ou VM) de l'ISO SystemRescue avec la clé attachée.
+
 ## [3.27.0-winpe-powershell-known-limitation] — 2026-09-16
 
 ### Contexte
