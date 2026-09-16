@@ -953,11 +953,15 @@ Commandes indépendantes (à la place de --disk):
                                 télécharger un logiciel commercial/sous licence)
   --profile [NOM|list]        Profils de dépannage fermés et documentés :
                                 boot-repair|data-recovery|malware|disk-clone|
-                                password-reset|hardware-diagnostic|full —
-                                scénario, outils, et POURQUOI ceux-là (pas le
-                                catalogue 1003, qui n'est qu'une base de
-                                connaissance). Sans argument (ou "list") :
-                                vue d'ensemble.
+                                password-reset|hardware-diagnostic|
+                                peripherals-network|full — scénario, outils,
+                                et POURQUOI ceux-là (pas le catalogue 1003,
+                                qui n'est qu'une base de connaissance).
+                                peripherals-network est différent des autres
+                                par nature : s'utilise depuis un PC déjà
+                                démarré (câble branché sur un téléphone
+                                Android), pas depuis le menu de boot Ventoy.
+                                Sans argument (ou "list") : vue d'ensemble.
   --fetch-manifest-seal       [rôle VAULT] Scelle (HMAC, secret de build) le
                                 manifeste de téléchargement (URL+SHA256 par
                                 outil) — à exécuter une fois avant tout
@@ -3713,10 +3717,11 @@ hardware-diagnostic	CrystalDiskMark	Mesure les vitesses reelles de lecture/ecrit
 hardware-diagnostic	Prime95	Stress-test CPU/alimentation intensif (GIMPS) — complementaire a Memtest86+ : detecte les plantages intermittents sous charge (surchauffe, alimentation limite) que Memtest86+ seul (RAM au repos, hors charge CPU) ne revele pas. Freeware avec EULA specifique GIMPS (pas open-source au sens strict, mais usage libre sans compte ni restriction pertinente ici — voir mersenne.org/legal).
 boot-repair	BlueScreenView	Analyse automatiquement les fichiers de vidage (.dmp) apres un ecran bleu pour identifier le pilote/module responsable — cible la reparation au lieu de deviner. Freeware NirSoft (personnel et commercial), aucun compte requis.
 boot-repair	Rufus	Cree une cle USB d'installation Windows amorcable a partir d'une ISO — utile quand le diagnostic conclut a une reinstallation plutot qu'une reparation. Open source (GPLv3), binaires signes Authenticode (editeur verifie : Akeo Consulting) en plus du telechargement direct GitHub.
+peripherals-network	Android Platform Tools	adb (debug USB) et fastboot (mode bootloader) — diagnostic et reparation basique d'un telephone Android depuis un PC fonctionnel, cable branche (redemarrage force, effacement cache, reinstallation systeme si un firmware officiel est disponible). Ne s'utilise PAS depuis le menu de boot Ventoy : necessite un PC deja demarre normalement (Windows/Linux), le telephone est la cible, pas la cle. iOS hors de portee (ecosysteme Apple verrouille, aucun outil libre equivalent). Officiel Google (dl.google.com), licence Android SDK.
 PROFILES_EOF
 )"
 
-SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic full"
+SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network full"
 
 sonar_profile_names() { echo "${SONAR_PROFILE_NAMES}"; }
 
@@ -3728,7 +3733,8 @@ sonar_profile_scenario() {
         disk-clone) echo "Migration ou sauvegarde bloc-a-bloc d'un disque : remplacement de disque, image avant intervention risquee, ou disque physiquement defaillant a cloner avant qu'il ne lache." ;;
         password-reset) echo "Compte Windows local verrouille (mot de passe perdu, poste recupere sans compte admin) : reinitialisation hors-ligne du mot de passe." ;;
         hardware-diagnostic) echo "Plantages, ecrans bleus ou instabilite aleatoires sans cause logicielle evidente : ecarter ou confirmer une RAM defaillante avant de perdre du temps a reinstaller un systeme sain." ;;
-        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les six scenarios." ;;
+        peripherals-network) echo "Telephone Android en panne (boot loop, systeme corrompu) diagnostique depuis un PC fonctionnel, cable branche — PAS un scenario de boot sur la cle, profil different des six precedents par nature." ;;
+        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les sept scenarios." ;;
         *) return 1 ;;
     esac
 }
@@ -3837,6 +3843,7 @@ CrystalDiskMark	https://sourceforge.net/projects/crystaldiskmark/files/9.0.3/Cry
 Prime95	https://download.mersenne.ca/gimps/v30/30.19/p95v3019b20.win64.zip	d9475f2ff3f4a6a701abc49a86a66126cb48abd10bda6fa87039d98fa8756bca		none	Freeware GIMPS (mersenne.org/legal) : usage libre sans compte ni restriction pertinente pour un usage en stress-test (la seule clause notable concerne une prime EFF si le code source sert a decouvrir un nombre premier record — hors sujet ici). Mirroir officiel mersenne.ca. SHA-256 calcule localement. Windows uniquement (build win64).
 BlueScreenView	https://www.nirsoft.net/utils/bluescreenview.zip	15ba3b0ca0a1ff21e89715da52ecc5918177b97ce40903d299fd591909e7b3ab		none	Freeware NirSoft (usage personnel et commercial libre — seule exception connue chez NirSoft concerne un autre outil, NK2Edit). SHA-256 calcule localement apres telechargement direct depuis nirsoft.net. Windows uniquement.
 Rufus	https://github.com/pbatard/rufus/releases/download/v4.15/rufus-4.15.exe	84c8a437f8af89257524478489e5c85f1edf25f761d299e2bcde46ac0afbe106		none	Open source GPLv3 (github.com/pbatard/rufus). L'auteur ne publie pas de SHA-256 statique par choix deliberateur (FAQ officielle) : le binaire est signe Authenticode (editeur verifie "Akeo Consulting"), verifie automatiquement par Windows au lancement — assurance au moins equivalente a un hash publie. SHA-256 calcule localement quand meme, comme reference. Windows uniquement.
+Android Platform Tools	https://dl.google.com/android/repository/platform-tools-latest-windows.zip	45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99		none	URL officielle Google (dl.google.com, meme domaine que les releases Android Studio). Licence Android SDK (contrat Google, pas open-source au sens strict, mais usage libre sans compte). "latest" dans l'URL : Google ne publie pas d'URL versionnee stable ni de somme officielle pour ce point d'entree — SHA-256 calcule localement au moment du telechargement, revalide a chaque --fetch (pas de garantie de stabilite dans le temps contrairement aux autres entrees de ce manifeste, a re-verifier si le contenu change).
 FETCH_EOF
 )"
 
@@ -4231,7 +4238,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.33.0-six-more-verified-tools"
+SONAR_VERSION="3.34.0-peripherals-network-profile"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4560,12 +4567,12 @@ sonar_self_test_v2() {
         rm -rf "${_wm_root}" "${_wm_mp}"
         grep -q '^SONAR_PROFILES_TSV=' "$self" && printf 'PASS\tTroubleshooting profiles module present\n' || { printf 'FAIL\tTroubleshooting profiles module missing\n'; errors=$((errors+1)); }
         local _prof _prof_ok=true
-        for _prof in boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic full; do
+        for _prof in boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network full; do
             if ! "$self" --profile "${_prof}" >/dev/null 2>&1; then
                 printf 'FAIL\tProfile "%s" failed to document\n' "${_prof}"; errors=$((errors+1)); _prof_ok=false
             fi
         done
-        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll seven troubleshooting profiles document scenario + tools\n'
+        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll eight troubleshooting profiles document scenario + tools\n'
         if "$self" --profile bogus-profile >/dev/null 2>&1; then
             printf 'FAIL\tUnknown profile name was NOT rejected\n'; errors=$((errors+1))
         else
@@ -4573,7 +4580,7 @@ sonar_self_test_v2() {
         fi
         local _full_out
         _full_out="$("$self" --profile full 2>/dev/null)"
-        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}" && grep -q 'Rufus' <<<"${_full_out}" && grep -q 'Process Explorer' <<<"${_full_out}"; then
+        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}" && grep -q 'Rufus' <<<"${_full_out}" && grep -q 'Process Explorer' <<<"${_full_out}" && grep -q 'Android Platform Tools' <<<"${_full_out}"; then
             printf 'PASS\tProfile "full" is the union of all profiles\n'
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))

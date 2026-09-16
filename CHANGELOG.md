@@ -6,6 +6,73 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.34.0-peripherals-network-profile] — 2026-09-16
+
+### Contexte
+Suite directe de v3.33.0 (même jour) : demande d'élargir la couverture
+à des domaines hors PC — serveurs, imprimantes, téléphonie mobile,
+caméras de surveillance. Analyse faite avant d'agir plutôt que de
+promettre une couverture que le mécanisme de SONAR ne peut pas tenir.
+
+### Trouvé — une limite architecturale réelle, pas juste un manque d'outils
+Le mécanisme de SONAR (`--disk` construit une clé Ventoy ; la machine
+en panne boote dessus ; on répare depuis cet environnement) suppose
+que la cible **peut booter sur une clé USB PC**. Ça exclut par nature
+trois des quatre domaines demandés :
+- **Imprimante** : pas de port de boot USB au sens PC — le dépannage
+  se fait depuis un PC déjà fonctionnel (spouleur, pilotes, interface
+  web de l'imprimante). Rien à ajouter : `SFC`/`DISM`/pilotes déjà
+  couverts côté Windows.
+- **Téléphone** : OS et architecture totalement différents d'un PC. On
+  ne boote pas un téléphone sur une clé USB PC. Diagnostic uniquement
+  possible depuis un PC fonctionnel, câble branché.
+- **Caméra de surveillance** : appareil réseau, se diagnostique par le
+  réseau depuis un PC fonctionnel, jamais en bootant dessus.
+- **Serveur** : seul cas qui reste un vrai scénario de boot — un
+  serveur est un PC pour ce que couvrent boot-repair/data-recovery/
+  disk-clone. Extension quasi gratuite (mêmes outils), pas encore
+  documentée formellement dans un profil dédié cette session.
+
+### Ajouté
+- **Nouveau profil `peripherals-network`** (8e profil) — explicitement
+  documenté comme différent des sept autres par nature : s'utilise
+  depuis un PC déjà démarré normalement, câble branché sur un
+  téléphone, pas depuis le menu de boot Ventoy. `--profile
+  peripherals-network` et `--help` le précisent en toutes lettres pour
+  ne pas laisser croire à une couverture qui n'existe pas.
+- **Android Platform Tools** (adb + fastboot) : diagnostic/réparation
+  basique d'un téléphone Android (redémarrage forcé, effacement cache,
+  réinstallation firmware officiel) depuis un PC fonctionnel. Officiel
+  Google (`dl.google.com`), SHA-256 vérifié pour de vrai via le
+  mécanisme `--fetch` réel. iOS explicitement hors de portée (aucun
+  outil libre équivalent, écosystème Apple verrouillé) — documenté
+  plutôt que passé sous silence.
+
+### Écarté / reporté
+`nmap` (scan réseau pour la détection de caméras) : licence et source
+officielle vérifiées (licence custom proche de mais non compatible
+GPLv2, nmap.org/dist) mais téléchargement du binaire portable Windows
+(dernière version portable : 7.92, 2021 — les versions plus récentes
+ne publient qu'un installeur .exe) échoué deux fois pour instabilité
+réseau côté serveur nmap.org (timeout, connexion réinitialisée) — pas
+un problème de licence, juste pas abouti cette session.
+
+### Testé
+`bash -n` + `--self-audit` (14 PASS, 0 FAIL) + `--self-test` (0
+ERRORS, "All eight troubleshooting profiles..." PASS, union de
+`--profile full` étendue pour confirmer `Android Platform Tools`).
+Récupéré via le vrai mécanisme `--fetch-manifest-seal` puis `--fetch
+peripherals-network` (pas un test manuel isolé). Déployé sur la clé
+physique (`E:\Portable\AndroidPlatformTools\`, adb.exe/fastboot.exe
+confirmés présents) sans toucher à `persistence/` (40 Go intact) ni à
+`ISO/` (inchangé). `--field-export` relancé, 8 profils confirmés
+présents sur la clé.
+
+### Non résolu
+`nmap` à retenter (candidat solide, juste pas abouti). Extension
+serveur (RAID/`mdadm`, notes IPMI) identifiée comme quasi gratuite
+mais pas encore formalisée en profil dédié.
+
 ## [3.33.0-six-more-verified-tools] — 2026-09-16
 
 ### Contexte
