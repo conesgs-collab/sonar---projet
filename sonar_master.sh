@@ -3700,6 +3700,8 @@ data-recovery	TestDisk	Recuperation de partitions et systemes de fichiers a part
 data-recovery	PhotoRec	Recuperation de fichiers par recherche de signatures (file carving), independante des metadonnees du systeme de fichiers — complementaire a TestDisk quand la structure elle-meme est perdue. Livre dans la meme archive que TestDisk (cgsecurity.org).
 data-recovery	ddrescue	Cree une image secteur par secteur d'un disque en train de mourir AVANT toute tentative de recuperation — etape standard qui evite d'aggraver les dommages en ecrivant/lisant a repetition sur le disque source.
 malware	ClamAV	Seul moteur antivirus open-source majeur, librement redistribuable et a signatures mises a jour (freshclam) — Malwarebytes et ESET Online Scanner ecartes : logiciels proprietaires non redistribuables librement, plusieurs exigent un compte en ligne, donc non automatisables par --fetch.
+malware	Process Explorer	Gestionnaire des taches avance (Sysinternals/Microsoft) : arborescence des processus, DLL chargees, editeur/signature de chaque binaire — la triage manuelle classique pour reperer un processus malveillant deguise en processus systeme. Freeware officiel Microsoft (EULA Sysinternals), aucun compte requis.
+malware	Autoruns	Sysinternals/Microsoft : liste exhaustive de tout ce qui demarre automatiquement avec Windows (services, taches planifiees, extensions explorateur, pilotes...) — la plupart des malwares persistants s'installent dans un de ces points d'entree. Meme licence/provenance que Process Explorer.
 disk-clone	SystemRescue	Meme environnement de boot que boot-repair (mutualisation du support) — fournit le shell Linux pour piloter Clonezilla/GParted/ddrescue depuis une seule cle.
 disk-clone	Clonezilla	Clonage/imagerie de disque ou partition, standard open-source du secteur, supporte de nombreux systemes de fichiers.
 disk-clone	GParted	Redimensionnement et gestion de partitions independamment d'un clonage complet (inclus dans SystemRescue).
@@ -3707,6 +3709,10 @@ disk-clone	ddrescue	Clonage secteur par secteur d'un disque physiquement defaill
 password-reset	chntpw	Seul outil libre maintenu de longue date qui edite directement la ruche registre SAM de Windows pour reinitialiser un mot de passe de compte local hors-ligne — support minuscule (~18 Mo), integrable sans alourdir la cle.
 hardware-diagnostic	Memtest86+	Testeur de memoire RAM autonome (boot direct, hors de tout systeme d'exploitation) — seul moyen fiable de confirmer ou d'ecarter une RAM defaillante comme cause de plantages/ecrans bleus aleatoires. GPLv2, activement maintenu (memtest86plus/memtest86plus sur GitHub), aucune restriction d'usage.
 hardware-diagnostic	CrystalDiskInfo	Lecture des attributs SMART d'un disque (temperature, secteurs defectueux, heures de fonctionnement, indicateur de sante global) — complementaire a Memtest86+ : distingue une RAM defaillante d'un disque en fin de vie, deux causes frequentes confondues autrement. Licence MIT, source ouverte (hiyohiyo/CrystalDiskInfo).
+hardware-diagnostic	CrystalDiskMark	Mesure les vitesses reelles de lecture/ecriture d'un disque (sequentiel et aleatoire) — un SSD qui repond mais dont les performances se sont effondrees est un symptome distinct d'un disque qui remonte des erreurs SMART. Meme editeur/licence que CrystalDiskInfo.
+hardware-diagnostic	Prime95	Stress-test CPU/alimentation intensif (GIMPS) — complementaire a Memtest86+ : detecte les plantages intermittents sous charge (surchauffe, alimentation limite) que Memtest86+ seul (RAM au repos, hors charge CPU) ne revele pas. Freeware avec EULA specifique GIMPS (pas open-source au sens strict, mais usage libre sans compte ni restriction pertinente ici — voir mersenne.org/legal).
+boot-repair	BlueScreenView	Analyse automatiquement les fichiers de vidage (.dmp) apres un ecran bleu pour identifier le pilote/module responsable — cible la reparation au lieu de deviner. Freeware NirSoft (personnel et commercial), aucun compte requis.
+boot-repair	Rufus	Cree une cle USB d'installation Windows amorcable a partir d'une ISO — utile quand le diagnostic conclut a une reinstallation plutot qu'une reparation. Open source (GPLv3), binaires signes Authenticode (editeur verifie : Akeo Consulting) en plus du telechargement direct GitHub.
 PROFILES_EOF
 )"
 
@@ -3825,6 +3831,12 @@ Clonezilla	https://sourceforge.net/projects/clonezilla/files/clonezilla_live_sta
 chntpw	http://pogostick.net/~pnh/ntpasswd/cd140201.zip	c88d86aee55b31827ab4782d05bd44922276955909c43c69f0fb15377cc64374		none	ATTENTION assurance plus faible que les autres lignes : source officielle en HTTP seul (pas de TLS), MD5 uniquement publie par le fournisseur (pas de SHA-256/GPG amont). MD5 recoupe (f274127bf8be9a7ed48b563fd951ae9e) lors de la constitution de ce manifeste ; SHA-256 calcule localement.
 Memtest86+	https://www.memtest.org/download/v8.10/mt86plus_8.10_x86_64.iso.zip	93530005d6ac6a85aa2a49c68604a43c25794ecccf796c4f8849a73a8001be9a		none	SHA-256 publie sur memtest.org (sha256sum.txt du meme domaine officiel, pas de GPG pour cette release) et recalcule localement apres telechargement HTTPS cette session : correspond exactement. Fichier est un .zip contenant l'ISO bootable (mt86plus_8.10_x86_64.iso) — extraire puis deposer l'ISO extraite dans ISO/ (pas Portable/, malgre le routage par extension de --fetch qui le place initialement dans Portable/Fetched/ a cause du .zip).
 CrystalDiskInfo	https://sourceforge.net/projects/crystaldiskinfo/files/9.9.2/CrystalDiskInfo9_9_2.zip/download	01acb3176851a85824d9589c6514e3eb9771eb7f9d5ee58ed9b4e057bd21c7df		none	Licence MIT confirmee (github.com/hiyohiyo/CrystalDiskInfo). Aucune somme officielle publiee par l'editeur ; SHA-256 calcule localement apres telechargement depuis SourceForge (miroir officiel du projet, meme schema de confiance que Clonezilla dans ce manifeste). Version portable (pas l'installeur, pour eviter les variantes "Ads"/bundlees listees sur crystalmark.info) : .exe Windows autonome, a lancer depuis WinPE (voir tools/Build-SonarSE-WinPE.ps1) ou un Windows demarre normalement — ne fonctionne pas depuis SystemRescue (Linux).
+Process Explorer	https://download.sysinternals.com/files/ProcessExplorer.zip	746770d3f54326dd7da16c2b2815803ab131f348cba24a91cb6a38cfd2f7073f		none	Licence Microsoft Sysinternals EULA (freeware, usage personnel et commercial, sans compte ni cle). URL officielle sur le domaine Microsoft (download.sysinternals.com). Aucune somme publiee separement ; SHA-256 calcule localement apres telechargement HTTPS direct cette session. Windows uniquement (WinPE ou Windows demarre normalement).
+Autoruns	https://download.sysinternals.com/files/Autoruns.zip	7b3a8eed819f732a3e4c134aecaeaebb8d643a46490ccddb82cc8a1a745c4cf7		none	Meme licence/provenance que Process Explorer (Microsoft Sysinternals, download.sysinternals.com). SHA-256 calcule localement apres telechargement HTTPS direct cette session. Windows uniquement.
+CrystalDiskMark	https://sourceforge.net/projects/crystaldiskmark/files/9.0.3/CrystalDiskMark9_0_3.zip/download	e0c1e76a8ca5df524ffb83b4553cc8f27e539feb3c2a692cc41189783c494b78		none	Meme editeur/licence MIT que CrystalDiskInfo (crystalmark.info / hiyohiyo). SHA-256 calcule localement apres telechargement depuis SourceForge. Windows uniquement.
+Prime95	https://download.mersenne.ca/gimps/v30/30.19/p95v3019b20.win64.zip	d9475f2ff3f4a6a701abc49a86a66126cb48abd10bda6fa87039d98fa8756bca		none	Freeware GIMPS (mersenne.org/legal) : usage libre sans compte ni restriction pertinente pour un usage en stress-test (la seule clause notable concerne une prime EFF si le code source sert a decouvrir un nombre premier record — hors sujet ici). Mirroir officiel mersenne.ca. SHA-256 calcule localement. Windows uniquement (build win64).
+BlueScreenView	https://www.nirsoft.net/utils/bluescreenview.zip	15ba3b0ca0a1ff21e89715da52ecc5918177b97ce40903d299fd591909e7b3ab		none	Freeware NirSoft (usage personnel et commercial libre — seule exception connue chez NirSoft concerne un autre outil, NK2Edit). SHA-256 calcule localement apres telechargement direct depuis nirsoft.net. Windows uniquement.
+Rufus	https://github.com/pbatard/rufus/releases/download/v4.15/rufus-4.15.exe	84c8a437f8af89257524478489e5c85f1edf25f761d299e2bcde46ac0afbe106		none	Open source GPLv3 (github.com/pbatard/rufus). L'auteur ne publie pas de SHA-256 statique par choix deliberateur (FAQ officielle) : le binaire est signe Authenticode (editeur verifie "Akeo Consulting"), verifie automatiquement par Windows au lancement — assurance au moins equivalente a un hash publie. SHA-256 calcule localement quand meme, comme reference. Windows uniquement.
 FETCH_EOF
 )"
 
@@ -3912,6 +3924,15 @@ sonar_fetch_one_tool() {
     esac
     mkdir -p "$dest_dir"
     dest_file="${dest_dir}/${base}"
+    # Idempotent : si le fichier est deja present ET que son SHA-256 est
+    # deja correct, on ne re-telecharge rien. Observe en pratique : sans
+    # ce garde-fou, --fetch sur un profil incluant un gros outil deja
+    # present (SystemRescue, 1.3 Go) le retelechargeait integralement a
+    # chaque execution, meme deja valide.
+    if [[ -f "$dest_file" ]] && sonar_fetch_sha256_matches "${dest_file}" "${expected_sha256}"; then
+        echo "[SONAR] OK: ${tool} deja present et verifie (SHA-256 conforme) -> ${dest_file}"
+        return 0
+    fi
     echo "[SONAR] Téléchargement: ${tool} <- ${url}"
     if ! curl -fL --retry 3 --retry-delay 5 -C - -o "${dest_file}.part" "$url"; then
         rm -f "${dest_file}.part"
@@ -4210,7 +4231,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.32.0-recovered-tooling-from-divergent-lineage"
+SONAR_VERSION="3.33.0-six-more-verified-tools"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4552,7 +4573,7 @@ sonar_self_test_v2() {
         fi
         local _full_out
         _full_out="$("$self" --profile full 2>/dev/null)"
-        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}"; then
+        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}" && grep -q 'Rufus' <<<"${_full_out}" && grep -q 'Process Explorer' <<<"${_full_out}"; then
             printf 'PASS\tProfile "full" is the union of all profiles\n'
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))

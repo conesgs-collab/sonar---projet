@@ -6,6 +6,80 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.33.0-six-more-verified-tools] — 2026-09-16
+
+### Contexte
+Suite d'une demande d'élargir la couverture d'outils à partir d'un
+document PDF fourni par l'auteur (liste de ~35 outils de diagnostic/
+réparation PC, 10 catégories). Recherche faite pour chaque candidat
+avant intégration — même discipline que Memtest86+/CrystalDiskInfo.
+
+### Ajouté
+- **Process Explorer** et **Autoruns** (Microsoft Sysinternals,
+  download.sysinternals.com, EULA freeware sans compte) — profil
+  `malware` : triage manuelle de processus/persistance, complément
+  Windows-side de ClamAV.
+- **BlueScreenView** (NirSoft, freeware personnel/commercial) — profil
+  `boot-repair` : identifie le pilote responsable d'un écran bleu à
+  partir des .dmp.
+- **Rufus** (GPLv3, github.com/pbatard/rufus, binaires signés
+  Authenticode "Akeo Consulting" en plus du téléchargement direct) —
+  profil `boot-repair` : création de clé USB Windows amorçable quand
+  le diagnostic conclut à une réinstallation.
+- **CrystalDiskMark** (même éditeur/licence MIT que CrystalDiskInfo) —
+  profil `hardware-diagnostic` : vitesses réelles de disque,
+  complémentaire à l'attribut SMART seul.
+- **Prime95** (GIMPS, freeware avec EULA spécifique — pas open source
+  au sens strict, clause notable sans rapport avec cet usage) — profil
+  `hardware-diagnostic` : stress-test CPU/alimentation, détecte les
+  plantages sous charge que Memtest86+ seul ne révèle pas.
+- **Idempotence de `--fetch`** (`sonar_fetch_one_tool`) : si le fichier
+  cible existe déjà avec le bon SHA-256, plus de re-téléchargement.
+  Découvert en pratique : sans ce garde-fou, chaque `--fetch` sur un
+  profil incluant SystemRescue (1,3 Go, déjà présent et valide) le
+  retéléchargeait intégralement à chaque exécution.
+
+### Écarté après recherche (mêmes critères que Kaspersky/Avast/Kali)
+`MediCat USB`, `Hiren's BootCD PE`, `Ultimate Boot CD` (suggérés par le
+document comme environnements de démarrage) : même compromis de
+licence que Kaspersky/Avast déjà écarté — gros bundle sans garantie de
+provenance individuelle. `Malwarebytes`, `RogueKiller`, `AdwCleaner`,
+`Revo Uninstaller Pro`, `Recuva`, `Macrium Reflect`, `Victoria SSD/HDD`,
+`HWiNFO64`, `CPU-Z`/`GPU-Z`, `Advanced IP Scanner` : non recherchés en
+profondeur cette session (proprietaires, statut de licence/téléchargement
+direct non vérifié) — candidats pour une prochaine session si voulu.
+`Wireshark` : licence/source vérifiées (GPLv2, wireshark.org,
+signatures GPG), mais intégration reportée — capture de paquets depuis
+un environnement de secours sans gestionnaire de paquets est plus
+complexe que les .exe portables ajoutés ici, mérite un traitement
+séparé. `SFC`/`DISM`/`CHKDSK` déjà couverts : binaires Windows/WinPE
+de base, rien à télécharger.
+
+### Testé
+`bash -n` + `--self-audit` (14 PASS, 0 FAIL) + `--self-test` (0
+ERRORS) sous WSL2. Les 6 outils récupérés et vérifiés pour de vrai via
+`--fetch-manifest-seal` puis `--fetch malware`/`--fetch boot-repair`/
+`--fetch hardware-diagnostic` (mécanisme réel du script, pas un test
+manuel isolé) — un échec réseau transitoire sur Rufus (connexion
+réinitialisée par GitHub) corrigé par une simple relance, confirmant
+au passage que le nouveau garde-fou d'idempotence fonctionne
+(SystemRescue/TestDisk/BlueScreenView reconnus déjà présents sans
+retéléchargement). Déployés sur la clé physique
+(`E:\Portable\{ProcessExplorer,Autoruns,CrystalDiskMark,Prime95}\`,
+`rufus-4.15.exe`, `bluescreenview.zip`) sans toucher à `persistence/`
+(40 Go intact) ni à `ISO/` (inchangé, aucun de ces 6 outils n'est une
+ISO). `--field-export` relancé, profils à jour sur la clé.
+
+### Non résolu
+Domaines demandés mais architecturalement incompatibles avec le
+mécanisme de SONAR (boot direct sur la machine en panne) : imprimantes,
+téléphonie mobile, caméras de surveillance. Voir discussion en session
+— nécessiteraient un profil différent, utilisé depuis un PC qui
+fonctionne déjà (câble/réseau), pas depuis le menu de boot Ventoy.
+Piste concrète identifiée mais pas implémentée : Android Platform
+Tools (adb/fastboot, dl.google.com, licence Android SDK) pour le volet
+téléphonie Android — iOS restant hors de portée par nature.
+
 ## [3.32.0-recovered-tooling-from-divergent-lineage] — 2026-09-16
 
 ### Contexte
