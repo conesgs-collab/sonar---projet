@@ -3706,6 +3706,7 @@ disk-clone	GParted	Redimensionnement et gestion de partitions independamment d'u
 disk-clone	ddrescue	Clonage secteur par secteur d'un disque physiquement defaillant, avant ou a la place d'un clonage logique classique.
 password-reset	chntpw	Seul outil libre maintenu de longue date qui edite directement la ruche registre SAM de Windows pour reinitialiser un mot de passe de compte local hors-ligne — support minuscule (~18 Mo), integrable sans alourdir la cle.
 hardware-diagnostic	Memtest86+	Testeur de memoire RAM autonome (boot direct, hors de tout systeme d'exploitation) — seul moyen fiable de confirmer ou d'ecarter une RAM defaillante comme cause de plantages/ecrans bleus aleatoires. GPLv2, activement maintenu (memtest86plus/memtest86plus sur GitHub), aucune restriction d'usage.
+hardware-diagnostic	CrystalDiskInfo	Lecture des attributs SMART d'un disque (temperature, secteurs defectueux, heures de fonctionnement, indicateur de sante global) — complementaire a Memtest86+ : distingue une RAM defaillante d'un disque en fin de vie, deux causes frequentes confondues autrement. Licence MIT, source ouverte (hiyohiyo/CrystalDiskInfo).
 PROFILES_EOF
 )"
 
@@ -3823,6 +3824,7 @@ ClamAV	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb
 Clonezilla	https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-15/clonezilla-live-3.3.3-15-amd64.iso/download	482518ea32af3b82ed15d09e2e7714806775deb62aeed81491e534f6cc6bbc47		none	SHA-256 verifie via CHECKSUMS.TXT signe GPG (cle DRBL) sur clonezilla.org (hors SourceForge). L'ISO vient de SourceForge : miroirs parfois instables, --fetch reprend un telechargement interrompu (curl -C -).
 chntpw	http://pogostick.net/~pnh/ntpasswd/cd140201.zip	c88d86aee55b31827ab4782d05bd44922276955909c43c69f0fb15377cc64374		none	ATTENTION assurance plus faible que les autres lignes : source officielle en HTTP seul (pas de TLS), MD5 uniquement publie par le fournisseur (pas de SHA-256/GPG amont). MD5 recoupe (f274127bf8be9a7ed48b563fd951ae9e) lors de la constitution de ce manifeste ; SHA-256 calcule localement.
 Memtest86+	https://www.memtest.org/download/v8.10/mt86plus_8.10_x86_64.iso.zip	93530005d6ac6a85aa2a49c68604a43c25794ecccf796c4f8849a73a8001be9a		none	SHA-256 publie sur memtest.org (sha256sum.txt du meme domaine officiel, pas de GPG pour cette release) et recalcule localement apres telechargement HTTPS cette session : correspond exactement. Fichier est un .zip contenant l'ISO bootable (mt86plus_8.10_x86_64.iso) — extraire puis deposer l'ISO extraite dans ISO/ (pas Portable/, malgre le routage par extension de --fetch qui le place initialement dans Portable/Fetched/ a cause du .zip).
+CrystalDiskInfo	https://sourceforge.net/projects/crystaldiskinfo/files/9.9.2/CrystalDiskInfo9_9_2.zip/download	01acb3176851a85824d9589c6514e3eb9771eb7f9d5ee58ed9b4e057bd21c7df		none	Licence MIT confirmee (github.com/hiyohiyo/CrystalDiskInfo). Aucune somme officielle publiee par l'editeur ; SHA-256 calcule localement apres telechargement depuis SourceForge (miroir officiel du projet, meme schema de confiance que Clonezilla dans ce manifeste). Version portable (pas l'installeur, pour eviter les variantes "Ads"/bundlees listees sur crystalmark.info) : .exe Windows autonome, a lancer depuis WinPE (voir tools/Build-SonarSE-WinPE.ps1) ou un Windows demarre normalement — ne fonctionne pas depuis SystemRescue (Linux).
 FETCH_EOF
 )"
 
@@ -4208,7 +4210,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.30.0-hardware-diagnostic-profile"
+SONAR_VERSION="3.31.0-crystaldiskinfo-added"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4550,7 +4552,7 @@ sonar_self_test_v2() {
         fi
         local _full_out
         _full_out="$("$self" --profile full 2>/dev/null)"
-        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}"; then
+        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}" && grep -q 'CrystalDiskInfo' <<<"${_full_out}"; then
             printf 'PASS\tProfile "full" is the union of all profiles\n'
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))

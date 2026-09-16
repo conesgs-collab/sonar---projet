@@ -6,6 +6,71 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.31.0-crystaldiskinfo-added] — 2026-09-16
+
+### Contexte
+Suite de v3.30.0 (même jour) : élargissement de `hardware-diagnostic`
+avec un deuxième outil, plus recherche sur trois autres candidats
+demandés explicitement (antivirus type Kaspersky/Bitdefender/Avast,
+remplacement de Kali).
+
+### Ajouté
+- **CrystalDiskInfo 9.9.2** dans `hardware-diagnostic` : licence MIT
+  confirmée (`github.com/hiyohiyo/CrystalDiskInfo`), SHA-256 calculé
+  localement après téléchargement réel depuis SourceForge (aucune
+  somme officielle publiée par l'éditeur — même schéma de confiance
+  que Clonezilla, déjà dans ce manifeste). Variante portable choisie
+  délibérément (pas l'installeur : le site officiel liste des variantes
+  "Ads"/bundlées à éviter). Lit les attributs SMART d'un disque —
+  complète Memtest86+ en distinguant une RAM défaillante d'un disque en
+  fin de vie. Nécessite Windows/WinPE (binaire .exe), ne fonctionne pas
+  depuis SystemRescue.
+
+### Recherché, pas ajouté (obstacles réels documentés)
+- **Bitdefender Rescue CD** : confirmé mort. L'URL "officielle" qui
+  circule (`download.bitdefender.com/rescue_cd/...`) renvoie une 404
+  vérifiée en direct — produit retiré depuis 2019, seuls des miroirs
+  tiers non vérifiables (ArchiveOS, MajorGeeks) le proposent encore.
+- **Kaspersky Rescue Disk** : toujours activement distribué et gratuit
+  sans compte, mais le téléchargement réel est derrière une page
+  rendue en JavaScript (Next.js) qui génère l'URL du fichier
+  dynamiquement — pas d'URL stable trouvée après plusieurs tentatives
+  (config JSON référencé mais non résolu, chemins CDN connus testés en
+  404). Même catégorie de blocage que Malwarebytes/ESET Online Scanner,
+  déjà écartés pour la même raison en v3.16.0.
+- **Avast Rescue Disk** : statut ambigu — les sources qui le donnent
+  actif sont des agrégateurs tiers (FileCR), pas avast.com directement ;
+  semble généré depuis l'application Avast installée plutôt que
+  distribué en ISO autonome, ce qui l'exclurait du modèle `--fetch`
+  (téléchargement direct sans dépendance à un autre logiciel installé).
+- **Remplacement de `kali-linux-2026.2-virtualbox-amd64.7z`** (déjà sur
+  la clé physique, 3,9 Go) : découvert que ce fichier est une appliance
+  VirtualBox compressée, **pas une image bootable** — Ventoy ne peut
+  jamais la démarrer, 3,9 Go inutilisables tels quels. L'ISO "live"
+  officielle (`kali-linux-2026.2-live-amd64.iso`, celle qu'il fallait)
+  n'est actuellement distribuée qu'en torrent sur le miroir principal
+  (`cdimage.kali.org/current/` liste le `.torrent` mais pas le `.iso`
+  en HTTP direct) — incompatible avec le modèle `--fetch` (URL HTTP(S)
+  fixe et vérifiable). L'ISO "installer" est bien en HTTP direct mais
+  n'offre pas la même expérience live-boot.
+
+### Testé
+`bash -n` + `--self-audit` (14 PASS, 0 FAIL) + `--self-test` (0
+ERRORS, union de `--profile full` étendue pour confirmer
+`CrystalDiskInfo`). `--fetch-manifest-seal` puis `--fetch
+hardware-diagnostic` exécutés pour de vrai (2 outils vérifiés, 0
+échec). CrystalDiskInfo extrait et déposé sur la clé physique
+(`E:\Portable\CrystalDiskInfo\`, ~8,7 Mo) sans toucher à `persistence/`
+(40 Go intact) ni au reste du contenu existant. `--field-export`
+relancé, profils à jour sur la clé.
+
+### Non résolu
+Kaspersky (blocage technique du téléchargement), Avast (statut
+ambigu), Bitdefender (mort), et un vrai remplacement Kali live restent
+non résolus — pistes documentées ci-dessus si quelqu'un veut reprendre
+l'investigation (ex. : résoudre l'API Kaspersky, ou accepter l'ISO
+"installer" Kali en compromis).
+
 ## [3.30.0-hardware-diagnostic-profile] — 2026-09-16
 
 ### Contexte
