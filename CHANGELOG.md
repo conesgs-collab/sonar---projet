@@ -6,6 +6,74 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.30.0-hardware-diagnostic-profile] — 2026-09-16
+
+### Contexte
+Demande explicite : couvrir « tous les domaines de l'informatique »
+comme MediCat, en élargissant le nombre d'outils sur la clé.
+Recherche faite avant d'agir : la page de licence officielle de MediCat
+confirme noir sur blanc *"We do not own, license, or claim rights to
+any third-party software included in this project"* — leur étendue
+vient précisément de l'absence de garantie de licence individuelle,
+exactement le compromis déjà écarté pour SONAR-SE (voir ROADMAP.md,
+section "SONAR - SE v1"). Décision confirmée par l'auteur : élargir
+`--fetch` domaine par domaine, avec vérification individuelle de
+provenance à chaque ajout — plus lent, mais chaque outil reste
+garanti authentique.
+
+### Ajouté
+- **Nouveau profil `hardware-diagnostic`** (7e profil, avant : 6) :
+  couvre un domaine jusqu'ici totalement absent — diagnostic RAM
+  (plantages/écrans bleus aléatoires sans cause logicielle évidente).
+  Aucun des 6 profils existants ne couvrait ce scénario.
+- **Memtest86+ v8.10** ajouté à `SONAR_FETCH_MANIFEST_TSV` : GPLv2,
+  dépôt officiel `memtest86plus/memtest86plus` (GitHub), à ne pas
+  confondre avec MemTest86 (PassMark, rebrand commercial). SHA-256
+  vérifié à deux niveaux : publié sur memtest.org (fichier
+  `sha256sum.txt` du domaine officiel, récupéré par `curl` brut plutôt
+  que via un outil de résumé IA — pour une valeur cryptographique, la
+  transcription doit être déterministe, pas passer par un modèle
+  intermédiaire) et recalculé localement après téléchargement réel :
+  les deux correspondent exactement.
+- Compteur du catalogue embarqué corrigé partout où il apparaît comme
+  affirmation vivante (pas historique/datée) : 981 → **1003** outils
+  (mesuré via `--catalog-download-resolve`, pas juste recopié) —
+  `sonar_master.sh`, `README.md`, `docs/CATALOG.md`.
+
+### Changé
+- `SONAR_PROFILE_NAMES` : `hardware-diagnostic` ajouté entre
+  `password-reset` et `full`.
+- `sonar_profile_scenario "full"` : "cinq scenarios" → "six scenarios"
+  (le nombre de profils réels, hors `full` lui-même).
+- `--help` (section `--profile`) et `docs/CATALOG.md` : liste des 7
+  profils et compteur catalogue mis à jour.
+- `--self-test` : boucle de couverture des profils étendue à
+  `hardware-diagnostic` (7 profils testés, message "six" → "seven"),
+  vérification de `--profile full` étendue pour confirmer la présence
+  de `Memtest86+` dans l'union.
+- `ROADMAP.md` : sous-entrée datée sous "Étape 1" documentant cet
+  ajout et la décision de séquençage (élargissement vérifié plutôt
+  qu'imitation MediCat).
+
+### Testé
+`bash -n` + `--self-audit` (14 PASS, 0 FAIL) + `--self-test` (0 ERRORS,
+"All seven troubleshooting profiles document scenario + tools" PASS,
+union de `--profile full` confirmée). `--fetch-manifest-seal` puis
+`--fetch hardware-diagnostic` exécutés pour de vrai : téléchargement
+réel, SHA-256 vérifié par le script lui-même (pas seulement en test
+manuel), fichier `.zip` extrait, ISO déposée sur la clé physique
+(`E:\ISO\Memtest86+_v8.10.iso`, 6,2 Mo) sans toucher à `persistence/`
+(toujours 40 Go) ni au reste d'`ISO/` (34,33 → 34,34 Go, delta exact
+de l'ajout). `--field-export` relancé : les 7 profils, dont
+`hardware-diagnostic`, confirmés présents sur la clé
+(`MANIFEST/PROFILES_SCENARIOS.tsv`).
+
+### Non résolu
+Un seul domaine ajouté (mémoire) sur les nombreux possibles (réseau,
+SMART/santé disque, UEFI/BIOS, pilotes...) — élargissement à poursuivre
+domaine par domaine si voulu, même méthode de vérification à chaque
+fois.
+
 ## [3.29.0-sonar-field-real-boot-validation] — 2026-09-16
 
 ### Contexte

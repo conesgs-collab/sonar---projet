@@ -11,10 +11,10 @@ de page.
 > verrou de rôle, journal d'audit chaîné). **Les outils qui dépannent
 > réellement une machine sont ceux des profils `--profile <nom>`
 > (`boot-repair`, `data-recovery`, `malware`, `disk-clone`,
-> `password-reset`, `full`) — SONAR ne répare rien lui-même.** Le
-> catalogue de 981 outils (`docs/CATALOG.md`) est une base de
-> connaissance consultable, pas la source de vérité de ce qui va sur la
-> clé.
+> `password-reset`, `hardware-diagnostic`, `full`) — SONAR ne répare rien
+> lui-même.** Le catalogue de 1003 outils (`docs/CATALOG.md`) est une
+> base de connaissance consultable, pas la source de vérité de ce qui va
+> sur la clé.
 
 > **Statut : validé sur un premier déploiement matériel réel** (SSD USB
 > externe, boot UEFI + Secure Boot confirmé — voir `ROADMAP.md` section

@@ -25,25 +25,26 @@ ce catalogue de référence — l'ajout de CAINE/DEFT/Tsurugi/SIFT au domaine
 « Forensic disque » ne change rien à ce que SONAR embarque par défaut.
 
 **Recentrage (2026-09-15) : base de connaissance, pas source de vérité.**
-Depuis `--profile`, ce catalogue de 981 outils est gelé comme référence
-consultable. Ce qui va réellement sur la clé par défaut est décidé par un
-petit nombre de profils de dépannage fermés et documentés — scénario,
-outils, et pourquoi ceux-là précisément :
+Depuis `--profile`, ce catalogue (1003 outils au 2026-09-16, en légère
+croissance depuis le gel initial à 981) reste une référence consultable.
+Ce qui va réellement sur la clé par défaut est décidé par un petit
+nombre de profils de dépannage fermés et documentés — scénario, outils,
+et pourquoi ceux-là précisément :
 
 ```bash
-./sonar_master.sh --profile                    # vue d'ensemble des 6 profils
+./sonar_master.sh --profile                    # vue d'ensemble des 7 profils
 ./sonar_master.sh --profile boot-repair        # détail (scénario + outils + justification)
 ```
 
 Profils disponibles : `boot-repair`, `data-recovery`, `malware`,
-`disk-clone`, `password-reset`, `full` (union des cinq précédents). Voir
-`ROADMAP.md` pour l'étape suivante (`--fetch`, téléchargement vérifié par
-manifeste signé).
+`disk-clone`, `password-reset`, `hardware-diagnostic`, `full` (union des
+six précédents). Voir `ROADMAP.md` pour l'étape suivante (`--fetch`,
+téléchargement vérifié par manifeste signé).
 
 ## Statistiques
 
 - **73 domaines**
-- **981 outils/composants** recensés au total
+- **1003 outils/composants** recensés au total (2026-09-16)
 
 ## Résumé par domaine (nombre d'outils)
 

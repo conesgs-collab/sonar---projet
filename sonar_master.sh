@@ -953,10 +953,11 @@ Commandes indépendantes (à la place de --disk):
                                 télécharger un logiciel commercial/sous licence)
   --profile [NOM|list]        Profils de dépannage fermés et documentés :
                                 boot-repair|data-recovery|malware|disk-clone|
-                                password-reset|full — scénario, outils, et
-                                POURQUOI ceux-là (pas le catalogue 981, qui
-                                n'est qu'une base de connaissance). Sans
-                                argument (ou "list") : vue d'ensemble.
+                                password-reset|hardware-diagnostic|full —
+                                scénario, outils, et POURQUOI ceux-là (pas le
+                                catalogue 1003, qui n'est qu'une base de
+                                connaissance). Sans argument (ou "list") :
+                                vue d'ensemble.
   --fetch-manifest-seal       [rôle VAULT] Scelle (HMAC, secret de build) le
                                 manifeste de téléchargement (URL+SHA256 par
                                 outil) — à exécuter une fois avant tout
@@ -3704,10 +3705,11 @@ disk-clone	Clonezilla	Clonage/imagerie de disque ou partition, standard open-sou
 disk-clone	GParted	Redimensionnement et gestion de partitions independamment d'un clonage complet (inclus dans SystemRescue).
 disk-clone	ddrescue	Clonage secteur par secteur d'un disque physiquement defaillant, avant ou a la place d'un clonage logique classique.
 password-reset	chntpw	Seul outil libre maintenu de longue date qui edite directement la ruche registre SAM de Windows pour reinitialiser un mot de passe de compte local hors-ligne — support minuscule (~18 Mo), integrable sans alourdir la cle.
+hardware-diagnostic	Memtest86+	Testeur de memoire RAM autonome (boot direct, hors de tout systeme d'exploitation) — seul moyen fiable de confirmer ou d'ecarter une RAM defaillante comme cause de plantages/ecrans bleus aleatoires. GPLv2, activement maintenu (memtest86plus/memtest86plus sur GitHub), aucune restriction d'usage.
 PROFILES_EOF
 )"
 
-SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset full"
+SONAR_PROFILE_NAMES="boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic full"
 
 sonar_profile_names() { echo "${SONAR_PROFILE_NAMES}"; }
 
@@ -3718,7 +3720,8 @@ sonar_profile_scenario() {
         malware) echo "Machine infectee : analyser et nettoyer depuis l'exterieur du systeme d'exploitation infecte, la ou le malware ne peut ni se cacher ni se defendre." ;;
         disk-clone) echo "Migration ou sauvegarde bloc-a-bloc d'un disque : remplacement de disque, image avant intervention risquee, ou disque physiquement defaillant a cloner avant qu'il ne lache." ;;
         password-reset) echo "Compte Windows local verrouille (mot de passe perdu, poste recupere sans compte admin) : reinitialisation hors-ligne du mot de passe." ;;
-        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les cinq scenarios." ;;
+        hardware-diagnostic) echo "Plantages, ecrans bleus ou instabilite aleatoires sans cause logicielle evidente : ecarter ou confirmer une RAM defaillante avant de perdre du temps a reinstaller un systeme sain." ;;
+        full) echo "Union de tous les profils ci-dessus — cle generaliste couvrant les six scenarios." ;;
         *) return 1 ;;
     esac
 }
@@ -3784,7 +3787,7 @@ sonar_profile_doc() {
         echo "LIMITE CONNUE: ${caveat}"
     fi
     echo
-    echo "NOTE: le catalogue de 981 outils embarque (--help pour SONAR_CATALOGUE_EMBEDDED)"
+    echo "NOTE: le catalogue de 1003 outils embarque (--help pour SONAR_CATALOGUE_EMBEDDED)"
     echo "      reste une base de connaissance consultable ; ce profil, pas ce catalogue,"
     echo "      decide de ce qui va reellement sur la cle."
     echo "NOTE: --fetch ${profile} telecharge et verifie (SHA-256 contre manifeste scelle)"
@@ -3819,6 +3822,7 @@ ddrescue	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz	2264622d309d6c87a
 ClamAV	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb	28d6efc5b4423e7830c3559339552eb53870a9eac51ac4efb37d60530d329886	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb.sig	gpg	Signature GPG verifiee cette session (cle Cisco Talos). Extraire avec 'ar x clamav*.deb && tar xf data.tar.*' (pas besoin de dpkg, fonctionne sur SystemRescue/Arch) : binaire reel en usr/local/bin/clamscan (pas usr/bin). Necessite ensuite export LD_LIBRARY_PATH=<extrait>/usr/local/lib (sinon 'error while loading shared libraries: libclamav.so.12'), puis 'freshclam --datadir=<dossier>' (reseau requis, paquet sans base de signatures embarquee) et 'clamscan --database=<meme dossier> -r <cible>' (sinon 0 signature chargee, scan silencieusement vide). Verifie de bout en bout sur materiel reel 2026-09-15, 3/3 fichiers EICAR detectes apres ces etapes — voir CHANGELOG.
 Clonezilla	https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-15/clonezilla-live-3.3.3-15-amd64.iso/download	482518ea32af3b82ed15d09e2e7714806775deb62aeed81491e534f6cc6bbc47		none	SHA-256 verifie via CHECKSUMS.TXT signe GPG (cle DRBL) sur clonezilla.org (hors SourceForge). L'ISO vient de SourceForge : miroirs parfois instables, --fetch reprend un telechargement interrompu (curl -C -).
 chntpw	http://pogostick.net/~pnh/ntpasswd/cd140201.zip	c88d86aee55b31827ab4782d05bd44922276955909c43c69f0fb15377cc64374		none	ATTENTION assurance plus faible que les autres lignes : source officielle en HTTP seul (pas de TLS), MD5 uniquement publie par le fournisseur (pas de SHA-256/GPG amont). MD5 recoupe (f274127bf8be9a7ed48b563fd951ae9e) lors de la constitution de ce manifeste ; SHA-256 calcule localement.
+Memtest86+	https://www.memtest.org/download/v8.10/mt86plus_8.10_x86_64.iso.zip	93530005d6ac6a85aa2a49c68604a43c25794ecccf796c4f8849a73a8001be9a		none	SHA-256 publie sur memtest.org (sha256sum.txt du meme domaine officiel, pas de GPG pour cette release) et recalcule localement apres telechargement HTTPS cette session : correspond exactement. Fichier est un .zip contenant l'ISO bootable (mt86plus_8.10_x86_64.iso) — extraire puis deposer l'ISO extraite dans ISO/ (pas Portable/, malgre le routage par extension de --fetch qui le place initialement dans Portable/Fetched/ a cause du .zip).
 FETCH_EOF
 )"
 
@@ -4204,7 +4208,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.29.0-sonar-field-real-boot-validation"
+SONAR_VERSION="3.30.0-hardware-diagnostic-profile"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4533,12 +4537,12 @@ sonar_self_test_v2() {
         rm -rf "${_wm_root}" "${_wm_mp}"
         grep -q '^SONAR_PROFILES_TSV=' "$self" && printf 'PASS\tTroubleshooting profiles module present\n' || { printf 'FAIL\tTroubleshooting profiles module missing\n'; errors=$((errors+1)); }
         local _prof _prof_ok=true
-        for _prof in boot-repair data-recovery malware disk-clone password-reset full; do
+        for _prof in boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic full; do
             if ! "$self" --profile "${_prof}" >/dev/null 2>&1; then
                 printf 'FAIL\tProfile "%s" failed to document\n' "${_prof}"; errors=$((errors+1)); _prof_ok=false
             fi
         done
-        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll six troubleshooting profiles document scenario + tools\n'
+        [[ "${_prof_ok}" == "true" ]] && printf 'PASS\tAll seven troubleshooting profiles document scenario + tools\n'
         if "$self" --profile bogus-profile >/dev/null 2>&1; then
             printf 'FAIL\tUnknown profile name was NOT rejected\n'; errors=$((errors+1))
         else
@@ -4546,7 +4550,7 @@ sonar_self_test_v2() {
         fi
         local _full_out
         _full_out="$("$self" --profile full 2>/dev/null)"
-        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}"; then
+        if grep -q 'SystemRescue' <<<"${_full_out}" && grep -q 'chntpw' <<<"${_full_out}" && grep -q 'ClamAV' <<<"${_full_out}" && grep -q 'Memtest86+' <<<"${_full_out}"; then
             printf 'PASS\tProfile "full" is the union of all profiles\n'
         else
             printf 'FAIL\tProfile "full" does not include tools from all sub-profiles\n'; errors=$((errors+1))

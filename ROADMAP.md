@@ -154,6 +154,15 @@ soit démarrer SONAR Field pour de vrai.
       base de connaissance (`docs/CATALOG.md`), plus source de vérité du
       déploiement. IA/smart-advisor/`--builder` marqués `[EXPÉRIMENTAL]`
       dans `--help` sans suppression.
+      - **2026-09-16** : septième profil ajouté, `hardware-diagnostic`
+        (Memtest86+, GPLv2, SHA-256 vérifié à la main) — comble un vrai
+        trou (aucun profil ne couvrait le diagnostic RAM). Décision
+        explicite de continuer à élargir `--fetch` domaine par domaine
+        avec vérification individuelle de provenance, plutôt que
+        d'imiter l'approche MediCat/Hiren's (gros catalogue bundlé sans
+        garantie de licence — confirmé sur leur propre page légale :
+        *"We do not own, license, or claim rights to any third-party
+        software included in this project"*). Voir CHANGELOG.md.
 - [x] **Étape 2 — `--fetch <profil>`** (v3.16.0-fetch-step2, 2026-09-15) :
       télécharge chaque outil unique du profil depuis une URL connue,
       vérifie le SHA-256 contre `SONAR_FETCH_MANIFEST_TSV`, supprime le
