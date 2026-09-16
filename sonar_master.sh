@@ -4180,7 +4180,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.26.0-ventoy-theme-root-cause-ruled-out"
+SONAR_VERSION="3.27.0-winpe-powershell-known-limitation"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

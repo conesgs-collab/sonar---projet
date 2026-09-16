@@ -203,6 +203,18 @@ soit démarrer SONAR Field pour de vrai.
         machine. `--profile boot-repair`/`full` et `sonar_field.sh`
         pointent vers ce script et détectent dynamiquement si un WinPE
         est déjà présent sur la clé.
+      - **v3.27.0** (2026-09-16) : tentative d'ajouter PowerShell à
+        l'image (`-IncludePowerShell`) — quatre bugs réels trouvés et
+        corrigés dans le script (redirection perdue sous élévation UAC,
+        détection d'échec DISM cassée par un code de sortie négatif,
+        `exit /b` qui tuait la redirection, montage orphelin laissé en
+        cas d'échec), mais blocage final non résolu : `Dism
+        /Add-Package` échoue avec "Erreur: 87" sur le fournisseur DISM
+        des images WinPE hors ligne, cause probable une incompatibilité
+        entre l'ADK récent utilisé et l'hôte Windows 10 22H2 de test.
+        `-IncludePowerShell` désactivé par défaut en conséquence — voir
+        `CHANGELOG.md` et `docs/WINPE.md`. L'image de base (sans
+        PowerShell) n'est pas affectée, reste testée et fonctionnelle.
 - [ ] **Étape 5 — déplacée vers SONAR Field** (section dédiée
       ci-dessous, 2026-09-15). Le menu orienté tâche n'est plus vu comme
       un script annexe dans l'environnement de boot de SONAR, mais comme

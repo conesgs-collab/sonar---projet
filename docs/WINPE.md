@@ -52,6 +52,19 @@ WinPE fonctionnelle confirmée.
 `SONAR_SOURCE\ISO\WinPE\` ; `-SkipAdkInstall` si l'ADK est déjà présent.
 Voir l'aide intégrée (`Get-Help .\tools\Build-SonarSE-WinPE.ps1 -Full`).
 
+**`-IncludePowerShell` (optionnel, désactivé par défaut)** : tente
+d'ajouter PowerShell à l'image (au-delà de cmd.exe/bootrec/bcdedit/
+diskpart/DISM déjà présents). Testé le 2026-09-16 sur un hôte
+Windows 10 22H2 avec l'ADK de décembre 2024 : le montage réussit mais
+`Dism /Add-Package` échoue systématiquement ("Erreur: 87", HRESULT
+0x80070057 sur le fournisseur DISM des images WinPE hors ligne) — cause
+probable non confirmée, incompatibilité entre ce moteur DISM récent et
+un hôte Windows 10 plus ancien. Voir `CHANGELOG.md` (entrée
+3.27.0-winpe-powershell-known-limitation) pour le détail des pistes
+écartées. L'option reste disponible pour qui veut retenter sur un autre
+hôte ou avec un ADK plus ancien ; en cas d'échec, le script s'arrête
+proprement (démontage automatique, pas de montage orphelin laissé).
+
 ## Pourquoi cette distinction (construire pour vous ≠ redistribuer)
 
 SONAR-SE **n'embarque et ne télécharge jamais** de WinPE pré-construit

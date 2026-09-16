@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Construit une image WinPE amd64 pour SONAR - SE, via le Windows ADK
     officiel de Microsoft, et l'ISO résultante prête à déposer sur une
@@ -34,19 +34,52 @@
     Suppose que le Windows ADK (Deployment Tools) et l'add-on WinPE sont
     déjà installés — saute le téléchargement/installation.
 
+.PARAMETER IncludePowerShell
+    Tente d'ajouter PowerShell à l'image WinPE (WinPE-WMI > WinPE-NetFx >
+    WinPE-Scripting > WinPE-PowerShell, dans cet ordre de dépendance,
+    chaque composant suivi de son paquet linguistique en-us). DÉSACTIVÉ
+    par défaut — voir "LIMITE CONNUE" ci-dessous. bootrec/bcdedit/diskpart
+    restent disponibles dans tous les cas (binaires Windows de base déjà
+    présents dans WinPE), et le réseau Ethernet de base fonctionne sans
+    composant supplémentaire (`wpeutil InitializeNetwork` après boot).
+
+    LIMITE CONNUE (testé le 2026-09-16, ADK 10.1.26100.2454 sur hôte
+    Windows 10 build 19045) : le montage de boot.wim réussit, mais
+    `Dism /Add-Package` échoue systématiquement dès le premier paquet
+    avec "Erreur: 87 — Une erreur d'initialisation s'est produite"
+    (HRESULT 0x80070057 sur `CPEImg::Attach`, le fournisseur DISM chargé
+    pour les images WinPE hors ligne). Écarté par test direct : chemin
+    avec espaces (rejoué avec un chemin court 8.3, même échec), version
+    de DISM utilisée (rejoué avec le DISM système ET celui de l'ADK,
+    même échec), montage orphelin (rejoué sur montage propre vérifié via
+    `Dism /Get-MountedWimInfo`, même échec). Hypothèse non confirmée :
+    incompatibilité entre ce moteur DISM (ère Windows 11 24H2) et l'hôte
+    Windows 10 22H2 pour le fournisseur PE spécifiquement — un ADK plus
+    ancien (~10.1.19041 ou ~10.1.22621) pourrait résoudre le problème
+    mais n'a pas été testé. `-IncludePowerShell` reste disponible pour
+    qui veut retenter sur un hôte différent ou avec un autre ADK ; en cas
+    d'échec, le script s'arrête proprement (démontage automatique,
+    message d'erreur clair) sans corrompre boot.wim ni laisser de
+    montage orphelin.
+
 .EXAMPLE
     .\Build-SonarSE-WinPE.ps1
-    Construit SONAR-SE-WinPE-amd64.iso dans le dossier courant.
+    Construit SONAR-SE-WinPE-amd64.iso (image minimale, cmd.exe) dans le dossier courant.
 
 .EXAMPLE
     .\Build-SonarSE-WinPE.ps1 -OutputIso C:\clé\SONAR_SOURCE\ISO\WinPE\winpe.iso
     Construit directement dans l'arborescence SONAR_SOURCE d'une clé en préparation.
+
+.EXAMPLE
+    .\Build-SonarSE-WinPE.ps1 -IncludePowerShell
+    Tente d'ajouter PowerShell — voir "LIMITE CONNUE" ci-dessus avant d'utiliser cette option.
 #>
 [CmdletBinding()]
 param(
     [string]$OutputIso = ".\SONAR-SE-WinPE-amd64.iso",
     [string]$WorkDir = "$env:TEMP\sonar-se-winpe-build",
-    [switch]$SkipAdkInstall
+    [switch]$SkipAdkInstall,
+    [bool]$IncludePowerShell = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -113,6 +146,116 @@ Start-Process -FilePath "cmd.exe" -ArgumentList $cmdline -Verb RunAs -Wait
 if (-not (Test-Path (Join-Path $stageDir "media\sources\boot.wim"))) {
     Get-Content $stageLog -ErrorAction SilentlyContinue | Write-Host
     throw "Échec de la création de l'environnement WinPE — voir $stageLog ci-dessus."
+}
+
+if ($IncludePowerShell) {
+    Write-Host "== Ajout de PowerShell a l'image WinPE (montage DISM, elevation requise) =="
+    $ocDir = Join-Path $WinPeDir "amd64\WinPE_OCs"
+    $components = @("WinPE-WMI", "WinPE-NetFx", "WinPE-Scripting", "WinPE-PowerShell")
+    $mountDir = Join-Path $WorkDir "mount"
+    New-Item -ItemType Directory -Force -Path $mountDir | Out-Null
+    $bootWim = Join-Path $stageDir "media\sources\boot.wim"
+
+    $addPkgLines = foreach ($c in $components) {
+        $neutral = Join-Path $ocDir "$c.cab"
+        $lang = Join-Path $ocDir "en-us\${c}_en-us.cab"
+        if (-not (Test-Path $neutral) -or -not (Test-Path $lang)) {
+            throw "Composant WinPE '$c' introuvable sous '$ocDir' — ADK/add-on WinPE incomplet ou version differente."
+        }
+        "Dism /Image:`"$mountDir`" /Add-Package /PackagePath:`"$neutral`""
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "Dism /Image:`"$mountDir`" /Add-Package /PackagePath:`"$lang`""
+        "if !errorlevel! neq 0 goto :fail_mounted"
+    }
+    $pkgScript = Join-Path $WorkDir "add_powershell.cmd"
+    $pkgLog = Join-Path $WorkDir "powershell_add_log.txt"
+    # La redirection ">...2>&1" vit DANS le .cmd plutôt que sur l'invocation
+    # externe "cmd /c ... > log" : sous élévation UAC (-Verb RunAs), la
+    # redirection passée dans -ArgumentList à un Start-Process élevé n'a
+    # produit AUCUN fichier log, même vide — signe que ShellExecuteEx ne la
+    # propage pas de façon fiable au process enfant. La faire porter par
+    # cmd.exe lui-même est robuste indépendamment de la méthode de
+    # lancement. `/Cleanup-Mountpoints` en préambule nettoie un montage DISM
+    # orphelin laissé par une tentative précédente en échec, qui ferait
+    # sinon échouer le nouveau /Mount-Image silencieusement.
+    #
+    # `if errorlevel 1` ne suffit PAS pour détecter un échec DISM : DISM
+    # renvoie souvent son HRESULT brut comme code de sortie (ex.
+    # 0xC1420127), qui a le bit de signe posé et est donc NÉGATIF une fois
+    # interprété par cmd.exe — `if errorlevel 1` (qui teste errorlevel>=1
+    # en entier signé) est alors silencieusement FAUX et laisse le script
+    # continuer comme si tout allait bien. C'est réellement arrivé : un
+    # /Mount-Image raté (mount orphelin d'une tentative interrompue) a
+    # laissé passer tous les /Add-Package suivants sans jamais échouer, et
+    # le script a rapporté un succès complet à tort. Le test correct est
+    # `if !errorlevel! neq 0` (comparaison numérique directe) avec
+    # `setlocal enabledelayedexpansion` + `!errorlevel!`.
+    #
+    # La logique vit dans une sous-routine appelée via `call :main > log
+    # 2>&1` plutôt que dans un bloc `( ... ) > log 2>&1` inline : un `exit
+    # /b` exécuté DANS un bloc parenthésé redirigé termine tout
+    # l'interprète cmd.exe avant qu'il ait fini de traiter/fermer la
+    # redirection — le fichier log n'est alors jamais créé, même vide (vu
+    # en pratique : `ExitCode` non nul mais aucun fichier produit). `exit
+    # /b` DANS une sous-routine appelée par `call` ne fait que revenir de
+    # cet appel, donc la redirection portée par le `call` se ferme
+    # normalement.
+    #
+    # `call "$setEnvBat"` en tête de :main est nécessaire : sans lui, "Dism"
+    # résout vers le DISM système (C:\Windows\System32\Dism.exe, ex.
+    # 10.0.19041.3636) au lieu de celui de l'ADK (ex. 10.0.26100.2454) —
+    # observé en pratique : le DISM système montait l'image sans problème
+    # mais échouait sur le tout premier /Add-Package avec "Erreur: 87 — Une
+    # erreur d'initialisation s'est produite", incompatible avec des .cab
+    # WinPE_OCs plus récents que son propre moteur de servicing.
+    #
+    # Tout échec APRÈS un /Mount-Image réussi saute vers :fail_mounted, qui
+    # démonte l'image (/Discard) avant de sortir en erreur — observé en
+    # pratique : un /Add-Package en échec qui se contentait d'un simple
+    # `exit /b 1` laissait l'image montée en lecture/écriture, ce qui
+    # faisait échouer la TENTATIVE SUIVANTE dès le /Mount-Image avec
+    # "l'image ... est déjà montée" (0xC1420127) — un échec en cascade sur
+    # un état orphelin, comme le /Mount-Image raté documenté plus haut.
+    $lines = @(
+        "@echo off"
+        "setlocal enabledelayedexpansion"
+        "call :main > `"$pkgLog`" 2>&1"
+        "exit /b !errorlevel!"
+        ""
+        ":main"
+        "call `"$setEnvBat`""
+        "echo [%date% %time%] Nettoyage des montages DISM orphelins"
+        "Dism /Cleanup-Mountpoints"
+        "echo [%date% %time%] Montage de l'image"
+        "Dism /Mount-Image /ImageFile:`"$bootWim`" /Index:1 /MountDir:`"$mountDir`""
+        "if !errorlevel! neq 0 exit /b 1"
+    )
+    $lines += $addPkgLines
+    $lines += @(
+        "echo [%date% %time%] Demontage et commit"
+        "Dism /Unmount-Image /MountDir:`"$mountDir`" /Commit"
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "echo [%date% %time%] OK"
+        "exit /b 0"
+        ""
+        ":fail_mounted"
+        "echo [%date% %time%] Echec — demontage (discard) de l'image montee"
+        "Dism /Unmount-Image /MountDir:`"$mountDir`" /Discard"
+        "exit /b 1"
+    )
+    $lines | Set-Content -Path $pkgScript -Encoding ASCII
+
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$pkgScript`"" -Verb RunAs -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Host "== Log ajout PowerShell =="
+        if (Test-Path $pkgLog) {
+            Get-Content $pkgLog -ErrorAction SilentlyContinue | Write-Host
+        } else {
+            Write-Host "(aucun fichier log produit — voir $pkgScript pour la commande exacte)"
+        }
+        throw "Echec de l'ajout de PowerShell a l'image (code $($proc.ExitCode)) — voir le log ci-dessus. Limite connue documentee dans '-? Build-SonarSE-WinPE.ps1' (parametre IncludePowerShell) ; relancez sans -IncludePowerShell pour l'image minimale (deja fonctionnelle)."
+    }
+    Write-Host "PowerShell ajoute avec succes."
 }
 
 $OutputIso = [System.IO.Path]::GetFullPath($OutputIso)

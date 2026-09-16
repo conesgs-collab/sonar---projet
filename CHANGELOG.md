@@ -6,6 +6,84 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.27.0-winpe-powershell-known-limitation] — 2026-09-16
+
+### Contexte
+Suite de la reconstruction WinPE (v3.25.0/v3.26.0, session précédente) :
+tentative d'ajouter PowerShell à l'image WinPE de base via
+`tools/Build-SonarSE-WinPE.ps1 -IncludePowerShell` (montage DISM +
+`/Add-Package` des composants WinPE-WMI/NetFx/Scripting/PowerShell).
+
+### Trouvé — quatre bugs réels dans le script, un problème d'environnement non résolu
+En tentant de faire fonctionner `-IncludePowerShell`, quatre bugs
+distincts et réels ont été identifiés et corrigés dans le script
+lui-même (indépendants du blocage final) :
+1. La redirection `> log 2>&1` passée à `Start-Process -Verb RunAs`
+   dans `-ArgumentList` ne produisait AUCUN fichier log, même vide —
+   ShellExecuteEx ne la propage pas de façon fiable au processus
+   enfant élevé. Corrigé en faisant porter la redirection par le
+   `.cmd` lui-même.
+2. `if errorlevel 1` ne détecte pas un échec DISM : DISM retourne
+   souvent son HRESULT brut comme code de sortie (ex. 0xC1420127), qui
+   a le bit de signe posé et est donc négatif une fois interprété par
+   cmd.exe — `if errorlevel 1` (comparaison signée ≥) est alors
+   silencieusement faux. Un `/Mount-Image` raté a ainsi laissé passer
+   tous les `/Add-Package` suivants sans jamais échouer, et le script a
+   rapporté un succès complet à tort alors que rien n'avait été
+   modifié. Corrigé avec `if !errorlevel! neq 0` (comparaison numérique
+   directe) + `setlocal enabledelayedexpansion`.
+3. `exit /b` exécuté dans un bloc parenthésé redirigé `( ... ) > log
+   2>&1` termine tout l'interprète cmd.exe avant qu'il ait fini de
+   traiter la redirection — le fichier log n'était alors jamais créé.
+   Corrigé en déplaçant la logique dans une sous-routine appelée via
+   `call :main > log 2>&1`.
+4. Tout échec après un `/Mount-Image` réussi laissait l'image montée
+   en lecture/écriture, ce qui faisait échouer la tentative suivante
+   dès le `/Mount-Image` avec "l'image est déjà montée" (0xC1420127) —
+   un échec en cascade sur un état orphelin. Corrigé avec un chemin
+   `:fail_mounted` qui démonte (`/Discard`) systématiquement avant de
+   sortir en erreur.
+
+Une fois ces quatre bugs corrigés, le vrai blocage est apparu, non lié
+au script : `Dism /Add-Package` échoue systématiquement dès le premier
+paquet avec "Erreur: 87" (HRESULT 0x80070057) sur `CPEImg::Attach`, le
+fournisseur DISM chargé pour les images WinPE hors ligne — alors que
+le montage lui-même réussit sans problème. Écarté par test direct :
+chemin avec espaces (rejoué avec chemin court 8.3 sans espaces, même
+échec), version de DISM utilisée (rejoué avec le DISM système
+10.0.19041.3636 ET celui de l'ADK 10.0.26100.2454, même échec dans les
+deux cas), montage orphelin (rejoué sur montage propre vérifié via
+`Dism /Get-MountedWimInfo`, même échec), antivirus (aucune détection
+Defender à l'horodatage du test). Hypothèse non confirmée :
+incompatibilité entre ce moteur DISM (ADK décembre 2024, ère
+Windows 11 24H2) et l'hôte de test (Windows 10 22H2, build 19045) pour
+le fournisseur PE spécifiquement.
+
+### Changé
+- `tools/Build-SonarSE-WinPE.ps1` : les quatre corrections ci-dessus.
+  `-IncludePowerShell` passe d'activé par défaut à **désactivé par
+  défaut** (image minimale, cmd.exe seul — celle qui fonctionne
+  réellement, déjà validée). Reste disponible en option explicite pour
+  qui veut retenter sur un autre hôte/ADK, avec échec propre garanti
+  (démontage automatique, pas de corruption ni de montage orphelin
+  laissé derrière).
+- Docstring du script mis à jour avec le détail de la limite connue.
+
+### Testé
+Build complet de l'image minimale (sans PowerShell) rejoué de bout en
+bout après le changement de défaut : copype + génération ISO réussis,
+ISO produite (380 Mo, SHA-256 vérifié). `-IncludePowerShell` testé
+plusieurs fois avec chaque hypothèse de correctif ci-dessus — chaque
+correction validée individuellement (log produit, échec correctement
+détecté, montage correctement nettoyé) avant de conclure que le
+blocage restant est un problème d'environnement, pas de script.
+
+### Non résolu
+Le blocage `CPEImg::Attach` / Erreur 87 sur `-IncludePowerShell` reste
+non résolu. Piste la plus probable (non testée) : installer un ADK
+plus ancien (~10.1.19041 ou ~10.1.22621) correspondant mieux à la
+version de l'hôte Windows 10 utilisé pour le test.
+
 ## [3.26.0-ventoy-theme-root-cause-ruled-out] — 2026-09-15
 
 ### Contexte
