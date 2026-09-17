@@ -6,6 +6,196 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.2-vault-role-enforced] — 2026-09-17
+
+### Contexte
+Un audit externe (analyse indépendante fournie par l'auteur, méthode
+DeepSeek) a passé le projet en revue et signalé, entre autres, deux
+failles de modèle de sécurité. Les deux ont été vérifiées directement
+dans le code (grep, pas de confiance aveugle) avant correction — les
+deux se sont révélées exactes.
+
+### Corrigé — rôle VAULT non appliqué (le plus grave des deux)
+`policy.tsv` donnait `VAULT=R` à Viewer et `VAULT=RW` à Technician — les
+deux rôles libre-service, sans jeton. `sonar_role_can` traite R/RW/
+CONFIRM comme équivalents (une seule valeur, "-", est un refus) : donc
+`--fetch-manifest-seal`, `--field-pin-set` et `--catalog-seal`
+n'exigeaient **aucune élévation réelle**, malgré le `[rôle VAULT]`
+affiché dans `--help` et malgré l'argument central du projet
+("un manifeste non signé est une porte ouverte", v3.16.0). N'importe
+quel opérateur local pouvait resceller un manifeste falsifié ou définir
+un nouveau PIN de terrain sans preuve d'identité.
+
+Root cause plus profonde découverte en creusant : le test qui semblait
+couvrir ce chemin (`--role-issue-token Vault ...`) utilisait "Vault"
+comme nom de RÔLE — qui n'existe pas (`known="Viewer Technician Senior
+Forensic Admin Expert"` dans `sonar_role_issue_token`). L'émission de
+jeton échouait donc silencieusement, `SONAR_ROLE=Vault` retombait sur
+Technician via le downgrade de `sonar_role_enforce_lock`, et le test ne
+passait que parce que Technician avait alors un accès VAULT non
+restreint — le bug masquait sa propre détection.
+
+**Corrigé** : `policy.tsv` — Viewer et Technician passent à `VAULT=-`
+(Senior/Forensic/Admin/Expert, qui exigent déjà un jeton signé,
+inchangés à `RW`). Les 5 tests concernés (scellement de manifeste,
+4× `--field-pin-set`) émettent désormais un vrai jeton `Admin` au lieu
+du rôle inexistant "Vault". **Ajouté** : un test de non-régression
+explicite — `--fetch-manifest-seal` doit être refusé pour un rôle
+libre-service sans jeton.
+
+**Effet de bord corrigé en cohérence** : `sonar_catalog_verify_seal`
+exigeait aussi VAULT, alors que **vérifier** un scellé ne crée aucune
+confiance nouvelle (contrairement à le créer) — incohérent avec
+`sonar_fetch_manifest_verify_seal`, jamais gaté. Le gate a été retiré
+de la vérification ; sans ce retrait, `--smart-advisor` aurait
+signalé une fausse alerte "[CRITICAL] catalogue altéré" pour tout
+opérateur non-élevé alors que le vrai problème aurait été un refus de
+rôle, pas une falsification.
+
+**Changement de comportement à connaître** : définir un PIN de terrain
+(`--field-pin-set`) ou sceller un manifeste exige maintenant
+`--role-bootstrap` + `--role-issue-token <Senior|Forensic|Admin|Expert>`
+au préalable — ce n'était pas le cas avant ce correctif. Le PIN déjà
+défini sur la clé physique (niveau "Technicien", PIN existant) n'est
+pas affecté ; seuls les futurs appels à `--field-pin-set` le sont.
+
+### Corrigé — identité non authentifiée journalisée comme si elle l'était
+`sonar_role_enforce_lock` retourne avant de toucher `SONAR_ROLE_IDENTITY`
+pour les rôles libre-service — donc `SONAR_ROLE_IDENTITY=X` positionné
+via l'environnement par l'opérateur lui-même (sans preuve) finissait
+dans l'audit comme `identity=X`, indistinguable d'une identité issue
+d'un jeton signé (rôles élevés). **Corrigé** : `sonar_audit` marque
+maintenant explicitement `identity=X (auto-declaree, non authentifiee)`
+quand le rôle actif est libre-service.
+
+### Non résolu
+- Le fond de la question posée par l'audit externe (item #6 : dérive
+  documentaire README 981↔1003 outils, 7 vs 9 profils) n'est pas encore
+  traité.
+- DESTRUCTIVE/FORENSIC restent volontairement non appliqués (voir
+  commentaire existant dans `sonar_security_init`, inchangé par ce
+  correctif).
+- Racine de confiance auto-générée (`sonar_ensure_build_secret`) : pas
+  de garde-fou ajouté, signalé par l'audit externe, pas traité ici.
+
+## [3.36.1-ventoy-background-globe] — 2026-09-17
+
+### Contexte
+L'auteur a proposé deux images pour le fond du menu de boot Ventoy : un
+globe bleu stylisé (sans texte), et un tableau de bord radar complet
+(panneaux, cartes du monde, graphiques) avec "SONAR - SE" et le crédit
+déjà incrustés dans l'image.
+
+### Décidé — le globe reste le fond actif, le tableau de bord est conservé en réserve
+Deux problèmes techniques avec le tableau de bord comme fond ACTIF :
+1. Le script (`sonar_prepare_ventoy_theme()`) incruste automatiquement
+   son propre bandeau titre/crédit sur toute image fournie via
+   `SOURCE_DIR/Branding/background.png` — avec cette image, le texte
+   apparaîtrait en double (une fois dans l'image, une fois via le
+   bandeau généré).
+2. La liste des ISO du menu Ventoy s'affiche par-dessus le fond à partir
+   d'environ 38% depuis le haut (`ventoy_top` dans `ventoy.json`) — sur
+   le tableau de bord, cette zone est la plus chargée visuellement
+   (radar + graphiques), ce qui nuirait à la lisibilité de la liste.
+
+Le globe (fond sombre, peu chargé dans cette zone) reste donc le fond
+actif sur `SOURCE_DIR/Branding/background.png` et sur la clé physique
+(`E:\ventoy\theme\background.png`). Le tableau de bord est conservé tel
+quel dans `Branding/alt_dashboard_background.jpg` (pas branché dans le
+pipeline `--disk`) — réutilisable ailleurs (présentation du projet) sans
+perdre le travail.
+
+## [3.36.0-hardware-drivers-maintenance-tools-winpe-menu] — 2026-09-17
+
+### Corrigé — `--self-test` rapportait 29 FAIL quand lancé sans `./`
+Cause racine unique pour des clusters en apparence sans rapport (role-lock/
+tokens, chain-of-custody, profils de depannage, fetch manifest, SONAR
+Field) : `sonar_self_test_v2()` calcule `self="${BASH_SOURCE[0]}"` puis
+reinvoque le script directement, `"$self" --flag`, pour des dizaines de
+sous-tests. Quand l'utilisateur lance le harnais avec `bash
+sonar_master.sh --self-test` (sans `./` ni chemin absolu), `BASH_SOURCE[0]`
+vaut le nom nu `sonar_master.sh` — sans aucun `/`. Un nom de commande sans
+`/` n'est jamais cherche dans le repertoire courant : bash le cherche dans
+`$PATH`, ne l'y trouve pas, et l'invocation echoue silencieusement (l'erreur
+« command not found » part sur stderr, deja redirige vers `/dev/null` par
+la quasi-totalite de ces sous-tests). Resultat : chaque sous-test qui
+delegue a une reinvocation de `"$self"` echoue, dans des clusters qui n'ont
+rien de fonctionnel en commun — la seule chose qu'ils partagent est ce
+mecanisme de reinvocation. `bash ./sonar_master.sh --self-test` (chemin
+avec `/`) ne declenchait pas le bug, ce qui masquait la regression pour
+quiconque avait pris l'habitude du `./`.
+
+Corrige en calculant `self` comme un chemin absolu —
+`"${SONAR_SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]}")"` — qui contient
+toujours un `/` et fonctionne donc quel que soit l'appel initial. Voir
+`sonar_self_test_v2()` dans `sonar_master.sh`. Verifie : `ERRORS=0` avec
+`bash sonar_master.sh --self-test` et `bash ./sonar_master.sh --self-test`.
+
+### Contexte
+Discussion sur ce que SONAR-SE devrait couvrir pour rester pertinent
+"au regard du monde aujourd'hui" : confiance vérifiable (provenance
+signée/hachée) plutôt que quantité brute d'outils, et robustesse
+hors-ligne. Suite logique : combler des trous concrets de couverture
+signalés par l'auteur — écran, pilotes, alimentation, et un WinPE plus
+accessible qu'une invite `cmd.exe` brute.
+
+### Ajouté — 7 nouveaux outils verifies (URL + SHA-256 calcule localement)
+- **hardware-diagnostic** : IsMyLcdOK (pixels morts), HWiNFO (capteurs
+  materiels/rails d'alimentation — freeware NON-COMMERCIAL pour la
+  partie 64 bits/ARM64, a signaler a l'operateur), BatteryInfoView
+  (diagnostic batterie portable), Snappy Driver Installer Origin
+  (pilotes hors-ligne, pack embarque), DriverStoreExplorer/RAPR
+  (nettoyage du magasin de pilotes Windows).
+- **boot-repair** : Dism++ (interface graphique DISM/SFC), BleachBit
+  (nettoyage disque/registre, alternative saine a CCleaner).
+
+Ecarte deliberement : outils d'« activation » Windows/Office (KMSPico,
+Microsoft Activation Scripts...) — ce sont des outils de contournement
+de licence (piratage logiciel), incompatibles avec la discipline de
+provenance verifiee de tout ce manifeste. Seule alternative legitime :
+`slmgr.vbs`, deja integre a Windows, pour du depannage d'activation
+sur une licence reellement possedee.
+
+### Ajouté — menu de reparation dans WinPE (`tools/Build-SonarSE-WinPE.ps1`)
+Nouveau parametre `-AddRepairMenu` (active par defaut) : remplace
+`startnet.cmd` par un menu batch numerote (reparation du demarrage via
+bootrec, bcdedit, diskpart, DISM ScanHealth/RestoreHealth, invite
+libre) au lieu du `cmd.exe` brut — evite au technicien de memoriser la
+syntaxe exacte de chaque commande. Implemente en montage DISM + simple
+remplacement de fichier (pas de `/Add-Package`), donc non concerne par
+la limite connue de `-IncludePowerShell` (bug DISM Erreur 87).
+
+### Corrigé — `Remove-Item` PowerShell peu fiable dans le script WinPE
+`Remove-Item -Recurse -Force` sur le dossier de stage WinPE
+(`$env:TEMP\sonar-se-winpe-build\winpe_amd64`) echouait de facon
+reproductible avec « Un objet n'existe pas a l'emplacement specifie
+C:\Users\CEPC~1. » (chemin tronque dans le message, cause exacte non
+confirmee — profil dont le nom d'utilisateur contient un espace,
+donc alias 8.3 `CEPC~1` dans `%TEMP%`). `cmd /c rmdir /s /q` sur le
+meme chemin reussit systematiquement ; le script utilise maintenant
+cette methode.
+
+### Découvert (non causé par ce changement) — régression `--self-test`
+`bash sonar_master.sh --self-test` rapporte 29 FAIL (role-lock/tokens,
+chain-of-custody, documentation des profils, scellement du manifeste
+fetch, PIN/export SONAR Field). **Confirmé pré-existant** : testé sur
+le commit HEAD précédent (avant tout changement de cette session, via
+`wsl -u root`), même résultat exact. Cause racine non identifiée cette
+session — plusieurs clusters de tests sans rapport fonctionnel échouent
+ensemble, ce qui suggère une cause commune (variable d'environnement,
+helper partagé par le harnais de self-test, ou dépendance manquante
+dans cet environnement WSL) plutôt que neuf bugs indépendants. Flaggé
+pour investigation dédiée séparée — voir tâche associée.
+
+### Non résolu
+- Le menu de reparation WinPE n'a pas encore ete teste par un vrai
+  boot (seul le remplacement de `startnet.cmd` dans l'image a ete
+  confirme reussi).
+- La regression `--self-test` (29 FAIL) ci-dessus reste a diagnostiquer.
+- HWiNFO : verifier avec l'operateur si un usage commercial de la cle
+  SONAR-SE necessiterait une licence, la version freeware actuelle
+  etant limitee a un usage non-commercial pour sa partie 64 bits/ARM64.
+
 ## [3.35.0-ventoy-theme-real-root-cause-found] — 2026-09-16
 
 ### Contexte

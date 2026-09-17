@@ -430,11 +430,25 @@ sonar_security_init() {
     # audit (ROADMAP.md P1) resolves them with someone who can validate
     # against real hardware and the project's actual policy intent — see
     # ROADMAP.md for the specific open questions above, spelled out there.
+    #
+    # CORRIGE 2026-09-17 : VAULT etait "R"/"RW" pour Viewer/Technician (les
+    # deux roles libre-service, sans jeton) — sonar_role_can traite R/RW/
+    # CONFIRM comme equivalents (aucune des trois n'est rejetee), donc
+    # --fetch-manifest-seal / --field-pin-set / --catalog-seal ne
+    # demandaient AUCUNE elevation reelle malgre le "[role VAULT]" affiche
+    # dans --help. Trouve par un audit externe (voir CHANGELOG.md), verifie
+    # par grep direct sur ce fichier. Viewer/Technician passes a "-" :
+    # sceller un manifeste ou definir un PIN de terrain exige maintenant un
+    # vrai jeton Senior/Forensic/Admin/Expert, comme le texte d'aide l'a
+    # toujours affirme. La VERIFICATION d'un scelle (sonar_fetch_manifest_
+    # verify_seal, sonar_catalog_verify_seal) reste volontairement ouverte a
+    # tous — verifier ne cree pas de confiance, ca en controle une deja
+    # etablie.
     if [[ ! -f "${SONAR_POLICY_FILE}" ]]; then
         cat > "${SONAR_POLICY_FILE}" <<'EOF'
 ROLE	AUDIT	DIAGNOSE	DEPLOY	DESTRUCTIVE	FORENSIC	VAULT
-Viewer	R	R	-	-	-	R
-Technician	R	R	R	-	-	RW
+Viewer	R	R	-	-	-	-
+Technician	R	R	R	-	-	-
 Senior	R	R	R	CONFIRM	R	RW
 Forensic	R	R	-	-	RW	RW
 Admin	RW	RW	R	CONFIRM	RW	RW
@@ -533,7 +547,19 @@ sonar_audit() {
     event="${event//$'\t'/ }"; event="${event//$'\n'/ }"
     details="${details//$'\t'/ }"; details="${details//$'\n'/ }"
     if [[ -n "${SONAR_ROLE_IDENTITY:-}" ]]; then
-        details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY}"
+        # Roles libre-service (Viewer/Technician) ne passent jamais par la
+        # verification de jeton (sonar_role_enforce_lock retourne avant) :
+        # SONAR_ROLE_IDENTITY peut donc etre une simple variable d'env
+        # positionnee par l'operateur lui-meme, sans preuve. Marquer ce cas
+        # explicitement au lieu de le journaliser comme une identite
+        # verifiee au meme titre qu'un jeton signe (roles elevated,
+        # SONAR_ROLE_IDENTITY assigne en ligne 355 apres verification HMAC).
+        # Trouve 2026-09-17 — voir CHANGELOG.md.
+        if sonar_role_is_self_service "${SONAR_ROLE}"; then
+            details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY} (auto-declaree, non authentifiee)"
+        else
+            details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY}"
+        fi
     fi
     # Serialize the read-prev/append sequence below with flock when available:
     # without it, two concurrent SONAR invocations can both read the same
@@ -3740,6 +3766,13 @@ hardware-diagnostic	CrystalDiskMark	Mesure les vitesses reelles de lecture/ecrit
 hardware-diagnostic	Prime95	Stress-test CPU/alimentation intensif (GIMPS) — complementaire a Memtest86+ : detecte les plantages intermittents sous charge (surchauffe, alimentation limite) que Memtest86+ seul (RAM au repos, hors charge CPU) ne revele pas. Freeware avec EULA specifique GIMPS (pas open-source au sens strict, mais usage libre sans compte ni restriction pertinente ici — voir mersenne.org/legal).
 boot-repair	BlueScreenView	Analyse automatiquement les fichiers de vidage (.dmp) apres un ecran bleu pour identifier le pilote/module responsable — cible la reparation au lieu de deviner. Freeware NirSoft (personnel et commercial), aucun compte requis.
 boot-repair	Rufus	Cree une cle USB d'installation Windows amorcable a partir d'une ISO — utile quand le diagnostic conclut a une reinstallation plutot qu'une reparation. Open source (GPLv3), binaires signes Authenticode (editeur verifie : Akeo Consulting) en plus du telechargement direct GitHub.
+boot-repair	Dism++	Interface graphique pour SFC/DISM (verification et reparation d'une image Windows hors ligne, nettoyage systeme) — plus accessible que les commandes DISM brutes pour un technicien qui n'en a pas la syntaxe memorisee. Open source (Chuyu-Team/Dism-Multi-language sur GitHub).
+boot-repair	BleachBit	Nettoyage disque/registre avant ou apres une reparation (fichiers temporaires, caches, journaux) — alternative saine a CCleaner (telemetrie/adware ajoutes ces dernieres annees). Open source (GPLv3), bleachbit.org.
+hardware-diagnostic	IsMyLcdOK	Test de pixels morts/uniformite d'un ecran par mires plein ecran — seul type de diagnostic ecran qui a du sens en logiciel (le reste, retroeclairage/dalle, est materiel). Freeware, aucune restriction d'usage professionnel connue.
+hardware-diagnostic	HWiNFO	Lecture des capteurs materiels en temps reel (tensions/rails d'alimentation, temperatures, vitesses ventilateurs) — complementaire aux autres outils hardware-diagnostic pour distinguer un probleme d'alimentation d'une RAM ou d'un disque defaillant. Freeware pour usage non-commercial (HWiNFO64/ARM64) ; HWiNFO32 (legacy, inclus dans la meme archive) reste freeware sans cette restriction. A signaler a l'operateur si usage commercial strict.
+hardware-diagnostic	BatteryInfoView	Diagnostic batterie/alimentation sur portable (usure, tension, capacite de conception vs actuelle) — cas d'usage alimentation le plus frequent en depannage terrain. Freeware NirSoft (personnel et commercial, pas de vente ni de bundling), aucun compte requis.
+hardware-diagnostic	Snappy Driver Installer Origin	Installation/mise a jour de pilotes hors-ligne (pack de pilotes embarque, pas de telechargement necessaire sur site) — pertinent specifiquement quand la machine cible n'a pas de reseau fonctionnel pour recuperer ses propres pilotes. Open source, snappy-driver-installer.org.
+hardware-diagnostic	DriverStoreExplorer	Nettoyage du magasin de pilotes Windows (DriverStore) qui accumule des versions obsoletes au fil du temps — complementaire a Snappy Driver Installer Origin (l'un installe/met a jour, l'autre nettoie). Open source (lostindark/DriverStoreExplorer sur GitHub).
 peripherals-network	Android Platform Tools	adb (debug USB) et fastboot (mode bootloader) — diagnostic et reparation basique d'un telephone Android depuis un PC fonctionnel, cable branche (redemarrage force, effacement cache, reinstallation systeme si un firmware officiel est disponible). Ne s'utilise PAS depuis le menu de boot Ventoy : necessite un PC deja demarre normalement (Windows/Linux), le telephone est la cible, pas la cle. iOS hors de portee (ecosysteme Apple verrouille, aucun outil libre equivalent). Officiel Google (dl.google.com), licence Android SDK.
 general-os	Alpine Linux	Distribution Linux minimaliste (musl/busybox) — utile pour un depannage reseau/systeme tres bas niveau ou un environnement le plus leger possible est prefere a SystemRescue. Open source, alpinelinux.org.
 general-os	Arch Linux	Environnement Linux "rolling release" avec les outils/pilotes les plus recents — utile quand SystemRescue (base plus ancienne) ne reconnait pas un peripherique tres recent. Open source, archlinux.org.
@@ -3878,6 +3911,13 @@ CrystalDiskMark	https://sourceforge.net/projects/crystaldiskmark/files/9.0.3/Cry
 Prime95	https://download.mersenne.ca/gimps/v30/30.19/p95v3019b20.win64.zip	d9475f2ff3f4a6a701abc49a86a66126cb48abd10bda6fa87039d98fa8756bca		none	Freeware GIMPS (mersenne.org/legal) : usage libre sans compte ni restriction pertinente pour un usage en stress-test (la seule clause notable concerne une prime EFF si le code source sert a decouvrir un nombre premier record — hors sujet ici). Mirroir officiel mersenne.ca. SHA-256 calcule localement. Windows uniquement (build win64).
 BlueScreenView	https://www.nirsoft.net/utils/bluescreenview.zip	15ba3b0ca0a1ff21e89715da52ecc5918177b97ce40903d299fd591909e7b3ab		none	Freeware NirSoft (usage personnel et commercial libre — seule exception connue chez NirSoft concerne un autre outil, NK2Edit). SHA-256 calcule localement apres telechargement direct depuis nirsoft.net. Windows uniquement.
 Rufus	https://github.com/pbatard/rufus/releases/download/v4.15/rufus-4.15.exe	84c8a437f8af89257524478489e5c85f1edf25f761d299e2bcde46ac0afbe106		none	Open source GPLv3 (github.com/pbatard/rufus). L'auteur ne publie pas de SHA-256 statique par choix deliberateur (FAQ officielle) : le binaire est signe Authenticode (editeur verifie "Akeo Consulting"), verifie automatiquement par Windows au lancement — assurance au moins equivalente a un hash publie. SHA-256 calcule localement quand meme, comme reference. Windows uniquement.
+Dism++	https://github.com/Chuyu-Team/Dism-Multi-language/releases/download/v10.1.1002.2/Dism%2B%2B10.1.1002.1B.zip	5bbab96d60704854efd8246a7d9371688b9102261544827fc8884126d70bcb3b		none	Open source (Chuyu-Team/Dism-Multi-language sur GitHub). Aucune somme publiee separement par le projet ; SHA-256 calcule localement apres telechargement direct GitHub cette session. Windows uniquement.
+BleachBit	https://download.bleachbit.org/get/BleachBit-6.0.4-portable.zip	3425195570e4d191695c45537065dc007a51efd4fd675a47f7b6da6d686a4660		none	Open source (GPLv3, bleachbit.org). Aucune somme publiee separement sur le site officiel ; SHA-256 calcule localement apres telechargement HTTPS direct depuis download.bleachbit.org cette session. Multiplateforme, version portable Windows utilisee ici.
+IsMyLcdOK	https://www.softwareok.com/Download/IsMyLcdOK_x64.zip	5b67541c0db43124539509071aa56a4c59621b6249abb043f8c1c5c31750553b		none	Freeware, aucun compte requis. Aucune somme publiee separement par l'editeur ; SHA-256 calcule localement apres telechargement HTTPS direct depuis softwareok.com cette session. Windows uniquement (64 bits).
+HWiNFO	https://www.hwinfo.com/files/hwi_852.zip	640c707de4c40c6903ed2ae916e62e6b7d5d6357c20fbf12d6b9753f7ae99c17		none	Version portable (32+64+ARM64 dans une seule archive). Freeware pour HWiNFO32 (legacy) ; HWiNFO64/ARM64 sont freeware pour usage NON-COMMERCIAL uniquement — a signaler a l'operateur si usage commercial strict (voir hwinfo.com/license). Aucune somme publiee separement ; SHA-256 calcule localement apres telechargement HTTPS direct depuis hwinfo.com cette session. Windows uniquement.
+BatteryInfoView	https://www.nirsoft.net/utils/batteryinfoview-x64.zip	a01a2dfae2b136ade4efe88b36993256b6121db0f797a827c2b8eea16105246f		none	Freeware NirSoft (personnel et commercial, pas de vente/bundling — meme licence que BlueScreenView). SHA-256 calcule localement apres telechargement direct depuis nirsoft.net cette session. Windows uniquement.
+Snappy Driver Installer Origin	https://www.glenn.delahoy.com/downloads/sdio/SDIO_2.0.4.887.zip	9d92cdd3bebf04d48e495b30277ae61ef2a61a67e1d164a6a241c1bc3a8a3d0b		none	Open source (snappy-driver-installer.org). Aucune somme publiee separement par l'editeur ; SHA-256 calcule localement apres telechargement HTTPS direct cette session. Contient un pack de pilotes embarque (installation hors-ligne). Windows uniquement.
+DriverStoreExplorer	https://github.com/lostindark/DriverStoreExplorer/releases/download/v1.0.26/DriverStoreExplorer-v1.0.26.zip	89a5ed17bf7c08c869294af2202f5f9b34050f81c2feeaa6cd694970da8e931f		none	Open source (MIT, lostindark/DriverStoreExplorer sur GitHub). Aucune somme publiee separement ; SHA-256 calcule localement apres telechargement direct GitHub cette session. Windows uniquement.
 Android Platform Tools	https://dl.google.com/android/repository/platform-tools-latest-windows.zip	45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99		none	URL officielle Google (dl.google.com, meme domaine que les releases Android Studio). Licence Android SDK (contrat Google, pas open-source au sens strict, mais usage libre sans compte). "latest" dans l'URL : Google ne publie pas d'URL versionnee stable ni de somme officielle pour ce point d'entree — SHA-256 calcule localement au moment du telechargement, revalide a chaque --fetch (pas de garantie de stabilite dans le temps contrairement aux autres entrees de ce manifeste, a re-verifier si le contenu change).
 Alpine Linux	https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/alpine-standard-3.24.1-x86_64.iso	f4dd613206676c62949144c8ad75fc64582099f444dd1485bae104a60f51dd26		none	SHA-256 publie sur le domaine officiel (fichier .sha256 a cote de l'ISO, dl-cdn.alpinelinux.org) et recoupe localement apres telechargement.
 Arch Linux	https://geo.mirror.pkgbuild.com/iso/latest/archlinux-2026.09.01-x86_64.iso	be8458032f8105e60ee2a3067f950b6e3c007ee51b38dac50e8b48e765561c91		none	SHA-256 publie sur le miroir officiel geo.mirror.pkgbuild.com (redirection vers un miroir proche gere par le projet Arch, sha256sums.txt) et recoupe localement.
@@ -4284,7 +4324,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.35.0-ventoy-theme-real-root-cause-found"
+SONAR_VERSION="3.36.2-vault-role-enforced"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4386,7 +4426,15 @@ sonar_diagnostic_report() {
 
 sonar_self_test_v2() {
     sonar_report_init
-    local ts out errors=0 warnings=0 self="${BASH_SOURCE[0]}"
+    # self must be an absolute (slash-containing) path: dozens of checks below
+    # invoke it directly as `"$self" --flag` (not `bash "$self"`). A bare
+    # BASH_SOURCE[0] like "sonar_master.sh" (no "/") has no slash, so bash's
+    # command lookup searches $PATH instead of cwd — it silently fails to
+    # find the file whenever the script was launched as `bash sonar_master.sh`
+    # (cwd not on PATH), and every one of those checks then fails together
+    # because the recursive invocation's stderr is swallowed by `2>/dev/null`.
+    # Found 2026-09-17 — see CHANGELOG.md.
+    local ts out errors=0 warnings=0 self="${SONAR_SCRIPT_DIR}/$(basename -- "${BASH_SOURCE[0]}")"
     ts="$(sonar_timestamp)"; out="${SONAR_REPORT_DIR}/runs/SONAR_SELFTEST_${ts}.txt"
     exec 3>&1
     {
@@ -4680,13 +4728,34 @@ sonar_self_test_v2() {
         fi
         SONAR_ROOT="${_fm_dir}" "$self" --role-bootstrap >/dev/null 2>&1
         local _fm_token
-        _fm_token="$(SONAR_ROOT="${_fm_dir}" "$self" --role-issue-token Vault fetch.selftest.bot 1 2>/dev/null)"
-        if SONAR_ROOT="${_fm_dir}" SONAR_ROLE=Vault SONAR_ROLE_TOKEN="${_fm_token}" "$self" --fetch-manifest-seal >/dev/null 2>&1 \
+        # "Vault" n'est PAS un nom de role valide (known="Viewer Technician
+        # Senior Forensic Admin Expert" dans sonar_role_issue_token) — c'etait
+        # une confusion avec VAULT, le nom de la COLONNE de policy.tsv. Avec
+        # un role invalide, --role-issue-token echouait silencieusement
+        # (jeton vide), SONAR_ROLE=Vault retombait sur Technician via le
+        # downgrade de sonar_role_enforce_lock, et ce test ne passait que
+        # parce que Technician avait alors un acces VAULT non restreint —
+        # exactement le bug corrige le 2026-09-17 (voir plus haut,
+        # policy.tsv). Corrige pour utiliser un vrai role eleve (Admin).
+        _fm_token="$(SONAR_ROOT="${_fm_dir}" "$self" --role-issue-token Admin fetch.selftest.bot 1 2>/dev/null)"
+        if SONAR_ROOT="${_fm_dir}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_fm_token}" "$self" --fetch-manifest-seal >/dev/null 2>&1 \
            && SONAR_ROOT="${_fm_dir}" "$self" --fetch-manifest-verify-seal >/dev/null 2>&1; then
             printf 'PASS\tFetch manifest seal/verify round-trip works (role VAULT)\n'
         else
             printf 'FAIL\tFetch manifest seal/verify round-trip did not behave as expected\n'; errors=$((errors+1))
         fi
+        # Non-regression du bug corrige le 2026-09-17 : un role libre-service
+        # (Technician, sans jeton) doit etre REFUSE par --fetch-manifest-seal.
+        # Avant le fix, policy.tsv donnait VAULT=RW a Technician et cette
+        # commande reussissait sans aucune elevation.
+        local _fm_dir2
+        _fm_dir2="$(mktemp -d)"
+        if SONAR_ROOT="${_fm_dir2}" "$self" --fetch-manifest-seal >/dev/null 2>&1; then
+            printf 'FAIL\t--fetch-manifest-seal succeeded for Technician without a token (VAULT not enforced)\n'; errors=$((errors+1))
+        else
+            printf 'PASS\t--fetch-manifest-seal rejects a self-service role without a token\n'
+        fi
+        rm -rf "${_fm_dir2}"
         rm -rf "${_fm_dir}"
         local _hash_tmp _hash_known
         _hash_tmp="$(mktemp)"
@@ -4720,27 +4789,34 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tsonar_field.sh smoke test did not behave as expected\n'; errors=$((errors+1))
         fi
-        local _fps_root _fps_out
+        local _fps_root _fps_out _fps_token
         _fps_root="$(mktemp -d)"
-        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Technicien abc 2>&1)"
+        # --field-pin-set exige desormais un vrai role eleve (VAULT verrouille
+        # pour Technician, voir policy.tsv ci-dessus) — "Technicien"/"Admin"
+        # passes en argument sont des NIVEAUX SONAR Field (concept distinct,
+        # non lie a SONAR_ROLE), donnes tels quels ; le ROLE de l'appelant,
+        # lui, doit etre eleve.
+        SONAR_ROOT="${_fps_root}" "$self" --role-bootstrap >/dev/null 2>&1
+        _fps_token="$(SONAR_ROOT="${_fps_root}" "$self" --role-issue-token Admin fieldpin.selftest.bot 1 2>/dev/null)"
+        _fps_out="$(SONAR_ROOT="${_fps_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_fps_token}" "$self" --field-pin-set Technicien abc 2>&1)"
         if [[ ! -s "${_fps_root}/Secure/Vault/field_pins.tsv" ]] && grep -qi 'court' <<<"${_fps_out}"; then
             printf 'PASS\t--field-pin-set rejects a too-short PIN\n'
         else
             printf 'FAIL\t--field-pin-set did not reject a too-short PIN\n'; errors=$((errors+1))
         fi
-        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Technicien 1234 boot-repair,data-recovery 2>&1)"
+        _fps_out="$(SONAR_ROOT="${_fps_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_fps_token}" "$self" --field-pin-set Technicien 1234 boot-repair,data-recovery 2>&1)"
         if [[ -s "${_fps_root}/Secure/Vault/field_pins.tsv" ]] && grep -q 'Technicien' "${_fps_root}/Secure/Vault/field_pins.tsv"; then
             printf 'PASS\t--field-pin-set accepts a valid PIN+niveau+profils and writes the file\n'
         else
             printf 'FAIL\t--field-pin-set did not write the pins file for a valid call\n'; errors=$((errors+1))
         fi
-        _fps_out="$(SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Technicien 1234 profil-bidon 2>&1)"
+        _fps_out="$(SONAR_ROOT="${_fps_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_fps_token}" "$self" --field-pin-set Technicien 1234 profil-bidon 2>&1)"
         if ! grep -q 'profil-bidon' "${_fps_root}/Secure/Vault/field_pins.tsv" && grep -qi 'inconnu' <<<"${_fps_out}"; then
             printf 'PASS\t--field-pin-set rejects an unknown profile name\n'
         else
             printf 'FAIL\t--field-pin-set did not reject an unknown profile name\n'; errors=$((errors+1))
         fi
-        SONAR_ROOT="${_fps_root}" "$self" --field-pin-set Admin 5678 >/dev/null 2>&1
+        SONAR_ROOT="${_fps_root}" SONAR_ROLE=Admin SONAR_ROLE_TOKEN="${_fps_token}" "$self" --field-pin-set Admin 5678 >/dev/null 2>&1
         if [[ "$(awk -F'\t' 'END{print NR}' "${_fps_root}/Secure/Vault/field_pins.tsv")" -eq 2 ]]; then
             printf 'PASS\t--field-pin-set accumulates a second niveau without overwriting the first\n'
         else
@@ -5612,7 +5688,14 @@ sonar_catalog_seal() {
 
 sonar_catalog_verify_seal() {
     [[ -s "${SONAR_CATALOG_SEAL_FILE}" ]] || { echo "[SONAR] Aucun scelle trouve (${SONAR_CATALOG_SEAL_FILE}); executez --catalog-seal d'abord." >&2; return 2; }
-    sonar_require_role VAULT || return 1
+    # Pas de sonar_require_role VAULT ici, volontairement (retire 2026-09-17) :
+    # verifier un scelle est une operation de lecture qui ne cree aucune
+    # confiance nouvelle, contrairement a sonar_catalog_seal ci-dessus qui EN
+    # cree une et reste gate. Meme raisonnement que sonar_fetch_manifest_
+    # verify_seal (jamais gate). L'exiger ici cassait --smart-advisor pour
+    # tout operateur non-elevated dans le cas normal (catalogue scelle,
+    # verification en lecture) : le refus de role se confondait avec une
+    # vraie alerte de falsification.
     local sealed_hash current_hash sealed_ts
     sealed_ts="$(awk -F '\t' '{print $1}' "${SONAR_CATALOG_SEAL_FILE}")"
     sealed_hash="$(awk -F '\t' '{print $NF}' "${SONAR_CATALOG_SEAL_FILE}")"

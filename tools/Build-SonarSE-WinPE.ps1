@@ -34,6 +34,14 @@
     Suppose que le Windows ADK (Deployment Tools) et l'add-on WinPE sont
     déjà installés — saute le téléchargement/installation.
 
+.PARAMETER AddRepairMenu
+    Remplace startnet.cmd par un menu de reparation numerote (bootrec,
+    bcdedit, diskpart, DISM, invite libre) au lieu du cmd.exe brut par
+    defaut. ACTIVE par defaut — c'est un simple remplacement de fichier
+    dans boot.wim (montage DISM + copie, PAS de /Add-Package), donc non
+    concerne par la limite connue de -IncludePowerShell ci-dessous.
+    Utilisez -AddRepairMenu:$false pour revenir au cmd.exe brut.
+
 .PARAMETER IncludePowerShell
     Tente d'ajouter PowerShell à l'image WinPE (WinPE-WMI > WinPE-NetFx >
     WinPE-Scripting > WinPE-PowerShell, dans cet ordre de dépendance,
@@ -79,7 +87,8 @@ param(
     [string]$OutputIso = ".\SONAR-SE-WinPE-amd64.iso",
     [string]$WorkDir = "$env:TEMP\sonar-se-winpe-build",
     [switch]$SkipAdkInstall,
-    [bool]$IncludePowerShell = $false
+    [bool]$IncludePowerShell = $false,
+    [bool]$AddRepairMenu = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -137,7 +146,21 @@ if (-not $setEnvBat -or -not $copypeCmd) {
 }
 
 $stageDir = Join-Path $WorkDir "winpe_amd64"
-if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
+if (Test-Path $stageDir) {
+    # cmd /c rmdir plutot que Remove-Item : sur certains profils Windows
+    # (nom d'utilisateur avec espace -> alias 8.3 dans %TEMP%, ex.
+    # C:\Users\CEPC~1\...), Remove-Item -Recurse echoue de facon
+    # reproductible sur l'arborescence WinPE (des centaines de petits
+    # fichiers) avec "Un objet n'existe pas a l'emplacement specifie
+    # C:\Users\CEPC~1." — chemin tronque dans le message, cause exacte
+    # non confirmee (quirk du provider FileSystem de PowerShell face a ce
+    # chemin). Constate et reproduit le 2026-09-17 ; cmd.exe rmdir /s /q
+    # reussit systematiquement sur le meme chemin.
+    cmd /c "rmdir /s /q `"$stageDir`""
+    if (Test-Path $stageDir) {
+        throw "Impossible de supprimer l'ancien dossier de travail '$stageDir' (rmdir a echoue)."
+    }
+}
 
 Write-Host "== Création de l'environnement de travail WinPE (élévation requise) =="
 $stageLog = Join-Path $WorkDir "stage_log.txt"
@@ -146,6 +169,136 @@ Start-Process -FilePath "cmd.exe" -ArgumentList $cmdline -Verb RunAs -Wait
 if (-not (Test-Path (Join-Path $stageDir "media\sources\boot.wim"))) {
     Get-Content $stageLog -ErrorAction SilentlyContinue | Write-Host
     throw "Échec de la création de l'environnement WinPE — voir $stageLog ci-dessus."
+}
+
+if ($AddRepairMenu) {
+    Write-Host "== Remplacement de startnet.cmd par le menu de reparation (montage DISM, elevation requise) =="
+    $bootWim = Join-Path $stageDir "media\sources\boot.wim"
+    $menuMountDir = Join-Path $WorkDir "mount_menu"
+    New-Item -ItemType Directory -Force -Path $menuMountDir | Out-Null
+
+    # Menu batch pur (pas de PowerShell) : reprend exactement les commandes
+    # documentees dans docs/WINPE.md (bootrec, bcdedit, diskpart, DISM),
+    # juste presentees sans que le technicien ait a en memoriser la syntaxe.
+    $menuLines = @(
+        "@echo off"
+        "wpeutil InitializeNetwork"
+        ":menu"
+        "cls"
+        "echo ============================================"
+        "echo   SONAR-SE WinPE - Menu de reparation"
+        "echo ============================================"
+        "echo 1. Reparer le demarrage (bootrec : fixmbr, fixboot, rebuildbcd)"
+        "echo 2. Configuration de boot (bcdedit, invite interactive)"
+        "echo 3. Gestion des disques/partitions (diskpart)"
+        "echo 4. Verifier/reparer une image Windows hors ligne (DISM)"
+        "echo 5. Invite de commandes libre (cmd.exe)"
+        "echo 0. Redemarrer"
+        "echo ============================================"
+        "set /p choix=Choix : "
+        "if `"%choix%`"==`"1`" goto bootrec"
+        "if `"%choix%`"==`"2`" goto bcdedit_menu"
+        "if `"%choix%`"==`"3`" goto diskpart_menu"
+        "if `"%choix%`"==`"4`" goto dism_menu"
+        "if `"%choix%`"==`"5`" goto cmdfree"
+        "if `"%choix%`"==`"0`" wpeutil reboot"
+        "goto menu"
+        ""
+        ":bootrec"
+        "cls"
+        "echo --- Reparation du demarrage ---"
+        "echo Va executer : bootrec /fixmbr, /fixboot, /rebuildbcd"
+        "echo Verifiez que le disque Windows cible est bien branche."
+        "pause"
+        "bootrec /fixmbr"
+        "bootrec /fixboot"
+        "bootrec /rebuildbcd"
+        "echo."
+        "echo Termine. Appuyez sur une touche pour revenir au menu."
+        "pause"
+        "goto menu"
+        ""
+        ":bcdedit_menu"
+        "cls"
+        "echo --- Configuration de demarrage (bcdedit) ---"
+        "echo Invite bcdedit interactive. Tapez ^`"exit^`" pour revenir au menu."
+        "cmd /k bcdedit"
+        "goto menu"
+        ""
+        ":diskpart_menu"
+        "cls"
+        "echo --- Gestion des disques (diskpart) ---"
+        "diskpart"
+        "goto menu"
+        ""
+        ":dism_menu"
+        "cls"
+        "echo --- DISM : verification/reparation d'une image hors ligne ---"
+        "set /p lettre=Lettre du lecteur Windows cible (ex: C) : "
+        "echo Verification de l'integrite de l'image (ScanHealth)..."
+        "Dism /Image:%lettre%:\ /Cleanup-Image /ScanHealth"
+        "echo."
+        "set /p rep=Lancer la reparation RestoreHealth ? (o/n) : "
+        "if /i `"%rep%`"==`"o`" Dism /Image:%lettre%:\ /Cleanup-Image /RestoreHealth"
+        "echo."
+        "pause"
+        "goto menu"
+        ""
+        ":cmdfree"
+        "cls"
+        "cmd /k"
+        "goto menu"
+    )
+    $startnetPath = Join-Path $WorkDir "startnet.cmd"
+    $menuLines | Set-Content -Path $startnetPath -Encoding ASCII
+
+    $menuScript = Join-Path $WorkDir "add_menu.cmd"
+    $menuLog = Join-Path $WorkDir "menu_add_log.txt"
+    # Meme schema robuste que le bloc -IncludePowerShell ci-dessous (call
+    # :main > log 2>&1, setlocal enabledelayedexpansion + !errorlevel!,
+    # Cleanup-Mountpoints en preambule, discard sur echec) : ici on
+    # remplace juste un fichier dans l'image montee (pas de /Add-Package),
+    # donc non concerne par le bug DISM Erreur 87 documente plus bas.
+    $menuScriptLines = @(
+        "@echo off"
+        "setlocal enabledelayedexpansion"
+        "call :main > `"$menuLog`" 2>&1"
+        "exit /b !errorlevel!"
+        ""
+        ":main"
+        "call `"$setEnvBat`""
+        "echo [%date% %time%] Nettoyage des montages DISM orphelins"
+        "Dism /Cleanup-Mountpoints"
+        "echo [%date% %time%] Montage de l'image"
+        "Dism /Mount-Image /ImageFile:`"$bootWim`" /Index:1 /MountDir:`"$menuMountDir`""
+        "if !errorlevel! neq 0 exit /b 1"
+        "echo [%date% %time%] Remplacement de startnet.cmd"
+        "copy /y `"$startnetPath`" `"$menuMountDir\Windows\System32\startnet.cmd`""
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "echo [%date% %time%] Demontage et commit"
+        "Dism /Unmount-Image /MountDir:`"$menuMountDir`" /Commit"
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "echo [%date% %time%] OK"
+        "exit /b 0"
+        ""
+        ":fail_mounted"
+        "echo [%date% %time%] Echec — demontage (discard) de l'image montee"
+        "Dism /Unmount-Image /MountDir:`"$menuMountDir`" /Discard"
+        "exit /b 1"
+    )
+    $menuScriptLines | Set-Content -Path $menuScript -Encoding ASCII
+
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$menuScript`"" -Verb RunAs -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Host "== Log remplacement startnet.cmd =="
+        if (Test-Path $menuLog) {
+            Get-Content $menuLog -ErrorAction SilentlyContinue | Write-Host
+        } else {
+            Write-Host "(aucun fichier log produit — voir $menuScript pour la commande exacte)"
+        }
+        throw "Echec du remplacement de startnet.cmd (code $($proc.ExitCode)) — voir le log ci-dessus. Relancez avec -AddRepairMenu:`$false pour l'image minimale (cmd.exe brut, deja fonctionnelle)."
+    }
+    Write-Host "Menu de reparation installe avec succes."
 }
 
 if ($IncludePowerShell) {

@@ -52,6 +52,24 @@ WinPE fonctionnelle confirmée.
 `SONAR_SOURCE\ISO\WinPE\` ; `-SkipAdkInstall` si l'ADK est déjà présent.
 Voir l'aide intégrée (`Get-Help .\tools\Build-SonarSE-WinPE.ps1 -Full`).
 
+**`-AddRepairMenu` (activé par défaut, ajouté le 2026-09-17)** : remplace
+`startnet.cmd` par un menu batch numéroté (bootrec, bcdedit, diskpart,
+DISM ScanHealth/RestoreHealth, invite libre) au lieu du `cmd.exe` brut —
+le technicien n'a plus besoin de mémoriser la syntaxe exacte de chaque
+commande. Implémenté en simple remplacement de fichier après montage
+DISM (pas de `/Add-Package`), donc non concerné par la limite connue de
+`-IncludePowerShell` ci-dessus. Testé le 2026-09-17 : montage, remplacement
+et démontage/commit réussis, ISO régénérée avec succès (380 Mo, SHA-256
+`6ad61eabac27a9bfe2f15562f4c6a755664ae9cf767494808be4058479ecf3ed`),
+déployée sur la clé physique (vérifié par hash identique via trois outils
+indépendants : `sha256sum` WSL, `sha256sum` Git-Bash, `Get-FileHash`
+PowerShell — la taille/date affichées par certains de ces outils sur la
+clé sont restées incohéremment figées à l'ancienne valeur pendant un
+moment après la copie, cause non identifiée — probablement un cache de
+métadonnées côté pilote de la clé USB — mais le contenu réel, seul ce qui
+compte, est confirmé correct par le hash). **Pas encore testé par un vrai
+boot.** Utiliser `-AddRepairMenu:$false` pour revenir au `cmd.exe` brut.
+
 **`-IncludePowerShell` (optionnel, désactivé par défaut)** : tente
 d'ajouter PowerShell à l'image (au-delà de cmd.exe/bootrec/bcdedit/
 diskpart/DISM déjà présents). Testé le 2026-09-16 sur un hôte
