@@ -2149,12 +2149,21 @@ generate_manifests_final() {
     [[ "${DRY_RUN}" == "true" ]] && return
     local mp
     mp="$(mount_ventoy_final)"
+    # cd "$mp" avant find : sha256sum ecrit alors des chemins RELATIFS au
+    # point de montage (ex. "ISO/foo.iso") plutot que des chemins absolus
+    # ancres sur ce point de montage temporaire precis (mount_ventoy_final
+    # utilise un mktemp -d different a chaque appel). sonar_post_deploy_
+    # verify_final n'a alors plus besoin de reecrire ces chemins par regex
+    # avant de relancer sha256sum -c depuis un nouveau point de montage —
+    # supprime une classe de bug entiere plutot que de la rendre plus
+    # precise (regex gloutonne sur des noms de dossiers qui pourraient, en
+    # theorie, se repeter plus profond dans un chemin).
     : > "${mp}/MANIFEST/ISO.sha256"
-    while IFS= read -r -d '' f; do sha256sum "$f" >> "${mp}/MANIFEST/ISO.sha256"; done \
-        < <(find "${mp}/ISO" -type f -iname '*.iso' -print0 | sort -z)
+    ( cd "${mp}" && while IFS= read -r -d '' f; do sha256sum "$f" >> "${mp}/MANIFEST/ISO.sha256"; done \
+        < <(find ISO -type f -iname '*.iso' -print0 | sort -z) )
     : > "${mp}/MANIFEST/FILES.sha256"
-    while IFS= read -r -d '' f; do sha256sum "$f" >> "${mp}/MANIFEST/FILES.sha256"; done \
-        < <(find "${mp}/Portable" "${mp}/Scripts" "${mp}/Drivers" "${mp}/macOS" -type f -print0 2>/dev/null | sort -z)
+    ( cd "${mp}" && while IFS= read -r -d '' f; do sha256sum "$f" >> "${mp}/MANIFEST/FILES.sha256"; done \
+        < <(find Portable Scripts Drivers macOS -type f -print0 2>/dev/null | sort -z) )
     unmount_final "${mp}"
 }
 
@@ -2168,23 +2177,23 @@ generate_manifests_final() {
 # --verify-manifest manually afterwards.
 sonar_post_deploy_verify_final() {
     [[ "${DRY_RUN}" == "true" ]] && { log "[DRY-RUN] Vérification post-déploiement simulée."; return; }
-    local mp checked=0 failed=0 mf n rel_tmp
+    local mp checked=0 failed=0 mf n
     mp="$(mount_ventoy_final)"
     for mf in "${mp}/MANIFEST/ISO.sha256" "${mp}/MANIFEST/FILES.sha256"; do
         [[ -s "$mf" ]] || continue
         n="$(wc -l < "$mf" | tr -d ' ')"
         checked=$((checked + n))
-        # Manifest lines carry the mount point that was live when the manifest
-        # was written; mount_ventoy_final always mounts on a fresh mktemp -d
-        # path, so we rewrite to paths relative to the *current* mount point
-        # (anchored at the known top-level folders) before re-checking.
-        rel_tmp="$(mktemp)"
-        sed -E 's#(^[0-9a-fA-F]+  ).*/(ISO/|Portable/|Scripts/|Drivers/|macOS/)#\1\2#' "$mf" > "$rel_tmp"
-        if ! ( cd "$mp" && sha256sum -c --quiet "$rel_tmp" ) 2>>"${LOG_FILE:-/dev/null}"; then
+        # generate_manifests_final ecrit desormais des chemins deja relatifs
+        # au point de montage (cd avant find) — plus besoin de les reecrire
+        # ici par regex avant de relancer sha256sum -c depuis le nouveau
+        # point de montage de cette verification. Ancienne regex gloutonne
+        # (s#...#) ecartee 2026-09-17 : fragile si un nom de dossier ancre
+        # (ex. "ISO/") pouvait en theorie se repeter plus profond dans un
+        # chemin — corrige a la source plutot que rendu plus precis.
+        if ! ( cd "$mp" && sha256sum -c --quiet "$mf" ) 2>>"${LOG_FILE:-/dev/null}"; then
             failed=$((failed+1))
             log_err "Vérification post-déploiement échouée: $(basename "$mf")"
         fi
-        rm -f "$rel_tmp"
     done
     unmount_final "${mp}"
     if (( failed > 0 )); then
@@ -4345,7 +4354,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.7-winpe-menu-build-fixed"
+SONAR_VERSION="3.36.8-post-deploy-verify-relative-paths"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

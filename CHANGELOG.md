@@ -6,6 +6,33 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.8-post-deploy-verify-relative-paths] — 2026-09-17
+
+### Contexte
+Item [8] du plan de correctifs (audit externe DeepSeek) : la réécriture
+`sed -E` de `sonar_post_deploy_verify_final` (qui ramène les chemins
+absolus du manifeste au point de montage courant, différent à chaque
+vérification) cherche la DERNIÈRE occurrence de `ISO/`, `Portable/`,
+etc. dans un chemin — si un fichier réel se nomme par exemple
+`Portable/ISO/README.txt` (un dossier `ISO` imbriqué dans `Portable`),
+la réécriture matcherait la mauvaise occurrence.
+
+### Corrigé — à la source, pas rendu plus précis
+`generate_manifests_final` fait maintenant `cd` vers le point de montage
+avant `find` : les manifestes (`ISO.sha256`, `FILES.sha256`) contiennent
+directement des chemins relatifs (`ISO/foo.iso`) au lieu de chemins
+absolus ancrés sur un point de montage temporaire qui change à chaque
+appel. `sonar_post_deploy_verify_final` n'a alors plus besoin de
+réécrire quoi que ce soit avant de relancer `sha256sum -c` — la classe
+de bug entière disparaît plutôt que d'être rendue plus précise.
+
+Test : cas reproduit manuellement hors self-test (aucun test existant
+n'exerce le pipeline `--disk` complet — nécessite un vrai périphérique
+bloc, P0 non résolu documenté dans ROADMAP.md) — un dossier
+`Portable/ISO/README.txt` et un `ISO/foo.iso` vérifiés sans ambiguïté
+avec le nouveau format, confirmé que l'ancien regex aurait mal géré ce
+cas précis.
+
 ## [3.36.7-winpe-menu-build-fixed] — 2026-09-17
 
 ### Contexte
