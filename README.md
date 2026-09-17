@@ -9,10 +9,12 @@ de page.
 > **Ce que SONAR fait, et ne fait pas :** SONAR construit la clé et trace
 > son origine (déploiement Ventoy, manifeste SHA-256, filigrane de build,
 > verrou de rôle, journal d'audit chaîné). **Les outils qui dépannent
-> réellement une machine sont ceux des profils `--profile <nom>`
-> (`boot-repair`, `data-recovery`, `malware`, `disk-clone`,
-> `password-reset`, `hardware-diagnostic`, `full`) — SONAR ne répare rien
-> lui-même.** Le catalogue de 1003 outils (`docs/CATALOG.md`) est une
+> réellement une machine sont ceux des profils `--profile <nom>`.
+> Profils de dépannage : `boot-repair`, `data-recovery`, `malware`,
+> `disk-clone`, `password-reset`, `hardware-diagnostic`,
+> `peripherals-network`. Profil de distributions généralistes (pas liées
+> à un scénario de réparation) : `general-os`. Et `full`, l'union de
+> tous. — SONAR ne répare rien lui-même.** Le catalogue de 981 outils (`docs/CATALOG.md`) est une
 > base de connaissance consultable, pas la source de vérité de ce qui va
 > sur la clé.
 

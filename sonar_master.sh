@@ -3835,7 +3835,7 @@ sonar_profile_doc() {
         echo "LIMITE CONNUE: ${caveat}"
     fi
     echo
-    echo "NOTE: le catalogue de 1003 outils embarque (--help pour SONAR_CATALOGUE_EMBEDDED)"
+    echo "NOTE: le catalogue de 981 outils embarque (--help pour SONAR_CATALOGUE_EMBEDDED)"
     echo "      reste une base de connaissance consultable ; ce profil, pas ce catalogue,"
     echo "      decide de ce qui va reellement sur la cle."
     echo "NOTE: --fetch ${profile} telecharge et verifie (SHA-256 contre manifeste scelle)"
