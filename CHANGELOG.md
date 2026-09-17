@@ -6,6 +6,29 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.11-tsv-tab-guard] — 2026-09-17
+
+### Contexte
+Item [12] du plan de correctifs (audit externe DeepSeek) : les 4 TSV
+embarqués en heredoc (`SONAR_CATALOGUE_EMBEDDED`, `SONAR_PROFILES_TSV`,
+`SONAR_FETCH_MANIFEST_TSV`, `SONAR_EMBEDDED_CATALOG_TSV`) contiennent de
+vraies tabulations en dur. `.gitattributes` force LF mais pas les
+tabulations — un éditeur qui les convertit en espaces casse
+`awk -F'\t'` (et donc chaque outil qui en dépend) sans erreur visible.
+
+### Corrigé
+`sonar_structural_self_audit` (`--self-audit`) vérifie désormais chacun
+des 4 TSV : extrait le bloc via ses marqueurs heredoc, `awk -F'\t'
+'NF<2'` sur chaque ligne non vide — échoue bruyamment en nommant le TSV
+et la ligne fautive si une tabulation manque. `awk` plutôt que
+`grep -P '\t'` (trop permissif — suffirait avec une seule tabulation
+n'importe où dans la ligne).
+
+Test : corruption simulée (tabulations → espaces sur une ligne de
+`SONAR_PROFILES_TSV`) sur une copie du script, confirmé que
+`--self-audit` la détecte et nomme la ligne exacte. 14 → 18 vérifications
+dans `--self-audit`.
+
 ## [3.36.10-selftest-extraction-guarded] — 2026-09-17
 
 ### Contexte

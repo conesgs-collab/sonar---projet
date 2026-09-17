@@ -4370,6 +4370,29 @@ sonar_structural_self_audit() {
     grep -q '^sonar_forensic_chain_of_custody() {' "$self" && echo 'PASS: chain-of-custody present' || { echo 'FAIL: chain-of-custody missing'; errors=$((errors+1)); }
     grep -q '^sonar_generate_vault_helper() {' "$self" && echo 'PASS: vault helper generator present' || { echo 'FAIL: vault helper generator missing'; errors=$((errors+1)); }
     grep -q '^sonar_generate_build_watermark() {' "$self" && echo 'PASS: build watermark present' || { echo 'FAIL: build watermark missing'; errors=$((errors+1)); }
+    # Garde-fou TSV (item [12], audit externe) : chaque TSV embarque en
+    # heredoc doit avoir au moins une tabulation par ligne de donnees. Un
+    # editeur qui convertit les tabulations en espaces casse "awk -F'\t'"
+    # (et donc chaque outil de ce manifeste) SANS message d'erreur visible
+    # — "outil non trouve, donc saute" plutot qu'un echec bruyant. grep -P
+    # '\t' seul serait insuffisant (une seule tabulation n'importe ou dans
+    # la ligne suffirait a le satisfaire, meme une ligne qui n'en a besoin
+    # que d'une alors que le format en attend plusieurs) ; awk -F'\t'
+    # 'NF<2' exige au moins une tabulation REELLE separant deux colonnes.
+    local _tsv_marker _tsv_start _tsv_end _tsv_bad
+    for _tsv_marker in SONAR_CATALOGUE_EOF PROFILES_EOF FETCH_EOF SONAR_CATALOG_EOF; do
+        _tsv_start=$(grep -n "<<'${_tsv_marker}'" "$self" | head -1 | cut -d: -f1)
+        _tsv_end=$(grep -n "^${_tsv_marker}\$" "$self" | head -1 | cut -d: -f1)
+        if [[ -z "$_tsv_start" || -z "$_tsv_end" ]]; then
+            echo "FAIL: TSV heredoc '${_tsv_marker}' introuvable pour verification"; errors=$((errors+1)); continue
+        fi
+        _tsv_bad=$(sed -n "$((_tsv_start+1)),$((_tsv_end-1))p" "$self" | awk -F'\t' 'NF<2 && length($0)>0 {print NR; exit}')
+        if [[ -n "$_tsv_bad" ]]; then
+            echo "FAIL: TSV '${_tsv_marker}' ligne ${_tsv_bad} (relative) sans tabulation"; errors=$((errors+1))
+        else
+            echo "PASS: TSV '${_tsv_marker}' — chaque ligne de donnees a au moins une tabulation"
+        fi
+    done
     return "$errors"
 }
 
@@ -4381,7 +4404,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.10-selftest-extraction-guarded"
+SONAR_VERSION="3.36.11-tsv-tab-guard"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
