@@ -6,6 +6,39 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.9-ai-prompt-stdin-not-argv] — 2026-09-17
+
+### Contexte
+Item [10] du plan de correctifs (audit externe DeepSeek) : `ai_query_local`
+passait le prompt IA à `python3 -c` en argv, visible via `/proc/<pid>/
+cmdline`/`ps` pendant l'exécution — même catégorie de problème déjà
+corrigée pour les secrets HMAC (v3.14.0), pas appliquée ici.
+
+### Trouvé en plus — une deuxième occurrence non signalée par l'audit
+En corrigeant, une fonction **distincte** avec le même défaut :
+`ollama_query()` (utilisée par la résolution IA du catalogue,
+`--ai-download`) passait aussi son prompt en argv à `python3 -`. L'audit
+externe n'avait signalé que `ai_query_local`.
+
+### Corrigé
+Les trois branches d'`ai_query_local` (ollama, llama.cpp, openai-compatible)
+et `ollama_query` : model/prompt transitent maintenant par stdin (première
+ligne = model, reste = prompt, préservant sauts de ligne/guillemets/
+accents) au lieu d'argv. Vérifié par aller-retour JSON (round-trip) que
+le contenu — y compris multi-ligne et caractères spéciaux — survit
+intact, et par `ps` que le prompt n'apparaît plus dans la ligne de
+commande du processus `python3`.
+
+Test ajouté : vérifie que les deux fonctions contiennent bien
+`stdin.read()` (pas de détection négative fragile sur le motif exact du
+bug — positive sur la présence du correctif).
+
+### Non résolu
+- `sonar_hmac_sha256_file` (ligne ~491) utilise aussi `sys.argv[2]` mais
+  intentionnellement : c'est le CHEMIN du secret qui transite en argv,
+  jamais les octets de la clé eux-mêmes (lus via `open()` dans le script
+  Python) — déjà correct depuis v3.14.0, non touché ici.
+
 ## [3.36.8-post-deploy-verify-relative-paths] — 2026-09-17
 
 ### Contexte

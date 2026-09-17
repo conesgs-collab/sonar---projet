@@ -1297,17 +1297,34 @@ ai_query_local() {
     case "${AI_PROVIDER}" in
         ollama)
             local model="${AI_MODEL:-gemma3}"
-            response=$(curl -fsS --max-time 120 http://127.0.0.1:11434/api/generate \
-              -H 'Content-Type: application/json' \
-              -d "$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"prompt":sys.argv[2],"stream":False}))' "$model" "$prompt")") || { ai_log "Ollama: échec de la requête HTTP."; return 1; }
+            # model/prompt passes par stdin, pas en argv : un argv est
+            # lisible par tout autre processus local via /proc/<pid>/cmdline
+            # (ou "ps") pendant l'execution — meme categorie de probleme deja
+            # corrigee pour les secrets HMAC (v3.14.0). Impact ici plus
+            # faible (prompt consultatif, pas un secret), mais meme
+            # traitement pour rester coherent. Premiere ligne = model,
+            # reste (y compris d'eventuels saut de ligne) = prompt.
+            response=$(printf '%s\n%s' "$model" "$prompt" | python3 -c '
+import json, sys
+data = sys.stdin.read().split("\n", 1)
+model = data[0]
+prompt = data[1] if len(data) > 1 else ""
+print(json.dumps({"model": model, "prompt": prompt, "stream": False}))
+' | { curl -fsS --max-time 120 http://127.0.0.1:11434/api/generate \
+              -H 'Content-Type: application/json' -d @-; }) || { ai_log "Ollama: échec de la requête HTTP."; return 1; }
             [[ -n "${response}" ]] || { ai_log "Ollama: réponse vide."; return 1; }
             ai_parse_llm_response "ollama" <<<"${response}" || { ai_log "Ollama: réponse JSON invalide ou vide."; return 1; }
             ;;
         llama.cpp)
             local model="${AI_MODEL:-local}"
-            response=$(curl -fsS --max-time 120 http://127.0.0.1:8080/v1/chat/completions \
-              -H 'Content-Type: application/json' \
-              -d "$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"messages":[{"role":"system","content":"Tu es Sonar AI. Tu es prudent, factuel et tu ne proposes jamais une action destructive sans validation humaine."},{"role":"user","content":sys.argv[2]}],"temperature":0.1}))' "$model" "$prompt")") || { ai_log "llama.cpp: échec de la requête HTTP."; return 1; }
+            response=$(printf '%s\n%s' "$model" "$prompt" | python3 -c '
+import json, sys
+data = sys.stdin.read().split("\n", 1)
+model = data[0]
+prompt = data[1] if len(data) > 1 else ""
+print(json.dumps({"model": model, "messages": [{"role": "system", "content": "Tu es Sonar AI. Tu es prudent, factuel et tu ne proposes jamais une action destructive sans validation humaine."}, {"role": "user", "content": prompt}], "temperature": 0.1}))
+' | { curl -fsS --max-time 120 http://127.0.0.1:8080/v1/chat/completions \
+              -H 'Content-Type: application/json' -d @-; }) || { ai_log "llama.cpp: échec de la requête HTTP."; return 1; }
             [[ -n "${response}" ]] || { ai_log "llama.cpp: réponse vide."; return 1; }
             ai_parse_llm_response "llama.cpp" <<<"${response}" || { ai_log "llama.cpp: réponse JSON invalide ou vide."; return 1; }
             ;;
@@ -1315,9 +1332,14 @@ ai_query_local() {
             [[ -n "${OPENAI_API_KEY:-}" ]] || { ai_log "openai-compatible: OPENAI_API_KEY absente."; return 1; }
             local -a curl_opts=(-fsS --max-time 120)
             [[ -n "${SONAR_CA_CERT:-}" ]] && curl_opts+=(--cacert "${SONAR_CA_CERT}")
-            response=$(curl "${curl_opts[@]}" "${AI_ENDPOINT}" \
-              -H 'Content-Type: application/json' -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-              -d "$(python3 -c 'import json,sys; print(json.dumps({"model":sys.argv[1],"messages":[{"role":"system","content":"Tu es Sonar AI. Ne donne jamais d ordre destructif automatique. Réponds de façon factuelle."},{"role":"user","content":sys.argv[2]}],"temperature":0.1}))' "${AI_MODEL:-gpt-4.1-mini}" "$prompt")") || { ai_log "openai-compatible: échec de la requête HTTP."; return 1; }
+            response=$(printf '%s\n%s' "${AI_MODEL:-gpt-4.1-mini}" "$prompt" | python3 -c '
+import json, sys
+data = sys.stdin.read().split("\n", 1)
+model = data[0]
+prompt = data[1] if len(data) > 1 else ""
+print(json.dumps({"model": model, "messages": [{"role": "system", "content": "Tu es Sonar AI. Ne donne jamais d ordre destructif automatique. Réponds de façon factuelle."}, {"role": "user", "content": prompt}], "temperature": 0.1}))
+' | { curl "${curl_opts[@]}" "${AI_ENDPOINT}" \
+              -H 'Content-Type: application/json' -H "Authorization: Bearer ${OPENAI_API_KEY}" -d @-; }) || { ai_log "openai-compatible: échec de la requête HTTP."; return 1; }
             [[ -n "${response}" ]] || { ai_log "openai-compatible: réponse vide."; return 1; }
             ai_parse_llm_response "openai-compatible" <<<"${response}" || { ai_log "openai-compatible: réponse JSON invalide ou vide."; return 1; }
             ;;
@@ -2416,9 +2438,14 @@ ollama_available() {
 }
 
 ollama_query() {
-    python3 - "$SONAR_AI_URL" "$SONAR_AI_MODEL" "$1" "$SONAR_TIMEOUT" <<'PY'
+    # prompt passe par stdin, pas en argv (meme correctif que ai_query_local,
+    # 2026-09-17) : url/model/timeout restent en argv (non sensibles), seul
+    # le prompt (visible sinon via /proc/<pid>/cmdline pendant l'execution)
+    # transite par stdin.
+    printf '%s' "$1" | python3 - "$SONAR_AI_URL" "$SONAR_AI_MODEL" "$SONAR_TIMEOUT" <<'PY'
 import json, sys, urllib.request
-url, model, prompt, timeout = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+url, model, timeout = sys.argv[1], sys.argv[2], int(sys.argv[3])
+prompt = sys.stdin.read()
 payload=json.dumps({"model":model,"prompt":prompt,"stream":False,"format":"json"}).encode()
 req=urllib.request.Request(url,data=payload,headers={"Content-Type":"application/json"})
 with urllib.request.urlopen(req,timeout=timeout) as r:
@@ -4354,7 +4381,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.8-post-deploy-verify-relative-paths"
+SONAR_VERSION="3.36.9-ai-prompt-stdin-not-argv"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4475,6 +4502,22 @@ sonar_self_test_v2() {
         echo
         check() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then printf "PASS\t%s\n" "${label}"; else printf "FAIL\t%s\n" "${label}"; errors=$((errors+1)); fi; }
         check 'bash syntax' bash -n "$self"
+        # Non-regression : le prompt IA ne doit plus jamais transiter par
+        # argv (visible via /proc/<pid>/cmdline ou "ps" pendant l'execution)
+        # — corrige 2026-09-17, meme categorie que le secret HMAC (v3.14.0).
+        # Verification ciblee sur les CORPS des deux fonctions concernees
+        # (pas tout le fichier : sonar_hmac_sha256_file utilise legitimement
+        # sys.argv[2] pour un message non-secret, cf. commentaire a cote).
+        _ai_argv_leak=false
+        for _fn in ai_query_local ollama_query; do
+            _body="$(sed -n "/^${_fn}() {/,/^}/p" "$self")"
+            grep -q 'stdin\.read()' <<<"${_body}" || _ai_argv_leak=true
+        done
+        if [[ "${_ai_argv_leak}" == "true" ]]; then
+            printf 'FAIL\tAI query prompt still passed via argv instead of stdin\n'; errors=$((errors+1))
+        else
+            printf 'PASS\tAI query prompt (ai_query_local, ollama_query) not passed via argv\n'
+        fi
         check 'python3' command -v python3
         check 'sha256 engine' bash -c 'command -v sha256sum || command -v shasum'
         if [[ -d "${SOURCE_DIR}" ]]; then printf 'PASS\tsource directory\n'; else printf 'WARN\tsource directory absent (runtime test environment)\n'; warnings=$((warnings+1)); fi
