@@ -3827,6 +3827,8 @@ sonar_profile_caveat() {
     case "$1" in
         boot-repair|full)
             echo "Reparation cote Linux (SystemRescue) couverte d'office. Cote Windows (bootrec/bcdedit/DISM), exige un WinPE que SONAR-SE ne redistribue pas mais peut vous aider a construire : tools/Build-SonarSE-WinPE.ps1 (Windows ADK officiel Microsoft, PowerShell) puis deposer l'ISO dans SOURCE_DIR/ISO/WinPE/ — voir docs/WINPE.md." ;;
+        password-reset)
+            echo "Couvre le mot de passe de COMPTE Windows local (chntpw), pas le mot de passe BIOS/UEFI (superviseur/allumage). Deliberement ecarte : les generateurs de code backdoor par numero de serie (Dell/HP/Lenovo...) trouves en ligne n'ont aucune distribution officielle editeur, provenance verifiable, ni licence claire — et sont detectes comme HackTool par la quasi-totalite des antivirus (confirme avec CmosPwd, pourtant GPL et du meme auteur que TestDisk/PhotoRec deja dans ce manifeste : Windows Defender le bloque a l'ecriture). Un outil qu'aucun antivirus ne laisse tourner sur la machine d'un technicien n'a pas sa place ici, licence ou pas. Voies legitimes : (1) Dell — code de deverrouillage officiel via le Service Tag et un code de defi, support.dell.com ; (2) HP — aucune procedure de reinitialisation cote support, remplacement de carte mere requis ; (3) Lenovo — aucune procedure pour un mot de passe superviseur ThinkPad oublie, passer par un centre de service agree. Retrait de la pile CMOS/cavalier : fonctionne sur carte mere de bureau (efface le CMOS, mot de passe inclus), NE fonctionne PAS de facon fiable sur portable (le mot de passe y est souvent stocke hors du CMOS classique, dans une EEPROM protegee)." ;;
         *) : ;;
     esac
 }
@@ -4343,7 +4345,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.5-catalog-counter-1003-was-never-real"
+SONAR_VERSION="3.36.6-bios-password-gap-documented"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4756,6 +4758,12 @@ sonar_self_test_v2() {
             printf 'PASS\tboot-repair profile discloses the WinPE gap (docs/WINPE.md)\n'
         else
             printf 'FAIL\tboot-repair profile does not disclose the WinPE gap\n'; errors=$((errors+1))
+        fi
+        _full_out="$("$self" --profile password-reset 2>/dev/null)"
+        if grep -q 'LIMITE CONNUE' <<<"${_full_out}" && grep -qi 'BIOS' <<<"${_full_out}"; then
+            printf 'PASS\tpassword-reset profile discloses the BIOS/UEFI password gap\n'
+        else
+            printf 'FAIL\tpassword-reset profile does not disclose the BIOS/UEFI password gap\n'; errors=$((errors+1))
         fi
         grep -q '^SONAR_FETCH_MANIFEST_TSV=' "$self" && printf 'PASS\tFetch manifest module present\n' || { printf 'FAIL\tFetch manifest module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_fetch_profile() {' "$self" && printf 'PASS\tFetch profile function present\n' || { printf 'FAIL\tFetch profile function missing\n'; errors=$((errors+1)); }

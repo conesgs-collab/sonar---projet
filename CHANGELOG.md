@@ -6,6 +6,38 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.6-bios-password-gap-documented] — 2026-09-17
+
+### Contexte
+L'auteur a signalé un trou de couverture : le déblocage de mot de passe
+BIOS/UEFI (superviseur/allumage), distinct du mot de passe de compte
+Windows déjà couvert par `chntpw`.
+
+### Recherché et écarté — CmosPwd (malgré une licence légitime)
+CmosPwd (Christophe Grenier, cgsecurity.org — même auteur/domaine que
+TestDisk/PhotoRec déjà dans ce manifeste) décode/efface le mot de passe
+stocké en CMOS. GPL, provenance vérifiable. **Écarté quand même** :
+téléchargé et testé sur cette machine, **Windows Defender l'a détecté
+et bloqué à l'écriture en temps réel** (`HackTool:Win32/CmosPwd.A`,
+confirmé via `Get-MpThreat`). N'importe quel antivirus sur la machine
+d'un technicien ferait pareil — un outil qu'aucun antivirus ne laisse
+tourner n'a pas sa place ici, licence ou pas. Première fois que ce
+projet écarte un outil pour ce motif précis (utilisabilité réelle) plutôt
+que pour la licence ou la provenance.
+
+### Ajouté — limite documentée (pas d'outil, `sonar_profile_caveat`)
+`password-reset` : même mécanisme que la divulgation de la limite WinPE
+(`--profile password-reset` affiche maintenant "LIMITE CONNUE"). Couvre :
+distinction compte Windows (chntpw, couvert) vs BIOS/UEFI (non couvert) ;
+voies officielles vérifiées par recherche — Dell (code de déverrouillage
+via Service Tag + code de défi, support.dell.com), HP (aucune procédure,
+remplacement de carte mère), Lenovo (aucune procédure pour un mot de
+passe superviseur ThinkPad, service agréé requis) ; et une précision
+souvent absente des guides en ligne : le retrait de pile CMOS efface
+bien le mot de passe sur carte mère de bureau, mais PAS de façon fiable
+sur portable (stockage souvent hors CMOS classique). Test ajouté :
+vérifie que le profil affiche bien cette limite.
+
 ## [3.36.5-catalog-counter-1003-was-never-real] — 2026-09-17
 
 ### Contexte
