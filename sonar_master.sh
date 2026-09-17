@@ -585,17 +585,30 @@ sonar_audit() {
 sonar_verify_hashchain() {
     [[ -s "${SONAR_HASHCHAIN_LOG}" ]] || { echo "[SONAR] Hashchain vide ou absent: ${SONAR_HASHCHAIN_LOG}" >&2; return 1; }
     local prev="GENESIS" ts role event details stored_hash computed_hash lineno=0 broken=0 total=0
-    while IFS=$'\t' read -r ts role event details stored_hash; do
-        lineno=$((lineno+1))
-        [[ -z "${ts:-}" ]] && continue
-        total=$((total+1))
-        computed_hash="$(sonar_hash_str "${prev}|${ts}|${role}|${event}|${details}")" || computed_hash="UNAVAILABLE"
-        if [[ "${computed_hash}" != "${stored_hash}" ]]; then
-            echo "[SONAR][TAMPER] Rupture de chaine a la ligne ${lineno} (event=${event}, ts=${ts})" >&2
-            broken=$((broken+1))
-        fi
-        prev="${stored_hash}"
-    done < "${SONAR_HASHCHAIN_LOG}"
+    # Meme verrou que sonar_audit (flock -x 201 sur le meme fichier .lock),
+    # scope UNIQUEMENT a la lecture ci-dessous — pas a tout sonar_verify_
+    # hashchain, dont le sonar_audit final (hors de ce bloc) prend lui-meme
+    # ce verrou : l'englober aurait cause un auto-blocage (le meme processus
+    # attendant un verrou qu'il detient deja). Sans ce verrou, une
+    # verification concurrente a une ecriture pouvait lire un "prev" hash
+    # incoherent et signaler une rupture qui n'existe pas — un faux positif
+    # couteux en credibilite pour un outil dont l'argument central est "je
+    # detecte la falsification". Trouve par un audit externe, verifie avant
+    # correction.
+    {
+        command -v flock >/dev/null 2>&1 && { flock -x 201 || true; }
+        while IFS=$'\t' read -r ts role event details stored_hash; do
+            lineno=$((lineno+1))
+            [[ -z "${ts:-}" ]] && continue
+            total=$((total+1))
+            computed_hash="$(sonar_hash_str "${prev}|${ts}|${role}|${event}|${details}")" || computed_hash="UNAVAILABLE"
+            if [[ "${computed_hash}" != "${stored_hash}" ]]; then
+                echo "[SONAR][TAMPER] Rupture de chaine a la ligne ${lineno} (event=${event}, ts=${ts})" >&2
+                broken=$((broken+1))
+            fi
+            prev="${stored_hash}"
+        done < "${SONAR_HASHCHAIN_LOG}"
+    } 201>>"${SONAR_HASHCHAIN_LOG}.lock"
     if (( broken == 0 )); then
         echo "[SONAR] Hashchain integre: ${total} entree(s) verifiee(s), aucune rupture."
         sonar_audit "HASHCHAIN_VERIFIED" "entries=${total};status=INTACT"
@@ -4483,6 +4496,24 @@ sonar_self_test_v2() {
         grep -q '^sonar_catalog_seal() {' "$self" && printf 'PASS\tCatalog seal module present\n' || { printf 'FAIL\tCatalog seal module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_post_deploy_verify_final() {' "$self" && printf 'PASS\tPost-deploy verification present\n' || { printf 'FAIL\tPost-deploy verification missing\n'; errors=$((errors+1)); }
         if "$self" --verify-hashchain >/dev/null 2>&1; then printf 'PASS\tHashchain verify smoke test\n'; else printf 'WARN\tHashchain verify smoke test (aucun historique encore)\n'; warnings=$((warnings+1)); fi
+        # Non-regression du flock ajoute 2026-09-17 : peuple un historique
+        # reel (plusieurs entrees, pas juste le cas WARN "vide" ci-dessus)
+        # dans un ROOT isole, verifie que --verify-hashchain le lit
+        # correctement (chemin PASS reel, pas juste "aucun historique").
+        local _hc_dir _hc_out
+        _hc_dir="$(mktemp -d)"
+        # --self-audit est structurel (grep sur le script), n'appelle jamais
+        # sonar_audit : --role-bootstrap + --role-issue-token, eux, ecrivent
+        # chacun une entree reelle.
+        SONAR_ROOT="${_hc_dir}" "$self" --role-bootstrap >/dev/null 2>&1
+        SONAR_ROOT="${_hc_dir}" "$self" --role-issue-token Admin hashchain.selftest.bot 1 >/dev/null 2>&1
+        _hc_out="$(SONAR_ROOT="${_hc_dir}" "$self" --verify-hashchain 2>&1)"
+        if grep -qi 'integre' <<<"${_hc_out}"; then
+            printf 'PASS\tHashchain verify succeeds on a populated, untampered log\n'
+        else
+            printf 'FAIL\tHashchain verify did not confirm an untampered populated log\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_hc_dir}"
         grep -q '^sonar_role_enforce_lock() {' "$self" && printf 'PASS\tRole lock module present\n' || { printf 'FAIL\tRole lock module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_role_bootstrap_secret() {' "$self" && printf 'PASS\tRole secret bootstrap present\n' || { printf 'FAIL\tRole secret bootstrap missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_role_revoke_token() {' "$self" && printf 'PASS\tRole token revocation present\n' || { printf 'FAIL\tRole token revocation missing\n'; errors=$((errors+1)); }
