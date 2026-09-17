@@ -4027,7 +4027,13 @@ sonar_fetch_one_tool() {
         return 0
     fi
     echo "[SONAR] Téléchargement: ${tool} <- ${url}"
-    if ! curl -fL --retry 3 --retry-delay 5 -C - -o "${dest_file}.part" "$url"; then
+    # --connect-timeout/--max-time : sans eux, un serveur qui accepte la
+    # connexion puis ne repond plus (pending indefiniment) bloque --fetch
+    # sans aucun message, sur un reseau instable — deja observe en
+    # pratique cette session (voir CHANGELOG.md). 3600s (1h) laisse le
+    # temps aux plus gros outils du manifeste (SystemRescue, ~1,3 Go) sur
+    # une connexion lente, sans bloquer indefiniment sur un serveur mort.
+    if ! curl -fL --connect-timeout 20 --max-time 3600 --retry 3 --retry-delay 5 -C - -o "${dest_file}.part" "$url"; then
         rm -f "${dest_file}.part"
         echo "[SONAR][ERROR] Échec du téléchargement: ${tool}" >&2
         sonar_audit "FETCH_DOWNLOAD_FAILED" "tool=${tool};url=${url}"
@@ -4725,6 +4731,14 @@ sonar_self_test_v2() {
             printf 'PASS\t--fetch refuses to run against an unsealed manifest (no network attempted)\n'
         else
             printf 'FAIL\t--fetch did not refuse an unsealed manifest as expected\n'; errors=$((errors+1))
+        fi
+        # Structurel plutot qu'un vrai appel reseau (qui ajouterait ~20s a
+        # chaque --self-test pour un serveur injoignable reel) : verifie que
+        # le correctif est present dans la commande curl elle-meme.
+        if grep -qE 'curl -fL --connect-timeout [0-9]+ --max-time [0-9]+' "$self"; then
+            printf 'PASS\tsonar_fetch_one_tool curl call has --connect-timeout/--max-time\n'
+        else
+            printf 'FAIL\tsonar_fetch_one_tool curl call is missing --connect-timeout/--max-time\n'; errors=$((errors+1))
         fi
         SONAR_ROOT="${_fm_dir}" "$self" --role-bootstrap >/dev/null 2>&1
         local _fm_token
