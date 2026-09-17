@@ -6,6 +6,41 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.4-build-secret-warning] — 2026-09-17
+
+### Contexte
+Item [7] du plan de correctifs (audit externe DeepSeek) : le secret HMAC
+de build (`sonar_ensure_build_secret`) est créé silencieusement au
+premier usage — aucune cérémonie, aucune trace d'un « propriétaire » du
+secret. Sur une machine fraîche, le premier utilisateur contrôle la
+racine de confiance. Deux options proposées : (a) exiger un rôle VAULT
+pour créer le secret, (b) avertissement explicite sans changer le
+comportement. Question posée à l'auteur plutôt que tranchée seule, comme
+demandé pour ce point précis du plan.
+
+### Décidé — option (b)
+Option (a) écartée après vérification des points d'appel :
+`sonar_ensure_build_secret` est appelée non seulement par
+`--fetch-manifest-seal` (déjà gaté VAULT depuis 3.36.2), mais aussi par
+`sonar_generate_build_watermark`, exécutée à **chaque `--disk` normal**.
+Exiger VAULT ici aurait cassé le tout premier build sur une machine
+fraîche pour tout Technician self-service — personne n'a de rôle élevé
+avant ce premier build. Un changement bien plus disruptif que ce que ce
+point du plan demandait.
+
+### Corrigé — avertissement explicite à la création
+`sonar_ensure_build_secret` affiche désormais deux lignes `[SONAR]
+[ATTENTION]` lors de la création automatique du secret : quel fichier a
+été créé, et une recommandation de l'administrer explicitement sur une
+machine partagée. Le comportement (création silencieuse au premier
+usage) est inchangé ; seule la transparence change.
+
+Test ajouté : vérifie que `BUILD_SECRET_CREATED` est bien journalisé
+dans `audit.log` lors de la première utilisation (déjà le cas
+fonctionnellement, non testé jusqu'ici). Le test de non-régression
+3.36.2 (`--fetch-manifest-seal` refusé sans jeton) reste vert, inchangé
+par ce correctif.
+
 ## [3.36.3-fetch-timeout-hashchain-flock] — 2026-09-17
 
 ### Contexte

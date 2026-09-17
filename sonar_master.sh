@@ -4343,7 +4343,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.3-fetch-timeout-hashchain-flock"
+SONAR_VERSION="3.36.4-build-secret-warning"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4724,6 +4724,11 @@ sonar_self_test_v2() {
             printf 'PASS\tBuild watermark: generated, verified authentic, tampering detected\n'
         else
             printf 'FAIL\tBuild watermark generation/verification/tamper-detection did not behave as expected\n'; errors=$((errors+1))
+        fi
+        if grep -q 'BUILD_SECRET_CREATED' "${_wm_root}/Secure/Logs/audit.log" 2>/dev/null; then
+            printf 'PASS\tsonar_ensure_build_secret logs BUILD_SECRET_CREATED on first use\n'
+        else
+            printf 'FAIL\tBUILD_SECRET_CREATED was not logged on first use of the build secret\n'; errors=$((errors+1))
         fi
         rm -rf "${_wm_root}" "${_wm_mp}"
         grep -q '^SONAR_PROFILES_TSV=' "$self" && printf 'PASS\tTroubleshooting profiles module present\n' || { printf 'FAIL\tTroubleshooting profiles module missing\n'; errors=$((errors+1)); }
@@ -5513,6 +5518,18 @@ sonar_ensure_build_secret() {
     printf '%s' "$secret" > "${SONAR_BUILD_SECRET_FILE}"
     chmod 600 "${SONAR_BUILD_SECRET_FILE}"
     sonar_audit "BUILD_SECRET_CREATED" "file=${SONAR_BUILD_SECRET_FILE}"
+    # Avertissement explicite plutot qu'un role eleve exige (option (a)
+    # ecartee: sonar_generate_build_watermark() appelle cette fonction a
+    # CHAQUE --disk normal, pas seulement --fetch-manifest-seal — exiger
+    # VAULT ici casserait le premier build sur une machine fraiche pour
+    # tout Technician self-service, personne n'ayant de role eleve avant
+    # le tout premier build). La racine de confiance HMAC est donc
+    # detenue par le premier utilisateur de cette machine : le signaler
+    # clairement au lieu de laisser croire a une ceremonie de creation
+    # plus formelle qu'elle ne l'est. Trouve par un audit externe, option
+    # tranchee avec l'auteur (2026-09-17) plutot que decidee seule.
+    echo "[SONAR][ATTENTION] Secret de build cree automatiquement (premiere utilisation) : ${SONAR_BUILD_SECRET_FILE}" >&2
+    echo "[SONAR][ATTENTION] Sur une machine partagee entre plusieurs personnes, ce secret devrait etre administre explicitement (genere par une seule personne de confiance, distribue hors-bande) plutot que laisse a la premiere invocation venue." >&2
 }
 
 # sonar_build_sign BUILD_ID TS OPERATOR LABEL -> HMAC-SHA256
