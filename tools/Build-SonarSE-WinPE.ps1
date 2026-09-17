@@ -20,8 +20,12 @@
 
     Nécessite Windows, PowerShell, et une élévation administrateur pour
     les deux installateurs ADK (une fenêtre UAC apparaîtra) — copype et
-    MakeWinPEMedia nécessitent aussi des droits administrateur (montage
-    DISM).
+    le montage DISM (menu de réparation, add-on PowerShell) nécessitent
+    aussi des droits administrateur. La génération finale de l'ISO
+    (oscdimg, appelé directement) n'en a PAS besoin — confirmé le
+    2026-09-17 après plusieurs heures de diagnostic : la lancer via
+    élévation produisait des artefacts silencieusement corrompus (voir
+    CHANGELOG.md).
 
 .PARAMETER OutputIso
     Chemin de l'ISO WinPE final. Défaut : .\SONAR-SE-WinPE-amd64.iso
@@ -415,13 +419,101 @@ $OutputIso = [System.IO.Path]::GetFullPath($OutputIso)
 $outputDir = Split-Path $OutputIso -Parent
 if ($outputDir -and -not (Test-Path $outputDir)) { New-Item -ItemType Directory -Force -Path $outputDir | Out-Null }
 
-Write-Host "== Génération de l'ISO (élévation requise) =="
+Write-Host "== Génération de l'ISO =="
 $isoLog = Join-Path $WorkDir "iso_log.txt"
-$cmdline = "/c call `"$setEnvBat`" && MakeWinPEMedia /iso `"$stageDir`" `"$OutputIso`" > `"$isoLog`" 2>&1"
-Start-Process -FilePath "cmd.exe" -ArgumentList $cmdline -Verb RunAs -Wait
+# oscdimg.exe appele DIRECTEMENT, sans passer par MakeWinPEMedia.cmd, et
+# SANS elevation (-Verb RunAs) — root cause confirmee le 2026-09-17 apres
+# plusieurs heures d'isolation : le probleme n'etait ni oscdimg, ni le
+# fichier de destination deja existant, ni un verrou externe (VirtualBox,
+# montage DISM orphelin) — TOUS ecartes par test direct. C'est
+# specifiquement le fait de lancer oscdimg (via MakeWinPEMedia.cmd ou
+# directement) a travers "Start-Process -Verb RunAs" qui produisait soit
+# l'invite interactive fantome "Destination file ... exists, overwrite it
+# [O,N]?" (jamais emise par oscdimg lui-meme en execution directe), soit un
+# ISO au boot.wim inchange malgre un "100% complete" affiche. oscdimg
+# n'ecrit qu'un fichier dans un dossier utilisateur ordinaire — il n'a
+# JAMAIS eu besoin de droits admin ; seul le montage DISM (menu de
+# reparation, plus haut) en a reellement besoin. Execution non-elevee
+# testee et confirmee correcte (boot.wim contient bien le menu) a plusieurs
+# reprises. -bootdata reconstruit nous-memes a partir du dossier bootbins
+# de l'ADK (copype le copie dans <stageDir>\bootbins). Reference :
+# ISOWorker_OscdImgCommand dans MakeWinPEMedia.cmd pour la formule.
+$oscdimgExe = Find-ToolInAdk "oscdimg.exe"
+if (-not $oscdimgExe) { throw "oscdimg.exe introuvable dans l'ADK sous '$AdkRoot'." }
+# copype copie les binaires de boot dans <stageDir>\bootbins (pas dans
+# l'arborescence de l'ADK lui-meme) — meme dossier que MakeWinPEMedia.cmd
+# utilise via %WORKINGDIR%\%BOOTBINS% (BOOTBINS="bootbins" en dur dans ce
+# .cmd). Verifie par test manuel reussi le 2026-09-17.
+$bootbinsDir = Join-Path $stageDir "bootbins"
+$etfsboot = Join-Path $bootbinsDir "etfsboot.com"
+$efisys = Join-Path $bootbinsDir "efisys.bin"
+if (-not (Test-Path $etfsboot) -or -not (Test-Path $efisys)) {
+    throw "Fichiers de boot introuvables sous '$bootbinsDir' (etfsboot.com / efisys.bin) — ADK/add-on WinPE incomplet ou disposition differente."
+}
+if (Test-Path $OutputIso) { Remove-Item -LiteralPath $OutputIso -Force }
+$bootData = "2#p0,e,b`"$etfsboot`"#pEF,e,b`"$efisys`""
+$mediaDir = Join-Path $stageDir "media"
+# oscdimg ecrit sa progression sur stderr — avec $ErrorActionPreference
+# = "Stop" (global, en tete de script), capturer stderr via "2>&1" fait
+# lever une NativeCommandError terminale a la PREMIERE ligne de stderr,
+# meme quand oscdimg reussit au final (code de sortie 0). ErrorAction
+# Continue localement pour ce seul appel evite ça sans affaiblir le
+# Stop global pour le reste du script.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$oscdimgOutput = & $oscdimgExe "-bootdata:$bootData" -u1 -udfver102 $mediaDir $OutputIso 2>&1
+$ErrorActionPreference = $prevEap
+try {
+    $oscdimgOutput | Out-String | Set-Content -Path $isoLog -Encoding UTF8 -ErrorAction Stop
+} catch {
+    Write-Host "(log d'oscdimg non ecrit — fichier verrouille par un reste d'execution precedente, sans rapport avec le resultat ci-dessous)"
+}
 if (-not (Test-Path $OutputIso)) {
     Get-Content $isoLog -ErrorAction SilentlyContinue | Write-Host
     throw "Échec de la génération de l'ISO — voir $isoLog ci-dessus."
+}
+
+if ($AddRepairMenu) {
+    # Verification post-generation indispensable : le bug MakeWinPEMedia.cmd
+    # corrige ci-dessus (destination deja existante -> invite interactive
+    # jamais repondue -> boot.wim non modifie dans l'ISO final) etait
+    # SILENCIEUX — le script rapportait un succes complet (ISO de taille et
+    # hash plausibles) tout en produisant un artefact casse. Seul un boot
+    # reel en VM l'a revele. Remonter l'ISO final et verifier le contenu de
+    # startnet.cmd directement evite de redecouvrir ce genre de bug a la
+    # main a chaque fois.
+    Write-Host "== Verification du menu dans l'ISO final =="
+    $verifyMountDir = Join-Path $WorkDir "verify_final_iso"
+    New-Item -ItemType Directory -Force -Path $verifyMountDir | Out-Null
+    $isoMount = Mount-DiskImage -ImagePath $OutputIso -PassThru
+    $isoVol = $isoMount | Get-Volume
+    $isoDrive = $isoVol.DriveLetter
+    $verifyLog = Join-Path $WorkDir "verify_final_iso.log"
+    $verifyScript = Join-Path $WorkDir "verify_final_iso.cmd"
+    $verifyLines = @(
+        "@echo off"
+        "setlocal enabledelayedexpansion"
+        "call :main > `"$verifyLog`" 2>&1"
+        "exit /b !errorlevel!"
+        ""
+        ":main"
+        "call `"$setEnvBat`""
+        "Dism /Cleanup-Mountpoints"
+        "Dism /Mount-Image /ImageFile:`"${isoDrive}:\sources\boot.wim`" /Index:1 /MountDir:`"$verifyMountDir`" /ReadOnly"
+        "if !errorlevel! neq 0 exit /b 1"
+        "findstr /C:`"SONAR-SE WinPE - Menu de reparation`" `"$verifyMountDir\Windows\System32\startnet.cmd`" >nul"
+        "set FOUND=!errorlevel!"
+        "Dism /Unmount-Image /MountDir:`"$verifyMountDir`" /Discard"
+        "exit /b !FOUND!"
+    )
+    $verifyLines | Set-Content -Path $verifyScript -Encoding ASCII
+    $verifyProc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$verifyScript`"" -Verb RunAs -Wait -PassThru
+    Dismount-DiskImage -ImagePath $OutputIso | Out-Null
+    if ($verifyProc.ExitCode -ne 0) {
+        Get-Content $verifyLog -ErrorAction SilentlyContinue | Write-Host
+        throw "L'ISO generee ($OutputIso) ne contient PAS le menu de reparation attendu dans startnet.cmd — voir le log ci-dessus. Ne pas deployer cet ISO tel quel."
+    }
+    Write-Host "Menu de reparation confirme present dans l'ISO finale."
 }
 
 $hash = (Get-FileHash $OutputIso -Algorithm SHA256).Hash

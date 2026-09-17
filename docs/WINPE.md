@@ -58,17 +58,35 @@ DISM ScanHealth/RestoreHealth, invite libre) au lieu du `cmd.exe` brut —
 le technicien n'a plus besoin de mémoriser la syntaxe exacte de chaque
 commande. Implémenté en simple remplacement de fichier après montage
 DISM (pas de `/Add-Package`), donc non concerné par la limite connue de
-`-IncludePowerShell` ci-dessus. Testé le 2026-09-17 : montage, remplacement
-et démontage/commit réussis, ISO régénérée avec succès (380 Mo, SHA-256
-`6ad61eabac27a9bfe2f15562f4c6a755664ae9cf767494808be4058479ecf3ed`),
-déployée sur la clé physique (vérifié par hash identique via trois outils
-indépendants : `sha256sum` WSL, `sha256sum` Git-Bash, `Get-FileHash`
-PowerShell — la taille/date affichées par certains de ces outils sur la
-clé sont restées incohéremment figées à l'ancienne valeur pendant un
-moment après la copie, cause non identifiée — probablement un cache de
-métadonnées côté pilote de la clé USB — mais le contenu réel, seul ce qui
-compte, est confirmé correct par le hash). **Pas encore testé par un vrai
-boot.** Utiliser `-AddRepairMenu:$false` pour revenir au `cmd.exe` brut.
+`-IncludePowerShell` ci-dessus.
+
+**Bug de génération corrigé le 2026-09-17 (plusieurs heures de diagnostic)**
+Le premier ISO produit ce jour-là (SHA-256 `6ad61eab...`, décrit ici comme
+"testé et déployé") s'est révélé, après un vrai test de boot en VM
+VirtualBox, ne PAS contenir le menu malgré un montage DISM et un
+remplacement de `startnet.cmd` rapportés comme réussis dans le log de
+build. Root cause confirmée par isolation méthodique (chaque hypothèse
+testée et écartée une à une : verrou VirtualBox sur le fichier ISO,
+montages DISM orphelins, absence du flag `/f` sur `MakeWinPEMedia.cmd`,
+fichier de destination déjà existant) : **lancer `oscdimg.exe`
+(directement ou via `MakeWinPEMedia.cmd`) à travers une élévation
+PowerShell (`Start-Process -Verb RunAs`) produisait un ISO dont le
+`boot.wim` restait inchangé**, malgré un "100% complete" affiché par
+oscdimg lui-même. oscdimg n'a jamais eu besoin de droits administrateur
+(il ne fait que lire un dossier et écrire un fichier) ; seuls `copype` et
+le montage DISM en ont réellement besoin. Le script appelle maintenant
+`oscdimg.exe` directement, sans élévation, et **vérifie automatiquement**
+après génération que le menu est bien présent dans le `boot.wim` final
+(remontage + `findstr`) — si ce n'est pas le cas, le script échoue
+bruyamment au lieu de rapporter un faux succès.
+
+Confirmé le 2026-09-17 (après correctif) : ISO régénérée (378,8 Mo,
+SHA-256 `529d841c9dbef6570a0acf64f0a3d6d20f09e37688fd97009cea427acf57f5ff`),
+vérification automatique du menu réussie, déployée sur la clé physique
+(hash identique confirmé côté clé). **Pas encore testé par un vrai boot
+matériel** (seule une vérification de contenu post-génération, pas un
+démarrage réel). Utiliser `-AddRepairMenu:$false` pour revenir au
+`cmd.exe` brut.
 
 **`-IncludePowerShell` (optionnel, désactivé par défaut)** : tente
 d'ajouter PowerShell à l'image (au-delà de cmd.exe/bootrec/bcdedit/

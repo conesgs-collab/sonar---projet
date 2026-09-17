@@ -6,6 +6,71 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.7-winpe-menu-build-fixed] — 2026-09-17
+
+### Contexte
+Le menu de réparation WinPE (3.36.0) rapportait un montage DISM et un
+remplacement de `startnet.cmd` réussis, mais un vrai test de boot en VM
+VirtualBox a montré que le menu n'apparaissait pas — l'ISO déployée
+(SHA-256 `6ad61eab...`) démarrait sur `wpeinit` brut. Plusieurs heures
+de diagnostic méthodique cette session pour isoler la cause exacte,
+plusieurs fausses pistes écartées une à une avant la bonne.
+
+### Diagnostiqué et écarté (dans l'ordre)
+1. Cache de métadonnées côté clé USB — écarté : le bug se reproduisait
+   aussi sur le disque local (`SONAR_SOURCE`), pas seulement sur `E:\`.
+2. `MakeWinPEMedia.cmd` sans le flag `/f` (invite interactive "overwrite
+   it" jamais répondue) — plausible, testé, insuffisant seul : le bug
+   persistait même avec `/f`.
+3. Verrou VirtualBox sur le fichier ISO (VM de test restée allumée avec
+   le fichier attaché en lecteur virtuel) — réel et confirmé (la VM
+   tournait bien avec le fichier attaché), mais insuffisant seul : le
+   bug persistait même après extinction de la VM.
+4. Montages DISM orphelins (plusieurs `check_*_wim` restés montés depuis
+   des diagnostics précédents, verrouillant le `boot.wim` de préparation)
+   — réel, corrigé (`Dism /Unmount-Image` explicite sur chacun), mais
+   insuffisant seul.
+
+### Root cause confirmée
+Appeler `oscdimg.exe` (directement ou via `MakeWinPEMedia.cmd`) à
+travers une élévation PowerShell (`Start-Process -Verb RunAs`)
+produisait un ISO dont le `boot.wim` restait inchangé, malgré un
+"100% complete" affiché par oscdimg lui-même — confirmé par test
+comparatif direct : la même commande, sans élévation, produit un ISO
+correct de façon systématique et reproductible. oscdimg ne fait que lire
+un dossier source et écrire un fichier ISO — il n'a jamais eu besoin de
+droits administrateur ; seuls `copype` et le montage DISM (menu de
+réparation) en ont réellement besoin.
+
+### Corrigé
+`tools/Build-SonarSE-WinPE.ps1` : `oscdimg.exe` appelé directement
+(reconstruction des paramètres `-bootdata` depuis `<stageDir>\bootbins`,
+sans passer par `MakeWinPEMedia.cmd`), sans élévation. Ajouté au passage :
+vérification automatique post-génération (remontage du `boot.wim` final,
+recherche du texte du menu) — si le menu n'est pas présent, le script
+échoue bruyamment au lieu de rapporter un faux succès comme avant. Deux
+bugs PowerShell annexes corrigés en cours de route : `$ErrorActionPreference
+= "Stop"` transformait la sortie stderr normale d'oscdimg (sa barre de
+progression) en erreur terminale (`ErrorAction Continue` localisé autour
+de cet appel) ; l'écriture du log oscdimg pouvait échouer sur un fichier
+verrouillé par un résidu d'exécution précédente (non-bloquant désormais,
+`try/catch`).
+
+### Confirmé
+ISO régénérée (378,8 Mo, SHA-256
+`529d841c9dbef6570a0acf64f0a3d6d20f09e37688fd97009cea427acf57f5ff`),
+vérification automatique du menu réussie, déployée sur la clé physique
+(`E:\ISO\WinPE\`, hash identique confirmé).
+
+### Non résolu
+- Pas encore testé par un vrai boot matériel (seule une vérification de
+  contenu post-génération).
+- Cause exacte de l'échec sous élévation non comprise en profondeur
+  (contournée, pas expliquée) — hypothèse non vérifiée : une différence
+  de contexte utilisateur/jeton d'accès entre le processus élevé et le
+  processus courant affectant la résolution du chemin de destination ou
+  un verrou implicite posé par le sous-système d'élévation lui-même.
+
 ## [3.36.6-bios-password-gap-documented] — 2026-09-17
 
 ### Contexte
