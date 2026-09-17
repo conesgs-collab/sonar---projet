@@ -6,6 +6,66 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.37.0-protect-catalog] — 2026-09-18
+
+### Contexte
+Demande directe (protection contre la "reproduction anarchique" de la
+clé). Rappel physique incontournable : un clone `dd` bit-à-bit d'un
+disque USB bootable en clair est impossible à empêcher techniquement —
+tout ce qui est nécessaire au boot doit rester lisible. L'objectif
+réaliste n'est donc pas "impossible à copier" mais "copie sans valeur" :
+protéger ce qui n'est PAS nécessaire au boot/dépannage plutôt que
+d'ajouter une couche qui casserait Ventoy ou `sonar_field.sh`.
+
+Vérifié avant d'ajouter quoi que ce soit : `Secure/Keys/role_secret.key`
+n'est déjà jamais copié sur la clé (`copy_payload_final` ne copie que
+ISO/Portable/Scripts/Drivers/macOS/manifestes/vault/champ/filigrane) — un
+clone brut n'a donc déjà aucun moyen d'escalader vers Admin/Forensic/
+VAULT. Le filigrane de build (`BUILD_WATERMARK.txt`, HMAC-SHA256 + registre
+local, v3.x antérieure) couvrait déjà la traçabilité. Le seul manque réel :
+`MANIFEST/MANIFEST.tsv` (curation complète — quel outil, pourquoi, SHA-256)
+circule en clair sur toute clé, clonée ou non.
+
+### Corrigé
+`--protect-catalog` (opt-in, rôle VAULT requis) : chiffre
+`MANIFEST/MANIFEST.tsv` en place avec `gpg --symmetric --cipher-algo
+AES256` avant la fin de `copy_payload_final`, retire le fichier en clair.
+Mot de passe jamais en argument — `SONAR_PROTECT_PASSPHRASE` uniquement
+(même discipline que le fix `ai_query_local`/`ollama_query` de la session
+précédente). Validation fail-fast dans `parse_args_final` : `--protect-
+catalog` sans la variable d'environnement arrête le script avant même de
+commencer, plutôt que de déployer silencieusement une clé non protégée.
+Vérifié que ni Ventoy (scanne `/ISO` directement) ni `sonar_field.sh`
+(ne lit que `MANIFEST/PROFILES.tsv`) ne lisent `MANIFEST.tsv` — le
+chiffrer ne casse donc jamais le boot ni le dépannage de terrain.
+Déchiffrable avec le coffre déjà déployé (`Scripts/sonar-vault.sh open`,
+même format gpg AES-256 — aucun nouvel outil à distribuer).
+
+4 nouveaux tests dans `--self-test` (opt-out sans effet par défaut, refus
+sans rôle VAULT, aller-retour chiffrement/déchiffrement réel) + 1 dans
+`--self-audit` (présence de la fonction).
+
+### Trouvé en testant (hors périmètre de la demande, corrigé séparément)
+Le test "refuse sans rôle VAULT" a d'abord échoué à tort : il dépendait
+de `Secure/Policies/policy.tsv`, qui existait déjà sur cette machine avec
+d'ANCIENNES valeurs (`Technician VAULT=RW`) — antérieures au durcissement
+RBAC de la session du 2026-09-17. `sonar_security_init` ne régénère
+jamais un fichier déjà présent, donc ce fichier local (gitignored, jamais
+committé) était resté silencieusement périmé malgré le fix déjà en place
+dans le script : la protection VAULT n'était donc *pas réellement active*
+sur cette installation avant ce test. Fichier supprimé et régénéré avec
+les valeurs correctes ; test durci pour ne plus jamais dépendre d'un
+`policy.tsv` ambiant (`SONAR_POLICY_FILE` pointé explicitement vers une
+racine isolée). **Non résolu** : `sonar_security_init` n'a toujours pas
+de mécanisme de migration/versionning pour détecter un `policy.tsv` local
+périmé sur une installation existante — seul un fichier absent déclenche
+la régénération. Impact réel limité (fichier local non versionné, jamais
+distribué avec la clé), mais reste un angle mort pour toute autre
+installation de développement plus ancienne.
+
+Test : `--self-audit` (19/19) et `--self-test` (77 PASS, 0 FAIL, 3 WARN
+pré-existants sans rapport) exécutés sous WSL après correction.
+
 ## [3.36.12-selftest-stderr-visible] — 2026-09-17
 
 ### Contexte

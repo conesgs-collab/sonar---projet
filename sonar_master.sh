@@ -788,6 +788,15 @@ GENERATE_README="${GENERATE_README:-true}"
 INCLUDE_VENTOY_THEME="${INCLUDE_VENTOY_THEME:-false}"
 SONAR_VENTOY_TITLE="${SONAR_VENTOY_TITLE:-SONAR - SE}"
 SONAR_VENTOY_CREDIT="${SONAR_VENTOY_CREDIT:-Sekou SANOU - Burkina Faso}"
+# Protection anti-reproduction anarchique (2026-09-18) : un clone dd brut de
+# la cle reste toujours possible (media bootable = lisible par definition),
+# donc l'objectif n'est pas de l'empecher mais de le rendre sans valeur pour
+# la curation. MANIFEST.tsv (quel outil, pourquoi, SHA-256) n'est lu ni par
+# Ventoy (qui scanne /ISO directement) ni par sonar_field.sh (qui ne lit que
+# PROFILES.tsv) — le chiffrer ne casse donc jamais le boot/depannage. Opt-in
+# (--protect-catalog), role VAULT requis, mot de passe jamais en argv (voir
+# SONAR_PROTECT_PASSPHRASE, meme discipline que le reste du script).
+SONAR_PROTECT_CATALOG="${SONAR_PROTECT_CATALOG:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 YES="${YES:-false}"
 # This build has never been validated on a real physical boot (Ventoy install
@@ -972,6 +981,17 @@ Autres:
                                 avoir testé sur le matériel cible précis.
   --no-ventoy-theme          Conservé pour compatibilité — sans effet,
                                 c'est déjà le comportement par défaut.
+  --protect-catalog          Chiffre MANIFEST/MANIFEST.tsv (gpg AES-256) sur
+                                la clé — protège la curation (quel outil,
+                                pourquoi, SHA-256) contre une reproduction
+                                anarchique. N'affecte jamais le boot/dépannage
+                                (ni Ventoy ni sonar_field.sh ne lisent ce
+                                fichier). Rôle VAULT requis. Mot de passe
+                                JAMAIS en argument — variable d'environnement
+                                SONAR_PROTECT_PASSPHRASE uniquement. Se
+                                déchiffre sur le terrain avec le coffre déjà
+                                déployé : Scripts/sonar-vault.sh open
+                                MANIFEST/MANIFEST.tsv.gpg MANIFEST/MANIFEST.tsv
   --help|-h                  Afficher cette aide
 
 Commandes indépendantes (à la place de --disk):
@@ -1111,6 +1131,7 @@ parse_final_args() {
             --gpg-key) [[ $# -ge 2 ]] || error_exit "--gpg-key nécessite une valeur."; SONAR_GPG_KEY="$2"; [[ -f "${SONAR_GPG_KEY}" ]] || error_exit "Clé GPG introuvable: ${SONAR_GPG_KEY}"; shift 2 ;;
             --gpg-sig) [[ $# -ge 2 ]] || error_exit "--gpg-sig nécessite une valeur."; SONAR_GPG_SIG="$2"; [[ -f "${SONAR_GPG_SIG}" ]] || error_exit "Signature GPG introuvable: ${SONAR_GPG_SIG}"; shift 2 ;;
             --no-veracrypt) INCLUDE_VERACRYPT=false; shift ;;
+            --protect-catalog) SONAR_PROTECT_CATALOG=true; shift ;;
             --no-logging) INCLUDE_LOGGING=false; shift ;;
             --no-readme) GENERATE_README=false; shift ;;
             --no-ventoy-theme) INCLUDE_VENTOY_THEME=false; shift ;;
@@ -1148,6 +1169,9 @@ parse_final_args() {
     [[ "${PERSISTENCE_COUNT}" =~ ^[0-9]+$ ]] || error_exit "--persistence invalide"
     [[ "${PERSISTENCE_SIZE}" =~ ^[1-9][0-9]*$ ]] || error_exit "--persistence-size invalide"
     [[ "${AI_MODE}" =~ ^(off|auto|local|online)$ ]] || error_exit "--ai invalide: ${AI_MODE}"
+    if [[ "${SONAR_PROTECT_CATALOG}" == "true" && -z "${SONAR_PROTECT_PASSPHRASE:-}" ]]; then
+        error_exit "--protect-catalog nécessite SONAR_PROTECT_PASSPHRASE (jamais en argument, voir --help)."
+    fi
 }
 
 require_cmd_final() {
@@ -1764,6 +1788,7 @@ copy_payload_final() {
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
     sonar_export_field_files "${mp}"
     [[ -s "${SONAR_FIELD_PINS_FILE}" ]] && cp -f "${SONAR_FIELD_PINS_FILE}" "${mp}/MANIFEST/FIELD_PINS.tsv"
+    sonar_protect_catalog_final "${mp}"
     sonar_generate_build_watermark "${mp}"
     unmount_final "${mp}"
 }
@@ -1851,6 +1876,35 @@ esac
 VAULT_EOF
     chmod +x "${dest}/sonar-vault.sh"
     log_ok "Coffre chiffré autonome déployé: Scripts/sonar-vault.sh (gpg AES-256, jamais lié à la persistance/boot)."
+}
+
+# sonar_protect_catalog_final MOUNT_POINT: chiffre en place (gpg AES-256
+# symétrique) le manifeste de curation déjà copié sur la clé
+# (MANIFEST/MANIFEST.tsv -> MANIFEST/MANIFEST.tsv.gpg, plaintext supprimé).
+# Opt-in (--protect-catalog), rôle VAULT requis — même famille de garde-fou
+# que --field-pin-set/--fetch-manifest-seal. N'affecte jamais le boot ni
+# sonar_field.sh (voir commentaire sur SONAR_PROTECT_CATALOG ci-dessus) :
+# seule la table de curation devient illisible sans le mot de passe. Se
+# déchiffre sur le terrain avec le helper déjà déployé (même format gpg) :
+#   Scripts/sonar-vault.sh open MANIFEST/MANIFEST.tsv.gpg MANIFEST/MANIFEST.tsv
+sonar_protect_catalog_final() {
+    local mp="$1" plain out
+    plain="${mp}/MANIFEST/MANIFEST.tsv"
+    out="${plain}.gpg"
+    [[ "${SONAR_PROTECT_CATALOG}" == "true" ]] || return 0
+    sonar_require_role VAULT || { log "[PROTECT] Rôle insuffisant — catalogue laissé en clair."; return 1; }
+    [[ -s "${plain}" ]] || { log "[PROTECT] Rien à protéger (MANIFEST.tsv absent ou vide)."; return 0; }
+    command -v gpg >/dev/null 2>&1 || { log "[PROTECT] gpg introuvable — catalogue laissé en clair."; return 1; }
+    [[ -n "${SONAR_PROTECT_PASSPHRASE:-}" ]] || { log "[PROTECT] SONAR_PROTECT_PASSPHRASE absente — catalogue laissé en clair."; return 1; }
+    if printf '%s' "${SONAR_PROTECT_PASSPHRASE}" | gpg --batch --yes --passphrase-fd 0 --symmetric --cipher-algo AES256 -o "${out}" "${plain}" 2>/dev/null; then
+        rm -f "${plain}"
+        sonar_audit "CATALOG_PROTECTED" "mount=${mp}"
+        log_ok "Catalogue chiffré (gpg AES-256): MANIFEST/MANIFEST.tsv.gpg — plaintext retiré."
+    else
+        rm -f "${out}"
+        log "[PROTECT] Échec du chiffrement gpg — catalogue laissé en clair."
+        return 1
+    fi
 }
 
 # sonar_export_field_files MOUNT_POINT: dépose sur la clé tout ce dont
@@ -4370,6 +4424,7 @@ sonar_structural_self_audit() {
     grep -q '^sonar_forensic_chain_of_custody() {' "$self" && echo 'PASS: chain-of-custody present' || { echo 'FAIL: chain-of-custody missing'; errors=$((errors+1)); }
     grep -q '^sonar_generate_vault_helper() {' "$self" && echo 'PASS: vault helper generator present' || { echo 'FAIL: vault helper generator missing'; errors=$((errors+1)); }
     grep -q '^sonar_generate_build_watermark() {' "$self" && echo 'PASS: build watermark present' || { echo 'FAIL: build watermark missing'; errors=$((errors+1)); }
+    grep -q '^sonar_protect_catalog_final() {' "$self" && echo 'PASS: catalog protection present' || { echo 'FAIL: catalog protection missing'; errors=$((errors+1)); }
     # Garde-fou TSV (item [12], audit externe) : chaque TSV embarque en
     # heredoc doit avoir au moins une tabulation par ligne de donnees. Un
     # editeur qui convertit les tabulations en espaces casse "awk -F'\t'"
@@ -4404,7 +4459,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.12-selftest-stderr-visible"
+SONAR_VERSION="3.37.0-protect-catalog"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4777,6 +4832,62 @@ sonar_self_test_v2() {
         else
             printf 'WARN\tVault helper round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
         fi
+        grep -q '^sonar_protect_catalog_final() {' "$self" && printf 'PASS\tCatalog protection function present\n' || { printf 'FAIL\tCatalog protection function missing\n'; errors=$((errors+1)); }
+        local _pc_mp _pc_root _pc_token
+        _pc_mp="$(mktemp -d)"
+        mkdir -p "${_pc_mp}/MANIFEST"
+        printf 'id\tname\turl\tsha256\n1\ttest-tool\thttp://example.invalid\tabc\n' > "${_pc_mp}/MANIFEST/MANIFEST.tsv"
+        ( SONAR_PROTECT_CATALOG=false; log() { :; }; log_ok() { :; }
+          sonar_protect_catalog_final "${_pc_mp}" ) >/dev/null 2>&1
+        if [[ -s "${_pc_mp}/MANIFEST/MANIFEST.tsv" && ! -e "${_pc_mp}/MANIFEST/MANIFEST.tsv.gpg" ]]; then
+            printf 'PASS\t--protect-catalog opt-out leaves MANIFEST.tsv untouched (default)\n'
+        else
+            printf 'FAIL\t--protect-catalog opt-out changed MANIFEST.tsv when it should not have\n'; errors=$((errors+1))
+        fi
+        _pc_root="$(mktemp -d)"
+        SONAR_ROOT="${_pc_root}" "$self" --role-bootstrap >/dev/null 2>&1
+        # SONAR_ROOT="${_pc_root}" "$self" --security-status materialise un
+        # policy.tsv frais (defauts actuels du script) sous _pc_root, pour
+        # que ce test ne depende jamais d'un policy.tsv deja present ailleurs
+        # sur la machine (trouve en pratique le 2026-09-18 : un policy.tsv
+        # local perime, genere avant le durcissement RBAC de cette session,
+        # accordait encore VAULT=RW a Technician — sonar_security_init ne
+        # regenere jamais un fichier deja present, donc un ancien
+        # Secure/Policies/policy.tsv reste silencieusement perime tant qu'il
+        # n'est pas supprime manuellement).
+        SONAR_ROOT="${_pc_root}" "$self" --security-status >/dev/null 2>&1
+        ( SONAR_PROTECT_CATALOG=true; SONAR_PROTECT_PASSPHRASE="pw123"; SONAR_ROLE=Technician; SONAR_ROLE_TOKEN=""
+          SONAR_ROLE_SECRET_FILE="${_pc_root}/Secure/Keys/role_secret.key"
+          SONAR_POLICY_FILE="${_pc_root}/Secure/Policies/policy.tsv"
+          log() { :; }; log_ok() { :; }
+          sonar_protect_catalog_final "${_pc_mp}" ) >/dev/null 2>&1
+        if [[ -s "${_pc_mp}/MANIFEST/MANIFEST.tsv" && ! -e "${_pc_mp}/MANIFEST/MANIFEST.tsv.gpg" ]]; then
+            printf 'PASS\t--protect-catalog refuses without a VAULT-capable role (catalog left in clear)\n'
+        else
+            printf 'FAIL\t--protect-catalog proceeded without a VAULT-capable role\n'; errors=$((errors+1))
+        fi
+        if command -v gpg >/dev/null 2>&1; then
+            _pc_token="$(SONAR_ROOT="${_pc_root}" "$self" --role-issue-token Admin protectcatalog.selftest.bot 1 2>/dev/null)"
+            ( SONAR_PROTECT_CATALOG=true; SONAR_PROTECT_PASSPHRASE="pw123"; SONAR_ROLE=Admin; SONAR_ROLE_TOKEN="${_pc_token}"
+              SONAR_ROLE_SECRET_FILE="${_pc_root}/Secure/Keys/role_secret.key"
+              SONAR_POLICY_FILE="${_pc_root}/Secure/Policies/policy.tsv"
+              log() { :; }; log_ok() { :; }; sonar_audit() { :; }
+              sonar_protect_catalog_final "${_pc_mp}" ) >/dev/null 2>&1
+            local _pc_out
+            _pc_out="$(mktemp)"
+            if [[ ! -s "${_pc_mp}/MANIFEST/MANIFEST.tsv" ]] && [[ -s "${_pc_mp}/MANIFEST/MANIFEST.tsv.gpg" ]] \
+               && ! grep -q 'test-tool' "${_pc_mp}/MANIFEST/MANIFEST.tsv.gpg" 2>/dev/null \
+               && printf 'pw123\n' | gpg --batch --yes --passphrase-fd 0 --decrypt -o "${_pc_out}" "${_pc_mp}/MANIFEST/MANIFEST.tsv.gpg" >/dev/null 2>&1 \
+               && grep -q 'test-tool' "${_pc_out}"; then
+                printf 'PASS\t--protect-catalog with VAULT-capable role encrypts MANIFEST.tsv (plaintext removed, decrypts back correctly)\n'
+            else
+                printf 'FAIL\t--protect-catalog with a valid role did not produce a correct encrypted catalog\n'; errors=$((errors+1))
+            fi
+            rm -f "${_pc_out}"
+        else
+            printf 'WARN\t--protect-catalog encrypt/decrypt round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
+        fi
+        rm -rf "${_pc_mp}" "${_pc_root}"
         # Ventoy theme : verifie que "file" dans ventoy.json pointe vers
         # theme.txt (script GRUB2), pas directement vers l'image PNG —
         # cause racine du crash "alloc magic is broken" identifiee le

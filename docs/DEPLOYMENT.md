@@ -272,6 +272,37 @@ copie :
   (voir v3.10.0)
 - Le fond d'écran Ventoy personnalisé, s'il y en a un — voir ci-dessous.
 
+### Protéger le catalogue contre une reproduction anarchique
+
+Un clone `dd` bit-à-bit de la clé reste toujours possible (media bootable
+= lisible par définition) — l'objectif de `--protect-catalog` n'est donc
+pas d'empêcher la copie, mais de rendre un clone sans valeur du point de
+vue de la curation. Avec `--protect-catalog` (rôle VAULT requis,
+`SONAR_PROTECT_PASSPHRASE` en variable d'environnement — **jamais** en
+argument) :
+
+```bash
+sudo SONAR_ROLE=Admin SONAR_ROLE_TOKEN="<jeton>" \
+    SONAR_PROTECT_PASSPHRASE="<mot de passe distribué aux clients légitimes>" \
+    ./sonar_master.sh --disk /dev/sdX --source ./SONAR_SOURCE --yes \
+    --accept-hardware-risk --protect-catalog
+```
+
+`MANIFEST/MANIFEST.tsv` (quel outil, pourquoi, SHA-256 — la vraie curation)
+est chiffré en place (gpg AES-256) et le fichier en clair retiré. Sans
+effet sur le boot ou le dépannage : ni Ventoy (qui scanne `/ISO`
+directement) ni `sonar_field.sh` (qui ne lit que `MANIFEST/PROFILES.tsv`)
+n'en dépendent. Se déchiffre sur le terrain avec le coffre déjà déployé :
+
+```bash
+Scripts/sonar-vault.sh open MANIFEST/MANIFEST.tsv.gpg MANIFEST/MANIFEST.tsv
+```
+
+Ce que ça protège déjà **sans rien activer** : `Secure/Keys/role_secret.key`
+n'est jamais copié sur la clé — un clone brut reste bloqué en
+Technician/Viewer (lecture/diagnostic), aucune escalade possible vers
+Admin/Forensic/VAULT.
+
 ### Personnaliser le fond d'écran Ventoy
 
 **Désactivé par défaut depuis le 2026-09-15** (`--ventoy-theme` pour

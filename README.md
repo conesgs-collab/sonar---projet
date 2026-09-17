@@ -94,6 +94,22 @@ Ne fonctionne que sur la machine possédant le secret de watermark local —
 c'est le point : sur une autre machine, les métadonnées restent lisibles
 mais l'authenticité n'est pas confirmable.
 
+## Catalogue protégé (`--protect-catalog`)
+
+Même limite physique que ci-dessus : rien n'empêche un clone brut de la
+clé. `--protect-catalog` (rôle VAULT requis) chiffre en place
+`MANIFEST/MANIFEST.tsv` — la curation complète (quel outil, pourquoi,
+SHA-256) — avec gpg AES-256, sans jamais toucher au boot ni au dépannage
+(ni Ventoy ni `sonar_field.sh` n'en dépendent). Un clone anarchique perd
+la curation ; il garde le boot/dépannage fonctionnel. Mot de passe
+toujours en variable d'environnement (`SONAR_PROTECT_PASSPHRASE`), jamais
+en argument. Voir `docs/DEPLOYMENT.md`, section « Protéger le catalogue
+contre une reproduction anarchique ».
+
+Rappel déjà vrai sans rien activer : `Secure/Keys/role_secret.key` n'est
+jamais copié sur la clé — un clone brut reste bloqué en
+Technician/Viewer, sans accès Admin/Forensic/VAULT.
+
 ## Avant tout déploiement réel sur disque
 
 Guide détaillé, étape par étape : [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
