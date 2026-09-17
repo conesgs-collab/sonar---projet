@@ -6,6 +6,44 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.5-catalog-counter-1003-was-never-real] — 2026-09-17
+
+### Contexte
+Un audit externe (DeepSeek) a demandé la construction d'un script de
+vérification permanent pour le compteur "981 vs 1003" — sans savoir
+que le correctif README/sonar_master.sh (voir 981 outils plus haut,
+commit `dae77fd`) avait déjà eu lieu dans cette même session. En
+vérifiant l'état actuel avant de construire cet outil, `docs/CATALOG.md`
+s'est révélé être le seul fichier vivant manqué par ce premier
+correctif (toujours à 1003 à deux endroits, plus une liste de 7 profils
+au lieu de 9 — même angle mort que README.md avant correction).
+
+### Corrigé — mesure directe sur l'historique Git, pas sur une affirmation
+Mesuré le heredoc `SONAR_CATALOGUE_EMBEDDED` sur plusieurs commits de
+l'historique (`20b766c` premier boot physique réussi, `e87379a`,
+`f167395`, `8a5973e`, HEAD~1) : **981 lignes de données partout,
+jamais 1003**. La ligne CHANGELOG affirmant "981 → 1003 (mesuré via
+--catalog-download-resolve)" ne correspond à aucun état réel retrouvé
+dans cet historique — origine non identifiée, possiblement une mesure
+faite sur la lignée de développement divergente mentionnée ailleurs
+dans ce fichier (`SONAR_PROJECT_v3.11.0.zip`), jamais ce dépôt-ci.
+Traité comme une correction de compteur erroné, pas comme la
+suppression d'entrées réelles à tracer (aucune preuve que le catalogue
+ait jamais compté 1003 entrées ici).
+
+`docs/CATALOG.md` : "1003 outils" → "981 outils" (deux occurrences),
+liste des 7 profils → 9 (même distinction dépannage/distributions
+généralistes que README.md). `sonar_master.sh` (`--help`, section
+`--profile`) : même correction, une occurrence manquée par le
+correctif précédent.
+
+### Non résolu
+- L'outil de vérification permanent demandé par l'audit externe
+  (`check-catalog-counter.sh`) n'a pas été construit — la correction
+  manuelle, une fois vérifiée par mesure directe, a rendu le problème
+  immédiat sans objet. Pourrait avoir de la valeur comme garde-fou
+  anti-régression future (CI/pre-commit), pas traité comme urgent ici.
+
 ## [3.36.4-build-secret-warning] — 2026-09-17
 
 ### Contexte

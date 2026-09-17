@@ -995,7 +995,7 @@ Commandes indépendantes (à la place de --disk):
                                 password-reset|hardware-diagnostic|
                                 peripherals-network|general-os|full —
                                 scénario, outils, et POURQUOI ceux-là (pas le
-                                catalogue 1003, qui n'est qu'une base de
+                                catalogue 981, qui n'est qu'une base de
                                 connaissance). peripherals-network et
                                 general-os sont différents des autres par
                                 nature : peripherals-network s'utilise depuis
@@ -4343,7 +4343,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.4-build-secret-warning"
+SONAR_VERSION="3.36.5-catalog-counter-1003-was-never-real"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

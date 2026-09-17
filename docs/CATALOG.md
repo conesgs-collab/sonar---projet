@@ -25,26 +25,39 @@ ce catalogue de référence — l'ajout de CAINE/DEFT/Tsurugi/SIFT au domaine
 « Forensic disque » ne change rien à ce que SONAR embarque par défaut.
 
 **Recentrage (2026-09-15) : base de connaissance, pas source de vérité.**
-Depuis `--profile`, ce catalogue (1003 outils au 2026-09-16, en légère
-croissance depuis le gel initial à 981) reste une référence consultable.
-Ce qui va réellement sur la clé par défaut est décidé par un petit
-nombre de profils de dépannage fermés et documentés — scénario, outils,
-et pourquoi ceux-là précisément :
+Depuis `--profile`, ce catalogue (981 outils, gelé) reste une référence
+consultable. Ce qui va réellement sur la clé par défaut est décidé par
+un petit nombre de profils de dépannage fermés et documentés — scénario,
+outils, et pourquoi ceux-là précisément :
 
 ```bash
-./sonar_master.sh --profile                    # vue d'ensemble des 7 profils
+./sonar_master.sh --profile                    # vue d'ensemble des 9 profils
 ./sonar_master.sh --profile boot-repair        # détail (scénario + outils + justification)
 ```
 
-Profils disponibles : `boot-repair`, `data-recovery`, `malware`,
-`disk-clone`, `password-reset`, `hardware-diagnostic`, `full` (union des
-six précédents). Voir `ROADMAP.md` pour l'étape suivante (`--fetch`,
-téléchargement vérifié par manifeste signé).
+Profils de dépannage : `boot-repair`, `data-recovery`, `malware`,
+`disk-clone`, `password-reset`, `hardware-diagnostic`,
+`peripherals-network`. Profil de distributions généralistes (pas liées
+à un scénario de réparation) : `general-os`. Et `full`, l'union de tous.
+Voir `ROADMAP.md` pour l'étape suivante (`--fetch`, téléchargement
+vérifié par manifeste signé).
 
 ## Statistiques
 
 - **73 domaines**
-- **1003 outils/composants** recensés au total (2026-09-16)
+- **981 outils/composants** recensés au total
+
+**Note (2026-09-17)** : une entrée CHANGELOG antérieure (recherche
+`--catalog-download-resolve`) affirmait un passage 981 → 1003, propagé
+ici et dans README.md/sonar_master.sh. Mesure directe du heredoc
+`SONAR_CATALOGUE_EMBEDDED` sur l'historique Git (plusieurs commits,
+jusqu'au premier boot physique réussi) : **981 partout, jamais 1003**.
+Origine du chiffre 1003 non retrouvée — possiblement une mesure faite
+sur une lignée de développement divergente (voir la note sur les
+scripts recuperes dans ROADMAP.md) plutôt qu'une régression réelle de ce
+dépôt. Traité comme une correction de compteur (le chiffre affirmé
+ailleurs corrigé pour matcher la mesure directe), pas comme une
+suppression d'entrées à tracer.
 
 ## Résumé par domaine (nombre d'outils)
 
