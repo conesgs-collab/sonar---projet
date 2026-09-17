@@ -6,6 +6,48 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.3-fetch-timeout-hashchain-flock] — 2026-09-17
+
+### Contexte
+Suite du plan de correctifs issu de l'audit externe (DeepSeek), items
+de robustesse opérationnelle (priorité 2 du plan).
+
+### Corrigé — `sonar_fetch_one_tool` sans timeout réseau
+`curl -fL --retry 3 --retry-delay 5 -C -` n'avait ni `--connect-timeout`
+ni `--max-time`. Sur un réseau instable (contexte réel constaté cette
+session), un serveur qui accepte la connexion puis ne répond plus
+bloquait `--fetch` indéfiniment, sans message. Ajouté :
+`--connect-timeout 20 --max-time 3600` (1h — suffisant pour le plus
+gros outil du manifeste, SystemRescue ~1,3 Go, sur une connexion
+lente). Test ajouté : vérification structurelle de la présence des
+deux options dans l'appel curl.
+
+### Corrigé — `sonar_verify_hashchain` sans `flock`
+`sonar_audit` prend un `flock -x 201` avant d'écrire une entrée ;
+`sonar_verify_hashchain` lisait le même fichier sans ce verrou — une
+vérification concurrente à une écriture pouvait lire un état
+intermédiaire incohérent et signaler une rupture inexistante (faux
+positif). Corrigé avec le même verrou, scopé à la seule boucle de
+lecture (l'englober dans tout `sonar_verify_hashchain` aurait causé un
+auto-blocage : le `sonar_audit` final de la fonction prend lui-même ce
+verrou). Test ajouté : peuple un hashchain réel dans un ROOT isolé,
+vérifie que la vérification confirme un log non-altéré.
+
+### Découvert en testant (sans rapport avec le correctif ci-dessus)
+Le hashchain local de développement (`Secure/Logs/`, gitignore, jamais
+commité) contenait une **corruption physique réelle** : un bloc de
+plusieurs centaines d'octets nuls insérés entre deux entrées légitimes
+du 16/09 (14h07 → 18h16) — signature typique d'une écriture interrompue
+brutalement (un des nombreux processus tués/plantés cette session,
+probablement pendant un `--fetch` la veille). Le mécanisme de détection
+a correctement signalé la rupture — preuve qu'il fonctionne. En creusant
+manuellement, une erreur d'isolation `SONAR_ROOT` dans une commande de
+debug ad-hoc (hors self-test) a aussi pollué ce même journal avec deux
+fausses entrées de test. Les deux (corruption + pollution) sauvegardées
+puis le journal réinitialisé localement — données de développement, pas
+des preuves d'un déploiement terrain réel ; aucun impact sur ce dépôt
+Git (fichiers gitignore).
+
 ## [3.36.2-vault-role-enforced] — 2026-09-17
 
 ### Contexte
