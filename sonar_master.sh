@@ -4404,7 +4404,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.11-tsv-tab-guard"
+SONAR_VERSION="3.36.12-selftest-stderr-visible"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4597,13 +4597,24 @@ sonar_self_test_v2() {
         grep -q '^sonar_forensic_acquire() {' "$self" && printf 'PASS\tForensic acquisition module present\n' || { printf 'FAIL\tForensic acquisition module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_clone_guarded() {' "$self" && printf 'PASS\tClone safety guard present\n' || { printf 'FAIL\tClone safety guard missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_module_status_v23() {' "$self" && printf 'PASS\tModule status present\n' || { printf 'FAIL\tModule status missing\n'; errors=$((errors+1)); }
-        if "$self" --module-status >/dev/null 2>&1; then printf 'PASS\tModule status smoke test\n'; else printf 'FAIL\tModule status smoke test\n'; errors=$((errors+1)); fi
-        if "$self" --recovery-execute collect >/dev/null 2>&1; then printf 'PASS\tRecovery collect smoke test\n'; else printf 'FAIL\tRecovery collect smoke test\n'; errors=$((errors+1)); fi
+        # stderr capture (2>&1 >/dev/null, dans cet ordre) plutot que
+        # >/dev/null 2>&1 pour ces 3 smoke tests specifiquement : un echec
+        # ici est une REGRESSION potentielle (pas un cas volontairement
+        # invalide comme les tests "rejette X" plus bas), donc la cause
+        # merite d'etre visible dans le rapport plutot que noyee comme
+        # avant le correctif du bug BASH_SOURCE[0] (v3.36.0) — retire le
+        # 2>/dev/null seulement ou l'echec silencieux n'est PAS le
+        # comportement attendu (item [13], audit externe).
+        _st_err="$("$self" --module-status 2>&1 >/dev/null)"; _st_rc=$?
+        if [[ $_st_rc -eq 0 ]]; then printf 'PASS\tModule status smoke test\n'; else printf 'FAIL\tModule status smoke test%s\n' "${_st_err:+ (stderr: ${_st_err})}"; errors=$((errors+1)); fi
+        _st_err="$("$self" --recovery-execute collect 2>&1 >/dev/null)"; _st_rc=$?
+        if [[ $_st_rc -eq 0 ]]; then printf 'PASS\tRecovery collect smoke test\n'; else printf 'FAIL\tRecovery collect smoke test%s\n' "${_st_err:+ (stderr: ${_st_err})}"; errors=$((errors+1)); fi
         grep -q '^sonar_smart_advisor() {' "$self" && printf 'PASS\tSmart Advisor module present\n' || { printf 'FAIL\tSmart Advisor module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_verify_hashchain() {' "$self" && printf 'PASS\tHashchain verification present\n' || { printf 'FAIL\tHashchain verification missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_catalog_seal() {' "$self" && printf 'PASS\tCatalog seal module present\n' || { printf 'FAIL\tCatalog seal module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_post_deploy_verify_final() {' "$self" && printf 'PASS\tPost-deploy verification present\n' || { printf 'FAIL\tPost-deploy verification missing\n'; errors=$((errors+1)); }
-        if "$self" --verify-hashchain >/dev/null 2>&1; then printf 'PASS\tHashchain verify smoke test\n'; else printf 'WARN\tHashchain verify smoke test (aucun historique encore)\n'; warnings=$((warnings+1)); fi
+        _st_err="$("$self" --verify-hashchain 2>&1 >/dev/null)"; _st_rc=$?
+        if [[ $_st_rc -eq 0 ]]; then printf 'PASS\tHashchain verify smoke test\n'; else printf 'WARN\tHashchain verify smoke test (aucun historique encore%s)\n' "${_st_err:+ ; stderr: ${_st_err}}"; warnings=$((warnings+1)); fi
         # Non-regression du flock ajoute 2026-09-17 : peuple un historique
         # reel (plusieurs entrees, pas juste le cas WARN "vide" ci-dessus)
         # dans un ROOT isole, verifie que --verify-hashchain le lit

@@ -6,6 +6,40 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.12-selftest-stderr-visible] — 2026-09-17
+
+### Contexte
+Item [13] du plan de correctifs (audit externe DeepSeek) : des dizaines
+de sous-tests de `sonar_self_test_v2` invoquent `"$self" --flag`
+avec `2>/dev/null` — c'est précisément ce mécanisme qui a masqué le bug
+`BASH_SOURCE[0]` (3.36.0) pendant plusieurs versions : l'échec réel
+partait silencieusement sur stderr, et le rapport ne montrait qu'un
+`FAIL` sans cause.
+
+### Analysé avant de corriger
+Deux motifs différents cohabitent : (a) `2>&1` (capture stdout+stderr
+ensemble dans une variable) — déjà visible, rien à faire ; (b)
+`>/dev/null 2>&1` en test booléen `if ... ; then PASS ; else FAIL` — ce
+motif-là perd vraiment stderr. Seulement **7 occurrences exactes** de
+(b) dans tout le fichier ; parmi elles, 4 sont des tests qui **attendent**
+un échec par construction (profil invalide, jeton absent...) — y
+afficher stderr n'aiderait pas au diagnostic (l'échec EST le résultat
+correct). Les **3 restantes** sont des smoke tests où un succès est le
+résultat normal — un échec y est une régression potentielle qui mérite
+d'être expliquée.
+
+### Corrigé
+`--module-status`, `--recovery-execute collect`, `--verify-hashchain` :
+stderr capturé (`2>&1 >/dev/null`, dans cet ordre — capture stderr seul
+sans re-exécuter la commande) et affiché entre parenthèses si le test
+échoue. Les 4 tests "attend un échec" et les nombreux `2>&1`/`2>/dev/null`
+sur simple capture de sortie propre (jetons, JSON) laissés inchangés —
+retirer la suppression seulement là où l'échec silencieux n'est PAS le
+comportement attendu, comme demandé par ce point du plan.
+
+Test : simulé un échec avec message stderr, confirmé que le message
+apparaît bien dans le `FAIL` au lieu de disparaître.
+
 ## [3.36.11-tsv-tab-guard] — 2026-09-17
 
 ### Contexte
