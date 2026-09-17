@@ -6,6 +6,40 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.36.10-selftest-extraction-guarded] — 2026-09-17
+
+### Contexte
+Item [11] du plan de correctifs (audit externe DeepSeek) : les ~12
+sous-tests de `sonar_self_test_v2` qui isolent une fonction unique
+utilisent `source <(sed -n '/^func() {/,/^}/p' "$self")`. Fonctionne
+aujourd'hui, mais casserait silencieusement si un heredoc À L'INTÉRIEUR
+de la fonction contenait un `}` en début de ligne : la plage `sed` se
+refermerait prématurément, `source` chargerait une fonction tronquée
+(syntaxiquement invalide en isolation — heredoc jamais fermé), et le
+sous-test tournerait sur un comportement partiel au lieu de la fonction
+réelle.
+
+### Corrigé
+Nouvelle fonction `sonar_selftest_extract_fn SELF FUNCNAME` : fait la
+même extraction `sed`, mais vérifie que l'extrait n'est pas vide,
+contient bien l'en-tête `FUNCNAME() {`, et passe `bash -n` — sinon
+échoue bruyamment (message sur stderr, code de sortie non nul) au lieu
+de laisser passer un extrait tronqué. Les 12 points d'appel remplacés
+uniformément (`source <(sed -n ...)` → `source <(sonar_selftest_extract_fn
+"$self" FUNCNAME)`).
+
+Option alternative du plan (`if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+main_final "$@"; fi` + sourcer tout le script) écartée : changement
+d'architecture bien plus large pour un gain équivalent — le garde-fou
+ciblé résout le risque réel sans toucher à la structure d'exécution du
+script.
+
+Test ajouté (vérification manuelle, pas dans le self-test lui-même :
+tester le garde-fou DANS le harnais qu'il garde serait circulaire) :
+simulé un fichier avec une fonction contenant un heredoc `}` en début de
+ligne — confirmé que l'extrait brut serait tronqué (comme décrit) et que
+`sonar_selftest_extract_fn` le détecte et refuse de le sourcer.
+
 ## [3.36.9-ai-prompt-stdin-not-argv] — 2026-09-17
 
 ### Contexte

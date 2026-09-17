@@ -4381,7 +4381,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.36.9-ai-prompt-stdin-not-argv"
+SONAR_VERSION="3.36.10-selftest-extraction-guarded"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4479,6 +4479,37 @@ sonar_diagnostic_report() {
     sonar_audit "DIAGNOSTIC_REPORT" "report=${out}"
     echo "[SONAR] Diagnostic: $out"
     echo "[SONAR] Hardware TSV: $inv"
+}
+
+# sonar_selftest_extract_fn SELF FUNCNAME: extrait le corps de FUNCNAME
+# depuis le fichier SELF via sed ('/^FUNCNAME() {/,/^}/p'), et imprime
+# l'extrait sur stdout SEULEMENT s'il est non vide, contient bien l'en-tete
+# "FUNCNAME() {" et passe "bash -n" — sinon echoue bruyamment (message sur
+# stderr, code de sortie non nul) au lieu de laisser un `source <(...)`
+# vide ou tronque passer silencieusement. Risque theorique que ca evite :
+# un heredoc a l'interieur de FUNCNAME contenant "}" en debut de ligne
+# refermerait prematurement la plage sed, produisant une fonction tronquee
+# qui reste syntaxiquement valide (bash -n ne le detecterait pas non plus
+# dans ce cas precis) mais fait moins que prevu — le test tournerait alors
+# sur un comportement partiel et pourrait passer par accident. Utilise par
+# les ~12 sous-tests de sonar_self_test_v2 qui isolent une fonction unique
+# plutot que de sourcer tout le script (evite d'executer main_final).
+sonar_selftest_extract_fn() {
+    local self="$1" fn="$2" body
+    body="$(sed -n "/^${fn}() {/,/^}/p" "$self")"
+    if [[ -z "$body" ]]; then
+        echo "sonar_selftest_extract_fn: extraction vide pour '${fn}'" >&2
+        return 1
+    fi
+    if ! grep -q "^${fn}() {" <<<"$body"; then
+        echo "sonar_selftest_extract_fn: en-tete de '${fn}' absent de l'extrait" >&2
+        return 1
+    fi
+    if ! bash -n <<<"$body" 2>/dev/null; then
+        echo "sonar_selftest_extract_fn: extrait de '${fn}' invalide (bash -n)" >&2
+        return 1
+    fi
+    printf '%s\n' "$body"
 }
 
 sonar_self_test_v2() {
@@ -4698,7 +4729,7 @@ sonar_self_test_v2() {
         if command -v gpg >/dev/null 2>&1; then
             local _vh_dir _vh_src _vh_enc _vh_out
             _vh_dir="$(mktemp -d)"
-            ( source <(sed -n '/^sonar_generate_vault_helper() {/,/^}/p' "$self"); log_ok() { :; }; sonar_generate_vault_helper "${_vh_dir}" ) >/dev/null 2>&1
+            ( source <(sonar_selftest_extract_fn "$self" sonar_generate_vault_helper); log_ok() { :; }; sonar_generate_vault_helper "${_vh_dir}" ) >/dev/null 2>&1
             _vh_src="${_vh_dir}/plain.txt"; _vh_enc="${_vh_dir}/v.enc"; _vh_out="${_vh_dir}/plain_out.txt"
             echo "selftest-vault-content" > "${_vh_src}"
             printf 'pw123\npw123\n' | "${_vh_dir}/sonar-vault.sh" create "${_vh_src}" "${_vh_enc}" >/dev/null 2>&1
@@ -4725,7 +4756,7 @@ sonar_self_test_v2() {
         ( SOURCE_DIR="${_vt_src}"; SONAR_ROOT="${_vt_src}"; INCLUDE_VENTOY_THEME=true
           SONAR_VENTOY_TITLE="Test"; SONAR_VENTOY_CREDIT="Test"
           log() { :; }; sonar_audit() { :; }
-          source <(sed -n '/^sonar_prepare_ventoy_theme() {/,/^}/p' "$self")
+          source <(sonar_selftest_extract_fn "$self" sonar_prepare_ventoy_theme)
           sonar_prepare_ventoy_theme "${_vt_mp}" ) >/dev/null 2>&1
         if [[ -s "${_vt_mp}/ventoy/theme/theme.txt" ]] && grep -q 'desktop-image' "${_vt_mp}/ventoy/theme/theme.txt" && [[ -s "${_vt_mp}/ventoy/theme/background.png" ]]; then
             printf 'PASS\tVentoy theme.txt generated with desktop-image directive\n'
@@ -4733,7 +4764,7 @@ sonar_self_test_v2() {
             printf 'FAIL\tVentoy theme.txt missing or malformed\n'; errors=$((errors+1))
         fi
         ( PERSISTENCE_COUNT=0
-          source <(sed -n '/^generate_ventoy_json_final() {/,/^}/p' "$self")
+          source <(sonar_selftest_extract_fn "$self" generate_ventoy_json_final)
           generate_ventoy_json_final "${_vt_mp}" ) >/dev/null 2>&1
         _vt_json="${_vt_mp}/ventoy/ventoy.json"
         if [[ -s "${_vt_json}" ]] && grep -q '"file": "/ventoy/theme/theme.txt"' "${_vt_json}"; then
@@ -4753,15 +4784,15 @@ sonar_self_test_v2() {
           SONAR_HASHCHAIN_LOG="${SONAR_SECURITY_DIR}/Logs/hashchain.log"
           mkdir -p "${SONAR_SECURITY_DIR}/Logs"
           SONAR_ROLE="Technician"; SONAR_ROLE_IDENTITY="wm.trace.bot"; VOL="SELFTEST-USB"
-          source <(sed -n '/^sonar_hash_str() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_hmac_sha256_file() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_const_time_eq() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_audit() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_build_secret_exists() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_ensure_build_secret() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_build_sign() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_generate_build_watermark() {/,/^}/p' "$self")
-          source <(sed -n '/^sonar_verify_build_watermark() {/,/^}/p' "$self")
+          source <(sonar_selftest_extract_fn "$self" sonar_hash_str)
+          source <(sonar_selftest_extract_fn "$self" sonar_hmac_sha256_file)
+          source <(sonar_selftest_extract_fn "$self" sonar_const_time_eq)
+          source <(sonar_selftest_extract_fn "$self" sonar_audit)
+          source <(sonar_selftest_extract_fn "$self" sonar_build_secret_exists)
+          source <(sonar_selftest_extract_fn "$self" sonar_ensure_build_secret)
+          source <(sonar_selftest_extract_fn "$self" sonar_build_sign)
+          source <(sonar_selftest_extract_fn "$self" sonar_generate_build_watermark)
+          source <(sonar_selftest_extract_fn "$self" sonar_verify_build_watermark)
           log() { :; }; log_ok() { :; }
           local _rc
           if sonar_generate_build_watermark "${_wm_mp}" >/dev/null 2>&1; then :; fi
