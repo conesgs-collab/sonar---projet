@@ -6,6 +6,51 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.38.0-kali-installer] — 2026-09-18
+
+### Contexte
+Répond au "Non résolu" de [3.30.0] : remplacement d'un vrai Kali Linux
+bootable, jamais retrouvé depuis que `kali-linux-2026.2-virtualbox-
+amd64.7z` (appliance VirtualBox, jamais bootable par Ventoy) a été
+écarté.
+
+### Recherché avant de trancher
+Confirmé sur deux sources officielles indépendantes (`cdimage.kali.org`
+et `kali.org/get-kali`) : l'image **live** amd64 (bureau pentest complet
+pret a l'emploi au demarrage) n'est distribuee par Kali **qu'en
+torrent** — aucune URL HTTP directe n'existe pour elle, sur aucun miroir
+officiel. C'est une politique de distribution deliberee de Kali, pas une
+panne ou un miroir manquant a chercher plus longtemps — la piste
+"trouver un miroir HTTP pour le live" est un cul-de-sac confirme, pas
+juste inexploree.
+
+### Corrigé
+Ajout de l'image **installer** amd64 (`kali-linux-2026.2-installer-
+amd64.iso`, 4,5 Go) au manifeste `--fetch` et au profil `general-os` —
+c'est la seule variante Kali disponible en HTTP direct et verifiable
+(compatible avec le modele `--fetch` de SONAR). SHA-256 recoupe sur deux
+methodes independantes contre `kali.download/base-images/kali-2026.2/
+SHA256SUMS` (source officielle vers laquelle `cdimage.kali.org`
+redirige).
+
+**Limitation assumée et documentée** (dans le catalogue ET le
+CHANGELOG, pas cachée) : c'est une image d'installation Debian, pas un
+environnement live — elle installe Kali sur un disque au lieu d'ouvrir
+un bureau pentest immédiatement au démarrage. Compromis délibéré :
+bootable et vérifiable en HTTP direct plutôt qu'absente du catalogue.
+La variante "netinst" (743 Mo, a besoin du réseau pendant
+l'installation) et "purple" (Kali Purple, blue team — produit différent)
+ont été écartées : la première contredit la philosophie offline-first de
+SONAR (terrain à réseau instable), la seconde n'est pas ce qu'un
+opérateur attend en demandant "Kali".
+
+Test : URL et SHA-256 vérifiés en direct (`curl` + recoupement
+`kali.download`), redirection géographique de `cdimage.kali.org`
+confirmée compatible avec le `-fL` déjà utilisé par
+`sonar_fetch_one_tool` (même mécanisme que l'entrée Arch Linux
+existante). `--self-audit` (20/20) et `--self-test` (80 PASS, 0 FAIL)
+exécutés sous WSL après l'ajout.
+
 ## [3.37.1-policy-migration] — 2026-09-18
 
 ### Contexte

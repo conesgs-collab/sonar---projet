@@ -3941,6 +3941,7 @@ general-os	Fedora KDE	Meme distribution que Fedora Workstation, environnement de
 general-os	Fedora Server	Meme distribution, edition serveur — pertinent pour reinstaller/depanner un serveur Linux avec un cycle plus recent qu'Ubuntu Server. Open source, fedoraproject.org.
 general-os	Manjaro	Distribution basee sur Arch Linux mais avec une installation graphique simplifiee — compromis entre la fraicheur d'Arch et la facilite d'installation d'Ubuntu/Mint. Open source, manjaro.org.
 general-os	CAINE	Distribution Linux specialisee forensique (Computer Aided INvestigative Environment) — analyse d'un disque en lecture seule par defaut, chaine de possession, pertinent pour un cas qui deborde du cadre non-destructif habituel de SONAR. Open source, caine-live.net.
+general-os	Kali Linux	Distribution Linux orientee tests d'intrusion et securite offensive (centaines d'outils pentest preinstalles) — pertinent pour auditer un reseau/systeme plutot que le reparer. LIMITATION CONNUE (voir CHANGELOG.md) : c'est l'image "installer" (programme d'installation Debian), pas "live" — Kali ne distribue sa vraie image live (bureau pentest pret a l'emploi au demarrage) qu'en torrent, incompatible avec le modele --fetch de SONAR (URL HTTP fixe et verifiable). Cette image demarre bien et est verifiee SHA-256, mais installe Kali sur un disque au lieu d'offrir un environnement live immediat. Open source, kali.org.
 PROFILES_EOF
 )"
 
@@ -4088,6 +4089,7 @@ Fedora KDE	https://download.fedoraproject.org/pub/fedora/linux/releases/44/KDE/x
 Fedora Server	https://download.fedoraproject.org/pub/fedora/linux/releases/44/Server/x86_64/iso/Fedora-Server-dvd-x86_64-44-1.7.iso	85837793bfa36db6bc709b4cecd2ec116951b87d9c53c3d95eb2fac8dcf7cf1f		none	Meme source/verification que Fedora Workstation.
 Manjaro	https://download.manjaro.org/gnome/26.1.0/manjaro-gnome-26.1.0-minimal-260812-linux618.iso	c95ab4fcce563edf5bd780dfad7a60d6e62f260473d772eee75a690f0c6f1861		none	SHA-256 publie sur le domaine officiel (download.manjaro.org, fichier .sha256 a cote de l'ISO) et recoupe localement.
 CAINE	https://www.caine-live.net/Downloads/caine14.0.iso	2702226cf9ee131ee54e9649d6d90008f3fe851ba35939f43ae8cb614a00d564		none	SHA-256 publie sur le domaine officiel (caine-live.net) et recoupe localement.
+Kali Linux	https://cdimage.kali.org/kali-2026.2/kali-linux-2026.2-installer-amd64.iso	6dbefacc95e3b556c19c48e8bae39b8b505e2d3a1aba0bfb7ab62b036c3d2ba3		none	SHA-256 publie sur le domaine officiel (kali.download/base-images/kali-2026.2/SHA256SUMS, meme infrastructure que cdimage.kali.org qui y redirige) et recoupe via deux methodes independantes cette session. cdimage.kali.org redirige (302) vers un miroir geographique proche, comme l'entree Arch Linux ci-dessus — couvert par le -fL (follow redirect) de sonar_fetch_one_tool. LIMITATION CONNUE : seule l'image "installer" est disponible en HTTP direct ; l'image "live" (bureau pret a l'emploi) n'existe qu'en torrent sur le site officiel (verifie sur cdimage.kali.org et kali.org/get-kali) — incompatible avec --fetch. Voir CHANGELOG.md.
 FETCH_EOF
 )"
 
@@ -4513,7 +4515,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.37.1-policy-migration"
+SONAR_VERSION="3.38.0-kali-installer"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
