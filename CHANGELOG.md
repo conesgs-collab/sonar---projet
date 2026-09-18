@@ -6,6 +6,56 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.40.0-winpe-boot-branding] — 2026-09-18
+
+### Contexte
+Demande directe : retirer le logo Windows animé affiché au démarrage de
+WinPE et le remplacer par "SONAR - SE".
+
+### Corrigé/Ajouté
+`tools/Build-SonarSE-WinPE.ps1` : nouveau paramètre `-BrandBootManager`
+(activé par défaut). Avant que `startnet.cmd` ne prenne la main, WinPE
+affiche normalement quelques secondes de logo Windows animé, dessiné
+par `winload`/`bootmgr` à partir du magasin BCD de l'image. Ce
+paramètre :
+
+- Renomme `{bootmgr}` et `{default}` de "Windows Boot Manager"/"Windows
+  Setup" vers **"SONAR - SE"** (`bcdedit /store <fichier> /set ...
+  description`).
+- Désactive l'animation graphique (`bootuxdisabled yes`).
+- Appliqué aux **deux** magasins BCD générés par `copype` (BIOS
+  `media\Boot\BCD` et UEFI `media\EFI\Microsoft\Boot\BCD`) — Ventoy peut
+  chainloader l'un ou l'autre selon le micrologiciel de la machine
+  cible.
+
+Délibérément limité à des opérations `bcdedit /store` standard sur le
+magasin de l'image en construction (jamais le magasin BCD du système
+hôte) — même registre de risque que les autres commandes bcdedit du
+menu de réparation. Un remplacement littéral du logo (patch binaire de
+`bootres.dll` ou équivalent) a été explicitement écarté : gain cosmétique
+marginal (écran visible 2-3 secondes) pour un risque de casser le boot
+disproportionné — même discipline que le thème Ventoy (v3.25.0/v3.26.0),
+qui a déjà coûté plusieurs heures de diagnostic pour un cas similaire.
+
+### Bloqué puis débloqué : UAC
+Cinq tentatives de reconstruction ont échoué avec "L'opération a été
+annulée par l'utilisateur" sur les appels `Start-Process -Verb RunAs` —
+fenêtre UAC jamais validée (timeout ~2-3 min sans clic, l'opérateur
+n'étant pas physiquement devant l'écran). Reconstruction réussie à la
+sixième tentative une fois l'opérateur présent pour valider les
+invites — pas un bug du script, une contrainte d'interaction humaine
+inévitable pour toute élévation Windows.
+
+Test : ISO reconstruite (`-SkipAdkInstall`, `-BrandBootManager` par
+défaut). Vérifié au-delà du contrôle automatique du script : copie des
+deux magasins BCD hors de l'ISO final (montage lecture seule) puis
+`bcdedit /store ... /enum` — confirmé `description` = `SONAR - SE` sur
+`{bootmgr}` et `{default}`, `bootuxdisabled` = `Yes` sur `{default}`,
+sur les deux magasins (BIOS et UEFI). SHA-256 final :
+`edb7a8ca4817442797cad6b692f53f596ddbf70953de0d0c78e35721a21bd6e7`
+(378,8 Mo). `sonar_master.sh` non modifié fonctionnellement (seul
+`SONAR_VERSION` change).
+
 ## [3.39.0-winpe-menu-expansion] — 2026-09-18
 
 ### Contexte

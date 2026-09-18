@@ -52,6 +52,29 @@ WinPE fonctionnelle confirmée.
 `SONAR_SOURCE\ISO\WinPE\` ; `-SkipAdkInstall` si l'ADK est déjà présent.
 Voir l'aide intégrée (`Get-Help .\tools\Build-SonarSE-WinPE.ps1 -Full`).
 
+**`-BrandBootManager` (activé par défaut, ajouté le 2026-09-18)** :
+avant même que `startnet.cmd` ne prenne la main, WinPE affiche
+normalement le logo Windows animé pendant quelques secondes (écran
+noir avec points tournants, dessiné par `winload`/`bootmgr` à partir du
+magasin BCD). Cette option renomme les entrées `{bootmgr}`/`{default}`
+du magasin BCD (BIOS **et** UEFI, Ventoy pouvant chainloader l'un ou
+l'autre) de "Windows Boot Manager"/"Windows Setup" vers **"SONAR - SE"**,
+et désactive l'animation graphique (`bootuxdisabled yes`). Opérations
+`bcdedit /store <fichier>` standard sur le magasin BCD de l'image en
+cours de construction (pas le magasin BCD du système hôte) — même
+registre de risque que les autres commandes bcdedit du menu de
+réparation, **pas** un patch binaire de ressource comme l'aurait été un
+remplacement littéral du logo (`bootres.dll`) : ça, ça reste hors de
+portée sans un risque de casser le boot pour un gain cosmétique
+marginal (l'écran est visible 2-3 secondes). `-BrandBootManager:$false`
+restaure le comportement Windows par défaut.
+
+Vérifié le 2026-09-18 par copie des deux magasins BCD hors de l'ISO
+final (montage lecture seule + `bcdedit /store ... /enum`) :
+`description` = `SONAR - SE` sur `{bootmgr}` et `{default}`,
+`bootuxdisabled` = `Yes` sur `{default}`, confirmé sur les deux
+magasins (BIOS et UEFI).
+
 **`-AddRepairMenu` (activé par défaut, ajouté le 2026-09-17, étendu le
 2026-09-18)** : remplace `startnet.cmd` par un menu batch numéroté au
 lieu du `cmd.exe` brut — le technicien n'a plus besoin de mémoriser la
@@ -94,8 +117,9 @@ message `cmd.exe` cryptique ; les dix autres options fonctionnent
 normalement dans tous les cas.
 
 ISO reconstruite et vérifiée le 2026-09-18 avec ce menu étendu :
-SHA-256 `39ffbb2ae6038a2d6d2e374b699eec5974f77a03ff3470609676d32e8adf92e8`
-(378,8 Mo) — les 8 nouveaux libellés (`:sfc_menu`, `:bitlocker_menu`,
+SHA-256 `edb7a8ca4817442797cad6b692f53f596ddbf70953de0d0c78e35721a21bd6e7`
+(378,8 Mo, inclut aussi le renommage BCD `-BrandBootManager` ci-dessus)
+— les 8 nouveaux libellés (`:sfc_menu`, `:bitlocker_menu`,
 `:bitlocker_recovery`, `:bitlocker_bek`, `:driver_menu`, `:backup_menu`,
 `:eventlog_menu`, `:network_menu`) et la détection `manage-bde.exe`
 confirmés présents dans `startnet.cmd` via remontage DISM en lecture

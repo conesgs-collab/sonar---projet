@@ -87,6 +87,19 @@
     .\Build-SonarSE-WinPE.ps1 -OutputIso C:\clé\SONAR_SOURCE\ISO\WinPE\winpe.iso
     Construit directement dans l'arborescence SONAR_SOURCE d'une clé en préparation.
 
+.PARAMETER BrandBootManager
+    Renomme les entrees "Windows Boot Manager"/"Windows Setup" du
+    magasin BCD (BIOS et UEFI) en "SONAR - SE", et desactive
+    l'animation graphique de demarrage (bootuxdisabled) qui affiche
+    autrement le logo Windows anime pendant quelques secondes avant que
+    startnet.cmd ne prenne la main. Operations bcdedit standard sur un
+    fichier de magasin (pas le magasin BCD systeme), pas de patch de
+    ressource binaire — meme registre de risque que les autres options
+    bcdedit du menu de reparation, pas le meme registre que le theme
+    Ventoy plus haut. ACTIVE par defaut. Utilisez
+    -BrandBootManager:$false pour garder le comportement Windows
+    standard (logo anime "Windows Setup" inclus).
+
 .PARAMETER IncludeBitLockerTools
     Tente d'ajouter le composant WinPE-SecureStartup (manage-bde.exe,
     necessaire a l'option "Deverrouiller un disque BitLocker" du menu de
@@ -115,7 +128,8 @@ param(
     [switch]$SkipAdkInstall,
     [bool]$IncludePowerShell = $false,
     [bool]$IncludeBitLockerTools = $false,
-    [bool]$AddRepairMenu = $true
+    [bool]$AddRepairMenu = $true,
+    [bool]$BrandBootManager = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -196,6 +210,48 @@ Start-Process -FilePath "cmd.exe" -ArgumentList $cmdline -Verb RunAs -Wait
 if (-not (Test-Path (Join-Path $stageDir "media\sources\boot.wim"))) {
     Get-Content $stageLog -ErrorAction SilentlyContinue | Write-Host
     throw "Échec de la création de l'environnement WinPE — voir $stageLog ci-dessus."
+}
+
+if ($BrandBootManager) {
+    # Renomme les entrees BCD ("Windows Boot Manager"/"Windows Setup" ->
+    # "SONAR - SE") et desactive l'animation graphique de demarrage
+    # (bootuxdisabled) qui affiche autrement le logo Windows anime avant
+    # meme que startnet.cmd ne prenne la main. Operations bcdedit
+    # standard sur un fichier de magasin arbitraire (PAS le magasin BCD
+    # du systeme en cours d'execution) — aucun patch binaire de
+    # ressource (bootres.dll etc.), donc pas la meme classe de risque
+    # que le theme Ventoy (voir plus haut) : ceci reste dans le domaine
+    # officiellement supporte de bcdedit. Applique aux DEUX magasins
+    # (BIOS et UEFI) generes par copype, Ventoy pouvant chainloader
+    # l'un ou l'autre selon le micrologiciel de la machine cible.
+    Write-Host "== Renommage du gestionnaire de demarrage en SONAR - SE (elevation requise) =="
+    $bcdPaths = @(
+        (Join-Path $stageDir "media\Boot\BCD")
+        (Join-Path $stageDir "media\EFI\Microsoft\Boot\BCD")
+    )
+    $bcdLog = Join-Path $WorkDir "bcd_brand_log.txt"
+    $bcdScript = Join-Path $WorkDir "bcd_brand.cmd"
+    $bcdLines = @("@echo off", "setlocal enabledelayedexpansion", "call :main > `"$bcdLog`" 2>&1", "exit /b !errorlevel!", "", ":main")
+    foreach ($bcd in $bcdPaths) {
+        if (-not (Test-Path $bcd)) {
+            throw "Magasin BCD introuvable : $bcd — copype a peut-etre change de disposition."
+        }
+        $bcdLines += "bcdedit /store `"$bcd`" /set {bootmgr} description `"SONAR - SE`""
+        $bcdLines += "if !errorlevel! neq 0 exit /b 1"
+        $bcdLines += "bcdedit /store `"$bcd`" /set {default} description `"SONAR - SE`""
+        $bcdLines += "if !errorlevel! neq 0 exit /b 1"
+        $bcdLines += "bcdedit /store `"$bcd`" /set {default} bootuxdisabled yes"
+        $bcdLines += "if !errorlevel! neq 0 exit /b 1"
+    }
+    $bcdLines += "exit /b 0"
+    $bcdLines | Set-Content -Path $bcdScript -Encoding ASCII
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$bcdScript`"" -Verb RunAs -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Host "== Log renommage BCD =="
+        Get-Content $bcdLog -ErrorAction SilentlyContinue | Write-Host
+        throw "Echec du renommage du gestionnaire de demarrage (code $($proc.ExitCode)) — voir le log ci-dessus. Relancez avec -BrandBootManager:`$false pour garder le magasin BCD par defaut (comportement Windows standard, logo anime inclus)."
+    }
+    Write-Host "Gestionnaire de demarrage renomme en SONAR - SE, animation de demarrage desactivee."
 }
 
 if ($AddRepairMenu) {
