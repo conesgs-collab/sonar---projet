@@ -6,6 +6,82 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.39.0-winpe-menu-expansion] — 2026-09-18
+
+### Contexte
+Demande directe : identifier puis combler les manques du menu de
+réparation WinPE (`tools/Build-SonarSE-WinPE.ps1`, ajouté en 3.36.x).
+L'ancien menu (bootrec, bcdedit, diskpart, DISM) laissait plusieurs
+scénarios réels sans option dédiée — notamment le blocage le plus
+fréquent en pratique (disque BitLocker verrouillé, qui empêche TOUTES
+les autres options de fonctionner) et l'absence de tout mécanisme
+d'injection de pilotes malgré le dossier `Drivers/` déjà présent sur la
+clé.
+
+### Ajouté
+Menu étendu de 6 à 11 options :
+
+- **SFC hors ligne** — complémentaire à DISM (composants vs fichiers
+  système protégés), pas redondant.
+- **Déverrouillage BitLocker** (`manage-bde`) — le blocage le plus
+  courant en pratique sur du matériel récent (chiffrement de l'appareil
+  activé par défaut).
+- **Injection de pilotes** (`Dism /Add-Driver`) — utile quand
+  `diskpart`/`bootrec` ne voient aucun disque (contrôleur NVMe/RAID
+  récent absent du WinPE de base).
+- **Sauvegarde de fichiers utilisateur** (`robocopy`) avant réparation
+  risquée.
+- **Export des journaux d'événements** (`.evtx`) pour diagnostiquer la
+  cause avant de réparer à l'aveugle.
+- **Diagnostic réseau** (`ipconfig`/`ping`).
+
+Toutes ces commandes sont des binaires Windows de base déjà présents
+dans WinPE — vérifié un par un par remontage DISM en lecture seule de
+l'ISO déjà construit AVANT d'écrire le menu (pas supposé) :
+`manage-bde` **absent**, `sfc`/`robocopy`/`ipconfig`/`ping`/`bcdedit`
+**présents**.
+
+### Trouvé en vérifiant, et traité honnêtement (pas caché)
+`manage-bde` nécessite le composant `WinPE-SecureStartup`, ajouté par
+`Dism /Add-Package` — la même famille d'opération que
+`-IncludePowerShell` (3.24.x), déjà documentée comme cassée sur cet
+hôte. Reproduit le même échec exact ("Erreur: 87 — Une erreur
+d'initialisation s'est produite") avec `WinPE-SecureStartup`, en
+utilisant le même mécanisme robuste que le bloc PowerShell existant
+(`Cleanup-Mountpoints`, `call "$setEnvBat"`, `!errorlevel!` en
+comparaison numérique) — confirme une incompatibilité générale
+ADK/DISM sur cet hôte pour `/Add-Package`, pas un problème spécifique à
+BitLocker.
+
+Traitement : nouveau paramètre `-IncludeBitLockerTools` (désactivé par
+défaut, même contrat que `-IncludePowerShell`) qui tente l'ajout quand
+même — utile sur un hôte où `/Add-Package` fonctionne. **Sans cette
+option**, l'entrée BitLocker du menu détecte l'absence de
+`manage-bde.exe` au runtime et l'indique clairement au lieu d'échouer
+avec un message `cmd.exe` cryptique ("'manage-bde' n'est pas reconnu…").
+Les 10 autres options fonctionnent normalement quel que soit ce
+paramètre.
+
+Une erreur de méthodologie a été corrigée en cours de route : le tout
+premier test de `/Add-Package` sur `WinPE-SecureStartup` a échoué avec
+"0xc1510111 — permissions insuffisantes", pas l'erreur 87 attendue —
+root cause identifiée (le `boot.wim` de test avait été copié depuis un
+ISO monté, donc hérité de l'attribut lecture seule du média source) et
+corrigée avant de conclure quoi que ce soit sur la vraie compatibilité
+`WinPE-SecureStartup`.
+
+Test : ISO reconstruite avec `-SkipAdkInstall` (sans
+`-IncludeBitLockerTools`, valeur par défaut). Vérification automatique
+du script (présence du titre du menu) **et** vérification manuelle
+approfondie (remontage DISM en lecture seule, `findstr` des 8 nouveaux
+libellés + de la ligne de détection `manage-bde.exe`, confirmation que
+`manage-bde` est bien absent et que `sfc`/`robocopy` sont bien
+présents) — toutes concordantes. SHA-256 final :
+`39ffbb2ae6038a2d6d2e374b699eec5974f77a03ff3470609676d32e8adf92e8`
+(378,8 Mo). `--self-audit` (20/20) et `--self-test` (80 PASS, 0 FAIL)
+de `sonar_master.sh` toujours au vert (fichier non modifié
+fonctionnellement, seul `SONAR_VERSION` change).
+
 ## [3.38.0-kali-installer] — 2026-09-18
 
 ### Contexte

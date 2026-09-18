@@ -40,10 +40,15 @@
 
 .PARAMETER AddRepairMenu
     Remplace startnet.cmd par un menu de reparation numerote (bootrec,
-    bcdedit, diskpart, DISM, invite libre) au lieu du cmd.exe brut par
-    defaut. ACTIVE par defaut — c'est un simple remplacement de fichier
-    dans boot.wim (montage DISM + copie, PAS de /Add-Package), donc non
-    concerne par la limite connue de -IncludePowerShell ci-dessous.
+    bcdedit, diskpart, DISM, SFC hors ligne, deverrouillage BitLocker,
+    injection de pilotes, sauvegarde de fichiers utilisateur, export des
+    journaux d'evenements, diagnostic reseau, invite libre) au lieu du
+    cmd.exe brut par defaut. Toutes ces commandes (manage-bde, sfc,
+    robocopy, ipconfig inclus) sont des binaires Windows de base deja
+    presents dans WinPE — aucun composant ADK supplementaire requis,
+    donc non concerne par la limite connue de -IncludePowerShell
+    ci-dessous. ACTIVE par defaut — c'est un simple remplacement de
+    fichier dans boot.wim (montage DISM + copie, PAS de /Add-Package).
     Utilisez -AddRepairMenu:$false pour revenir au cmd.exe brut.
 
 .PARAMETER IncludePowerShell
@@ -82,6 +87,23 @@
     .\Build-SonarSE-WinPE.ps1 -OutputIso C:\clé\SONAR_SOURCE\ISO\WinPE\winpe.iso
     Construit directement dans l'arborescence SONAR_SOURCE d'une clé en préparation.
 
+.PARAMETER IncludeBitLockerTools
+    Tente d'ajouter le composant WinPE-SecureStartup (manage-bde.exe,
+    necessaire a l'option "Deverrouiller un disque BitLocker" du menu de
+    reparation) via `Dism /Add-Package`. DESACTIVE par defaut — MEME
+    LIMITE CONNUE que -IncludePowerShell ci-dessus, confirmee le
+    2026-09-18 sur ce meme hote (ADK 10.1.26100.2454) : `Dism /Add-Package`
+    echoue avec "Erreur: 87 — Une erreur d'initialisation s'est produite"
+    sur WinPE-SecureStartup exactement comme sur WinPE-WMI/NetFx/
+    Scripting/PowerShell — pas un probleme specifique a BitLocker, la
+    meme incompatibilite generale ADK/DISM sur cet hote. Sans cette
+    option (defaut), l'entree "Deverrouiller un disque BitLocker" du menu
+    detecte l'absence de manage-bde.exe et l'indique clairement au lieu
+    d'echouer avec un message cmd.exe cryptique — le reste du menu
+    (bootrec/bcdedit/diskpart/DISM/SFC/pilotes/sauvegarde/journaux/
+    reseau/invite libre, tous des binaires deja presents dans WinPE de
+    base) fonctionne normalement quel que soit ce parametre.
+
 .EXAMPLE
     .\Build-SonarSE-WinPE.ps1 -IncludePowerShell
     Tente d'ajouter PowerShell — voir "LIMITE CONNUE" ci-dessus avant d'utiliser cette option.
@@ -92,6 +114,7 @@ param(
     [string]$WorkDir = "$env:TEMP\sonar-se-winpe-build",
     [switch]$SkipAdkInstall,
     [bool]$IncludePowerShell = $false,
+    [bool]$IncludeBitLockerTools = $false,
     [bool]$AddRepairMenu = $true
 )
 
@@ -196,7 +219,13 @@ if ($AddRepairMenu) {
         "echo 2. Configuration de boot (bcdedit, invite interactive)"
         "echo 3. Gestion des disques/partitions (diskpart)"
         "echo 4. Verifier/reparer une image Windows hors ligne (DISM)"
-        "echo 5. Invite de commandes libre (cmd.exe)"
+        "echo 5. Verifier les fichiers systeme hors ligne (SFC)"
+        "echo 6. Deverrouiller un disque BitLocker"
+        "echo 7. Injecter des pilotes dans le disque cible"
+        "echo 8. Sauvegarder des fichiers utilisateur"
+        "echo 9. Exporter les journaux d'evenements (.evtx)"
+        "echo 10. Diagnostic reseau (ipconfig, ping)"
+        "echo 11. Invite de commandes libre (cmd.exe)"
         "echo 0. Redemarrer"
         "echo ============================================"
         "set /p choix=Choix : "
@@ -204,7 +233,13 @@ if ($AddRepairMenu) {
         "if `"%choix%`"==`"2`" goto bcdedit_menu"
         "if `"%choix%`"==`"3`" goto diskpart_menu"
         "if `"%choix%`"==`"4`" goto dism_menu"
-        "if `"%choix%`"==`"5`" goto cmdfree"
+        "if `"%choix%`"==`"5`" goto sfc_menu"
+        "if `"%choix%`"==`"6`" goto bitlocker_menu"
+        "if `"%choix%`"==`"7`" goto driver_menu"
+        "if `"%choix%`"==`"8`" goto backup_menu"
+        "if `"%choix%`"==`"9`" goto eventlog_menu"
+        "if `"%choix%`"==`"10`" goto network_menu"
+        "if `"%choix%`"==`"11`" goto cmdfree"
         "if `"%choix%`"==`"0`" wpeutil reboot"
         "goto menu"
         ""
@@ -244,6 +279,106 @@ if ($AddRepairMenu) {
         "echo."
         "set /p rep=Lancer la reparation RestoreHealth ? (o/n) : "
         "if /i `"%rep%`"==`"o`" Dism /Image:%lettre%:\ /Cleanup-Image /RestoreHealth"
+        "echo."
+        "pause"
+        "goto menu"
+        ""
+        ":sfc_menu"
+        "cls"
+        "echo --- Verification des fichiers systeme hors ligne (SFC) ---"
+        "echo Complementaire a DISM : DISM repare le magasin de composants,"
+        "echo SFC remplace les fichiers systeme proteges corrompus."
+        "set /p lettre=Lettre du lecteur Windows cible (ex: C) : "
+        "if not exist `"%lettre%:\Windows`" (echo Windows introuvable sur %lettre%:\ - verifiez la lettre. & pause & goto menu)"
+        "echo Lancement de sfc /scannow en mode hors ligne (peut prendre du temps)..."
+        "sfc /scannow /offbootdir=%lettre%:\ /offwindir=%lettre%:\Windows"
+        "echo."
+        "echo Termine. Appuyez sur une touche pour revenir au menu."
+        "pause"
+        "goto menu"
+        ""
+        ":bitlocker_menu"
+        "cls"
+        "echo --- Deverrouillage BitLocker ---"
+        "if not exist `"%WINDIR%\System32\manage-bde.exe`" (echo. & echo manage-bde.exe absent de cette image WinPE ^(composant WinPE-SecureStartup non inclus au build^). & echo Reconstruire avec -IncludeBitLockerTools si l'ADK le permet sur votre poste ^(voir docs/WINPE.md^). & echo. & pause & goto menu)"
+        "echo Necessaire avant bootrec/DISM/SFC si le disque cible est chiffre"
+        "echo (chiffrement de l'appareil active par defaut sur la plupart des"
+        "echo PC recents) - sinon ces outils ne peuvent pas lire le disque."
+        "set /p lettre=Lettre du lecteur chiffre (ex: C) : "
+        "echo."
+        "echo 1. Deverrouiller avec la cle de recuperation (48 chiffres)"
+        "echo 2. Deverrouiller avec un fichier de cle (.bek) sur un support externe"
+        "set /p blchoix=Choix : "
+        "if `"%blchoix%`"==`"1`" goto bitlocker_recovery"
+        "if `"%blchoix%`"==`"2`" goto bitlocker_bek"
+        "goto menu"
+        ":bitlocker_recovery"
+        "set /p reckey=Cle de recuperation (xxxxxx-xxxxxx-xxxxxx-xxxxxx-xxxxxx-xxxxxx-xxxxxx-xxxxxx) : "
+        "manage-bde -unlock %lettre%: -RecoveryPassword %reckey%"
+        "echo."
+        "pause"
+        "goto menu"
+        ":bitlocker_bek"
+        "set /p bekpath=Chemin complet du fichier .bek (ex: E:\recovery.bek) : "
+        "manage-bde -unlock %lettre%: -RecoveryKey `"%bekpath%`""
+        "echo."
+        "pause"
+        "goto menu"
+        ""
+        ":driver_menu"
+        "cls"
+        "echo --- Injection de pilotes dans le disque cible ---"
+        "echo Utile si diskpart/bootrec ne voient aucun disque (controleur"
+        "echo NVMe/RAID recent absent du WinPE de base) - injecte les pilotes"
+        "echo du dossier Drivers/ de la cle SONAR-SE dans le disque cible."
+        "set /p lettre=Lettre du lecteur Windows cible (ex: C) : "
+        "set /p drvpath=Dossier de pilotes (ex: E:\Drivers) : "
+        "if not exist `"%drvpath%`" (echo Dossier introuvable : %drvpath% & pause & goto menu)"
+        "echo Injection des pilotes de %drvpath% dans %lettre%:\ ..."
+        "Dism /Image:%lettre%:\ /Add-Driver /Driver:`"%drvpath%`" /Recurse"
+        "echo."
+        "echo Termine. Appuyez sur une touche pour revenir au menu."
+        "pause"
+        "goto menu"
+        ""
+        ":backup_menu"
+        "cls"
+        "echo --- Sauvegarde de fichiers utilisateur ---"
+        "echo A faire AVANT toute reparation risquee si des donnees"
+        "echo importantes n'ont pas d'autre copie."
+        "set /p srcpath=Dossier source (ex: C:\Users\NomUtilisateur) : "
+        "set /p dstpath=Destination (ex: E:\Sauvegarde) : "
+        "if not exist `"%srcpath%`" (echo Dossier source introuvable : %srcpath% & pause & goto menu)"
+        "echo Copie de %srcpath% vers %dstpath% (peut prendre du temps)..."
+        "robocopy `"%srcpath%`" `"%dstpath%`" /E /R:1 /W:1 /XJ /TEE /LOG+:X:\sonar_backup.log"
+        "echo."
+        "echo Termine. Journal : X:\sonar_backup.log"
+        "pause"
+        "goto menu"
+        ""
+        ":eventlog_menu"
+        "cls"
+        "echo --- Export des journaux d'evenements ---"
+        "echo Pour diagnostiquer POURQUOI le demarrage a echoue avant de"
+        "echo lancer une reparation a l'aveugle."
+        "set /p lettre=Lettre du lecteur Windows cible (ex: C) : "
+        "set /p dstpath=Destination (ex: E:\Logs) : "
+        "if not exist `"%lettre%:\Windows\System32\winevt\Logs`" (echo Journaux introuvables sur %lettre%:\ - verifiez la lettre. & pause & goto menu)"
+        "if not exist `"%dstpath%`" mkdir `"%dstpath%`""
+        "echo Copie des journaux .evtx vers %dstpath% ..."
+        "robocopy `"%lettre%:\Windows\System32\winevt\Logs`" `"%dstpath%`" *.evtx /R:1 /W:1"
+        "echo."
+        "echo Termine. Journaux copies dans %dstpath%"
+        "pause"
+        "goto menu"
+        ""
+        ":network_menu"
+        "cls"
+        "echo --- Diagnostic reseau ---"
+        "ipconfig /all"
+        "echo."
+        "set /p cible=Adresse a tester (ex: 8.8.8.8, ou Entree pour passer) : "
+        "if not `"%cible%`"==`"`" ping %cible%"
         "echo."
         "pause"
         "goto menu"
@@ -413,6 +548,61 @@ if ($IncludePowerShell) {
         throw "Echec de l'ajout de PowerShell a l'image (code $($proc.ExitCode)) — voir le log ci-dessus. Limite connue documentee dans '-? Build-SonarSE-WinPE.ps1' (parametre IncludePowerShell) ; relancez sans -IncludePowerShell pour l'image minimale (deja fonctionnelle)."
     }
     Write-Host "PowerShell ajoute avec succes."
+}
+
+if ($IncludeBitLockerTools) {
+    Write-Host "== Ajout du support BitLocker (WinPE-SecureStartup) a l'image WinPE (montage DISM, elevation requise) =="
+    $ocDir = Join-Path $WinPeDir "amd64\WinPE_OCs"
+    $mountDir = Join-Path $WorkDir "mount_bitlocker"
+    New-Item -ItemType Directory -Force -Path $mountDir | Out-Null
+    $bootWim = Join-Path $stageDir "media\sources\boot.wim"
+    $neutral = Join-Path $ocDir "WinPE-SecureStartup.cab"
+    $lang = Join-Path $ocDir "en-us\WinPE-SecureStartup_en-us.cab"
+    if (-not (Test-Path $neutral) -or -not (Test-Path $lang)) {
+        throw "Composant WinPE-SecureStartup introuvable sous '$ocDir' — ADK/add-on WinPE incomplet ou version differente."
+    }
+    $pkgScript = Join-Path $WorkDir "add_bitlocker.cmd"
+    $pkgLog = Join-Path $WorkDir "bitlocker_add_log.txt"
+    # Meme schema que le bloc -IncludePowerShell ci-dessus (voir ses
+    # commentaires pour le detail de chaque choix) : redirection portee
+    # par le .cmd lui-meme, Cleanup-Mountpoints en preambule,
+    # !errorlevel! en comparaison numerique directe, discard sur echec.
+    $lines = @(
+        "@echo off"
+        "setlocal enabledelayedexpansion"
+        "call :main > `"$pkgLog`" 2>&1"
+        "exit /b !errorlevel!"
+        ""
+        ":main"
+        "call `"$setEnvBat`""
+        "Dism /Cleanup-Mountpoints"
+        "Dism /Mount-Image /ImageFile:`"$bootWim`" /Index:1 /MountDir:`"$mountDir`""
+        "if !errorlevel! neq 0 exit /b 1"
+        "Dism /Image:`"$mountDir`" /Add-Package /PackagePath:`"$neutral`""
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "Dism /Image:`"$mountDir`" /Add-Package /PackagePath:`"$lang`""
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "Dism /Unmount-Image /MountDir:`"$mountDir`" /Commit"
+        "if !errorlevel! neq 0 goto :fail_mounted"
+        "exit /b 0"
+        ""
+        ":fail_mounted"
+        "Dism /Unmount-Image /MountDir:`"$mountDir`" /Discard"
+        "exit /b 1"
+    )
+    $lines | Set-Content -Path $pkgScript -Encoding ASCII
+
+    $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$pkgScript`"" -Verb RunAs -Wait -PassThru
+    if ($proc.ExitCode -ne 0) {
+        Write-Host "== Log ajout BitLocker =="
+        if (Test-Path $pkgLog) {
+            Get-Content $pkgLog -ErrorAction SilentlyContinue | Write-Host
+        } else {
+            Write-Host "(aucun fichier log produit — voir $pkgScript pour la commande exacte)"
+        }
+        throw "Echec de l'ajout du support BitLocker a l'image (code $($proc.ExitCode)) — voir le log ci-dessus. Meme limite connue documentee pour -IncludePowerShell ; relancez sans -IncludeBitLockerTools pour l'image sans BitLocker (le reste du menu de reparation fonctionne normalement)."
+    }
+    Write-Host "Support BitLocker ajoute avec succes."
 }
 
 $OutputIso = [System.IO.Path]::GetFullPath($OutputIso)

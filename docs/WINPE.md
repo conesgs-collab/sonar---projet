@@ -52,13 +52,54 @@ WinPE fonctionnelle confirmée.
 `SONAR_SOURCE\ISO\WinPE\` ; `-SkipAdkInstall` si l'ADK est déjà présent.
 Voir l'aide intégrée (`Get-Help .\tools\Build-SonarSE-WinPE.ps1 -Full`).
 
-**`-AddRepairMenu` (activé par défaut, ajouté le 2026-09-17)** : remplace
-`startnet.cmd` par un menu batch numéroté (bootrec, bcdedit, diskpart,
-DISM ScanHealth/RestoreHealth, invite libre) au lieu du `cmd.exe` brut —
-le technicien n'a plus besoin de mémoriser la syntaxe exacte de chaque
-commande. Implémenté en simple remplacement de fichier après montage
-DISM (pas de `/Add-Package`), donc non concerné par la limite connue de
+**`-AddRepairMenu` (activé par défaut, ajouté le 2026-09-17, étendu le
+2026-09-18)** : remplace `startnet.cmd` par un menu batch numéroté au
+lieu du `cmd.exe` brut — le technicien n'a plus besoin de mémoriser la
+syntaxe exacte de chaque commande :
+
+1. Réparer le démarrage (`bootrec`)
+2. Configuration de boot (`bcdedit`)
+3. Gestion des disques/partitions (`diskpart`)
+4. Vérifier/réparer une image Windows hors ligne (DISM ScanHealth/RestoreHealth)
+5. Vérifier les fichiers système hors ligne (`sfc /scannow /offbootdir=...`) — complémentaire à DISM, pas redondant : DISM répare le magasin de composants, SFC remplace les fichiers système protégés corrompus
+6. Déverrouiller un disque BitLocker (`manage-bde`) — voir limitation ci-dessous
+7. Injecter des pilotes dans le disque cible (`Dism /Add-Driver`) — utile quand `diskpart`/`bootrec` ne voient aucun disque (contrôleur NVMe/RAID récent absent du WinPE de base)
+8. Sauvegarder des fichiers utilisateur (`robocopy`) avant une réparation risquée
+9. Exporter les journaux d'événements (`.evtx`) pour diagnostiquer *pourquoi* le démarrage a échoué avant de réparer à l'aveugle
+10. Diagnostic réseau (`ipconfig`/`ping`)
+11. Invite de commandes libre (`cmd.exe`)
+
+Toutes ces commandes (y compris `manage-bde`, `sfc`, `robocopy`,
+`ipconfig`) sont des binaires Windows de base déjà présents dans WinPE,
+**sauf `manage-bde`** — voir juste en dessous. Implémenté en simple
+remplacement de fichier après montage DISM (pas de `/Add-Package` pour
+le menu lui-même), donc non concerné par la limite connue de
 `-IncludePowerShell` ci-dessus.
+
+**Limitation connue : BitLocker (`manage-bde`)** — contrairement aux
+dix autres options, `manage-bde.exe` n'est PAS inclus dans le WinPE de
+base ; il nécessite le composant `WinPE-SecureStartup`, ajouté via
+`Dism /Add-Package` comme PowerShell. Confirmé le 2026-09-18 sur cet
+hôte (ADK 10.1.26100.2454) : **même échec exact** que
+`-IncludePowerShell` ("Erreur: 87 — Une erreur d'initialisation s'est
+produite"), reproduit sur `WinPE-SecureStartup` avec le même mécanisme
+robuste (`Cleanup-Mountpoints`, `call "$setEnvBat"`, `!errorlevel!`) —
+confirmant qu'il s'agit d'une incompatibilité générale ADK/DISM sur cet
+hôte, pas un problème spécifique à BitLocker. `-IncludeBitLockerTools`
+(désactivé par défaut) tente quand même l'ajout — utile si vous
+reconstruisez sur un hôte où `/Add-Package` fonctionne. **Sans cette
+option**, l'entrée BitLocker du menu détecte l'absence de
+`manage-bde.exe` et l'indique clairement au lieu d'échouer avec un
+message `cmd.exe` cryptique ; les dix autres options fonctionnent
+normalement dans tous les cas.
+
+ISO reconstruite et vérifiée le 2026-09-18 avec ce menu étendu :
+SHA-256 `39ffbb2ae6038a2d6d2e374b699eec5974f77a03ff3470609676d32e8adf92e8`
+(378,8 Mo) — les 8 nouveaux libellés (`:sfc_menu`, `:bitlocker_menu`,
+`:bitlocker_recovery`, `:bitlocker_bek`, `:driver_menu`, `:backup_menu`,
+`:eventlog_menu`, `:network_menu`) et la détection `manage-bde.exe`
+confirmés présents dans `startnet.cmd` via remontage DISM en lecture
+seule de l'ISO final, en plus de la vérification automatique du script.
 
 **Bug de génération corrigé le 2026-09-17 (plusieurs heures de diagnostic)**
 Le premier ISO produit ce jour-là (SHA-256 `6ad61eab...`, décrit ici comme
