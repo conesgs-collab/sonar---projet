@@ -6,6 +6,47 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.37.1-policy-migration] — 2026-09-18
+
+### Contexte
+Résout le "Non résolu" laissé par [3.37.0-protect-catalog] : aucun
+mécanisme ne détectait un `Secure/Policies/policy.tsv` local périmé sur
+une installation existante — `sonar_security_init` ne régénère jamais un
+fichier déjà présent, quelle que soit l'ancienneté de son contenu par
+rapport au défaut actuel du script.
+
+### Corrigé
+`sonar_policy_check_stale()`, appelée à chaque `sonar_security_init` (donc
+à chaque invocation du script) :
+
+- Si le fichier sur disque correspond **exactement** (SHA-256) à l'ancien
+  défaut permissif d'avant le 2026-09-17 (`Viewer VAULT=R`,
+  `Technician VAULT=RW` — voir commit `f457156`) : sauvegarde horodatée
+  (`policy.tsv.bak.<timestamp>`), régénération avec le défaut actuel,
+  message `[SONAR][SECURITE]` explicite, événement d'audit
+  `POLICY_MIGRATED`. Migration automatique **uniquement** sur cette
+  signature exacte connue — jamais sur un simple écart de contenu, pour
+  ne jamais écraser silencieusement une personnalisation délibérée de
+  l'opérateur (une vraie décision produit).
+- Sinon, si `Viewer` et/ou `Technician` (rôles libre-service, sans jeton)
+  ont un accès VAULT différent de `-` : avertissement
+  `[SONAR][ATTENTION]` + audit `POLICY_PERMISSIVE_VAULT_DETECTED`, **sans
+  jamais modifier le fichier** — couvre le cas général (un policy.tsv
+  personnalisé différemment, ou une future régression du même genre),
+  pas seulement le cas historique précis du 2026-09-17.
+
+2 nouveaux tests dans `--self-test` (migration automatique du cas connu
+avec sauvegarde vérifiée ; un policy.tsv personnalisé n'est jamais
+modifié) + 1 dans `--self-audit`.
+
+Test : reproduit les deux scénarios avec un `policy.tsv` de test écrit à
+la main (ancien défaut exact, puis contenu personnalisé) sous un
+`SONAR_ROOT` isolé — confirmé migration+sauvegarde dans le premier cas,
+fichier intact dans le second. `--self-audit` (20/20) et `--self-test`
+(80 PASS, 0 FAIL) exécutés sous WSL. Vérifié que le `policy.tsv` réel de
+ce dépôt (déjà à jour depuis [3.37.0-protect-catalog]) n'est ni modifié
+ni dupliqué en sauvegarde par ce changement.
+
 ## [3.37.0-protect-catalog] — 2026-09-18
 
 ### Contexte

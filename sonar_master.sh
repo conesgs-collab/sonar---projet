@@ -455,8 +455,61 @@ Admin	RW	RW	R	CONFIRM	RW	RW
 Expert	RW	RW	R	CONFIRM	RW	RW
 EOF
     fi
+    sonar_policy_check_stale
 
     touch "${SONAR_AUDIT_LOG}" "${SONAR_HASHCHAIN_LOG}"
+}
+
+# SHA-256 exacte du defaut policy.tsv d'avant le durcissement VAULT du
+# 2026-09-17 (Viewer VAULT=R, Technician VAULT=RW — voir commit f457156).
+# UNE seule valeur connue, figee, jamais recalculee dynamiquement : c'est
+# la signature d'un etat historique precis, pas du defaut courant.
+SONAR_POLICY_STALE_HASH_20260917="cae4d872be81284cf9c8641863bc0406754b3970e805fb0f1684fdd7a98f3d98"
+
+# sonar_policy_check_stale: appelee a chaque sonar_security_init, donc a
+# chaque invocation du script — sonar_security_init ne regenere JAMAIS un
+# policy.tsv deja present, meme apres une mise a jour du script qui change
+# le defaut. Trouve le 2026-09-18 : un policy.tsv local (gitignore, jamais
+# commite) etait reste perime avec l'ancien defaut permissif malgre le fix
+# VAULT deja livre dans le script, SANS AUCUN avertissement — la
+# protection RBAC du 2026-09-17 n'etait donc pas reellement active sur
+# cette machine tant que ce fichier n'a pas ete supprime manuellement.
+#
+# Ne compare PAS au defaut courant : un policy.tsv deliberement
+# personnalise par l'operateur est une vraie decision produit, jamais a
+# ecraser silencieusement. Seule la signature EXACTE de l'ancien defaut
+# connu ci-dessus declenche une migration automatique (avec sauvegarde
+# horodatee). Tout le reste (personnalise ou deja a jour) est laisse
+# intact ; seul un ecart specifique et dangereux (VAULT ouvert a un role
+# libre-service Viewer/Technician) declenche un avertissement, sans
+# jamais modifier le fichier.
+sonar_policy_check_stale() {
+    [[ -s "${SONAR_POLICY_FILE}" ]] || return 0
+    local h bak
+    h="$(sonar_hash "${SONAR_POLICY_FILE}" 2>/dev/null)" || return 0
+    if [[ "$h" == "${SONAR_POLICY_STALE_HASH_20260917}" ]]; then
+        bak="${SONAR_POLICY_FILE}.bak.$(date -u +%Y%m%dT%H%M%SZ)"
+        cp -f "${SONAR_POLICY_FILE}" "${bak}"
+        cat > "${SONAR_POLICY_FILE}" <<'EOF'
+ROLE	AUDIT	DIAGNOSE	DEPLOY	DESTRUCTIVE	FORENSIC	VAULT
+Viewer	R	R	-	-	-	-
+Technician	R	R	R	-	-	-
+Senior	R	R	R	CONFIRM	R	RW
+Forensic	R	R	-	-	RW	RW
+Admin	RW	RW	R	CONFIRM	RW	RW
+Expert	RW	RW	R	CONFIRM	RW	RW
+EOF
+        sonar_audit "POLICY_MIGRATED" "from=pre-2026-09-17-default;backup=${bak}"
+        echo "[SONAR][SECURITE] ${SONAR_POLICY_FILE} etait perime (defaut d'avant le durcissement VAULT du 2026-09-17, Viewer/Technician avaient encore acces VAULT). Migre automatiquement vers le defaut actuel. Ancienne version sauvegardee: ${bak}" >&2
+        return 0
+    fi
+    local vv vt
+    vv="$(awk -F'\t' '$1=="Viewer"{print $NF}' "${SONAR_POLICY_FILE}" 2>/dev/null)"
+    vt="$(awk -F'\t' '$1=="Technician"{print $NF}' "${SONAR_POLICY_FILE}" 2>/dev/null)"
+    if [[ -n "$vv" && "$vv" != "-" ]] || [[ -n "$vt" && "$vt" != "-" ]]; then
+        sonar_audit "POLICY_PERMISSIVE_VAULT_DETECTED" "viewer_vault=${vv:-?};technician_vault=${vt:-?}"
+        echo "[SONAR][ATTENTION] ${SONAR_POLICY_FILE}: acces VAULT non restreint ('-') pour un role libre-service (Viewer=${vv:-?}, Technician=${vt:-?}). Si ce n'est pas une personnalisation voulue, comparez avec le defaut actuel de sonar_security_init et corrigez manuellement." >&2
+    fi
 }
 
 sonar_hash() {
@@ -4425,6 +4478,7 @@ sonar_structural_self_audit() {
     grep -q '^sonar_generate_vault_helper() {' "$self" && echo 'PASS: vault helper generator present' || { echo 'FAIL: vault helper generator missing'; errors=$((errors+1)); }
     grep -q '^sonar_generate_build_watermark() {' "$self" && echo 'PASS: build watermark present' || { echo 'FAIL: build watermark missing'; errors=$((errors+1)); }
     grep -q '^sonar_protect_catalog_final() {' "$self" && echo 'PASS: catalog protection present' || { echo 'FAIL: catalog protection missing'; errors=$((errors+1)); }
+    grep -q '^sonar_policy_check_stale() {' "$self" && echo 'PASS: stale policy.tsv migration check present' || { echo 'FAIL: stale policy.tsv migration check missing'; errors=$((errors+1)); }
     # Garde-fou TSV (item [12], audit externe) : chaque TSV embarque en
     # heredoc doit avoir au moins une tabulation par ligne de donnees. Un
     # editeur qui convertit les tabulations en espaces casse "awk -F'\t'"
@@ -4459,7 +4513,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.37.0-protect-catalog"
+SONAR_VERSION="3.37.1-policy-migration"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4888,6 +4942,32 @@ sonar_self_test_v2() {
             printf 'WARN\t--protect-catalog encrypt/decrypt round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
         fi
         rm -rf "${_pc_mp}" "${_pc_root}"
+        grep -q '^sonar_policy_check_stale() {' "$self" && printf 'PASS\tStale policy.tsv migration check present\n' || { printf 'FAIL\tStale policy.tsv migration check missing\n'; errors=$((errors+1)); }
+        local _pol_root _pol_file _pol_bak_count
+        _pol_root="$(mktemp -d)"
+        mkdir -p "${_pol_root}/Secure/Policies"
+        _pol_file="${_pol_root}/Secure/Policies/policy.tsv"
+        printf 'ROLE\tAUDIT\tDIAGNOSE\tDEPLOY\tDESTRUCTIVE\tFORENSIC\tVAULT\nViewer\tR\tR\t-\t-\t-\tR\nTechnician\tR\tR\tR\t-\t-\tRW\nSenior\tR\tR\tR\tCONFIRM\tR\tRW\nForensic\tR\tR\t-\t-\tRW\tRW\nAdmin\tRW\tRW\tR\tCONFIRM\tRW\tRW\nExpert\tRW\tRW\tR\tCONFIRM\tRW\tRW\n' > "${_pol_file}"
+        SONAR_ROOT="${_pol_root}" "$self" --security-status >/dev/null 2>&1
+        _pol_bak_count=$(find "${_pol_root}/Secure/Policies" -maxdepth 1 -name 'policy.tsv.bak.*' | wc -l)
+        if [[ "$(awk -F'\t' '$1=="Technician"{print $NF}' "${_pol_file}")" == "-" ]] && [[ "${_pol_bak_count}" -eq 1 ]]; then
+            printf 'PASS\tKnown-stale pre-2026-09-17 policy.tsv is auto-migrated with a timestamped backup\n'
+        else
+            printf 'FAIL\tKnown-stale policy.tsv was NOT migrated (or backup missing)\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_pol_root}"
+        _pol_root="$(mktemp -d)"
+        mkdir -p "${_pol_root}/Secure/Policies"
+        _pol_file="${_pol_root}/Secure/Policies/policy.tsv"
+        printf 'ROLE\tAUDIT\tDIAGNOSE\tDEPLOY\tDESTRUCTIVE\tFORENSIC\tVAULT\nViewer\tR\tR\t-\t-\t-\t-\nTechnician\tR\tR\tR\t-\t-\tCUSTOM\nSenior\tR\tR\tR\tCONFIRM\tR\tRW\nForensic\tR\tR\t-\t-\tRW\tRW\nAdmin\tRW\tRW\tR\tCONFIRM\tRW\tRW\nExpert\tRW\tRW\tR\tCONFIRM\tRW\tRW\n' > "${_pol_file}"
+        SONAR_ROOT="${_pol_root}" "$self" --security-status >/dev/null 2>&1
+        _pol_bak_count=$(find "${_pol_root}/Secure/Policies" -maxdepth 1 -name 'policy.tsv.bak.*' | wc -l)
+        if [[ "$(awk -F'\t' '$1=="Technician"{print $NF}' "${_pol_file}")" == "CUSTOM" ]] && [[ "${_pol_bak_count}" -eq 0 ]]; then
+            printf 'PASS\tA non-default (customized) policy.tsv is left untouched, never overwritten\n'
+        else
+            printf 'FAIL\tA customized policy.tsv was modified when it should have been left alone\n'; errors=$((errors+1))
+        fi
+        rm -rf "${_pol_root}"
         # Ventoy theme : verifie que "file" dans ventoy.json pointe vers
         # theme.txt (script GRUB2), pas directement vers l'image PNG —
         # cause racine du crash "alloc magic is broken" identifiee le
