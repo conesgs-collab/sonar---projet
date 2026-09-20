@@ -1,0 +1,27 @@
+# HDD mourant : SMART FAILED + secteurs en attente + erreurs E/S. Symptome : ne demarre plus.
+sys.diag_root=yes
+sys.firmware=uefi
+sys.secureboot=on
+sys.ram_mb=8192
+sys.mce_count=0
+sys.temp_max_c=58
+boot.efi_entries=1
+boot.windows_entry=yes
+win.partitions=1
+esp.count=1
+disk.sda.model=WDC WD10JPVX
+disk.sda.rota=1
+disk.sda.tran=sata
+disk.sda.ptable=gpt
+disk.sda.io_errors=14
+disk.sda.smart_overall=FAILED
+disk.sda.smart_realloc=212
+disk.sda.smart_pending=48
+disk.sda.smart_uncorrect=9
+disk.sda.smart_power_on_h=41200
+disk.sda.smart_temp_c=44
+part.sda3.is_esp=no
+part.sda3.bitlocker=no
+part.sda3.fs_state=dirty
+part.sda3.has_windows=yes
+part.sda3.free_pct=22

@@ -1,0 +1,22 @@
+# Disque chiffre BitLocker : aucune reparation possible sans la cle.
+sys.diag_root=yes
+sys.firmware=uefi
+sys.secureboot=on
+sys.ram_mb=16384
+win.partitions=0
+esp.count=1
+boot.efi_entries=1
+disk.nvme0n1.model=KXG60ZNV
+disk.nvme0n1.rota=0
+disk.nvme0n1.tran=nvme
+disk.nvme0n1.ptable=gpt
+disk.nvme0n1.io_errors=0
+disk.nvme0n1.smart_overall=PASSED
+disk.nvme0n1.nvme_crit_warn=0
+disk.nvme0n1.nvme_pct_used=12
+part.nvme0n1p1.is_esp=yes
+part.nvme0n1p1.bootmgfw=yes
+part.nvme0n1p1.bcd=yes
+part.nvme0n1p1.bitlocker=no
+part.nvme0n1p3.is_esp=no
+part.nvme0n1p3.bitlocker=yes

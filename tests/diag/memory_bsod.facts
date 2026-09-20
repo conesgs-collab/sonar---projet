@@ -1,0 +1,24 @@
+# Ecrans bleus aleatoires : erreurs machine-check + bridage thermique + batterie usee.
+sys.diag_root=yes
+sys.firmware=uefi
+sys.ram_mb=2048
+sys.mce_count=3
+sys.edac_errors=0
+sys.thermal_throttle=17
+sys.temp_max_c=93
+win.partitions=1
+esp.count=1
+boot.efi_entries=1
+disk.sda.model=SanDisk SSD
+disk.sda.rota=0
+disk.sda.tran=sata
+disk.sda.ptable=gpt
+disk.sda.io_errors=0
+disk.sda.smart_overall=PASSED
+disk.sda.smart_realloc=0
+disk.sda.smart_pending=0
+part.sda1.is_esp=yes
+part.sda1.bootmgfw=yes
+part.sda1.bcd=yes
+battery.health_pct=38
+battery.cycles=1100

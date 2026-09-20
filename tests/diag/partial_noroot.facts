@@ -1,0 +1,7 @@
+# Execute sans root : le moteur doit le signaler.
+sys.diag_root=no
+sys.firmware=bios
+sys.ram_mb=8192
+disk.sda.model=Generic
+disk.sda.rota=1
+disk.sda.smart_overall=unknown

@@ -6,6 +6,74 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.42.0-intelligent-diagnostic] — 2026-09-20
+
+### Contexte
+Demande directe : « construit un diagnostic intelligent ». Existant :
+`--diagnostic` (simple relevé de l'hôte) et `--smart-advisor` (contrôle de
+l'état de SONAR lui-même) — rien qui analyse la **machine en panne** pour
+en déduire une cause probable et un plan d'action.
+
+### Ajouté — `tools/sonar_diag.sh` + `tools/diag_rules.txt`
+Trois étages, du plus fiable au plus consultatif :
+1. **Collecte** (lecture seule ; partitions montées en `ro`) : SMART SATA et
+   NVMe, erreurs d'E/S noyau par disque, cohérence de la table de
+   partitions, ESP / `bootmgfw.efi` / BCD, détection BitLocker, état NTFS
+   (sale, hibernation), espace libre, machine-check / ECC, bridage
+   thermique, températures, usure batterie, entrées UEFI. La clé
+   SONAR-SE/Ventoy est exclue de l'analyse.
+2. **Moteur de règles déterministe** (awk pur, ~36 règles en données
+   éditables) : mêmes faits ⇒ même rapport. Chaque constat porte gravité,
+   confiance chiffrée, **faits déclencheurs**, cause probable, action,
+   profil SONAR-SE et « à éviter ». Score = `100 − Σ(poids × confiance)`,
+   poids affichés. Corrélation : les indices concordants renforcent la
+   confiance (SMART FAILED + secteurs en attente + erreurs d'E/S ⇒ 99 %).
+   Priorité à la sécurité des données (un disque mourant passe avant toute
+   réparation de démarrage, `chkdsk /r`/`fsck` explicitement interdits).
+   Plan d'action sans doublon (une étape par profil). Le rapport ne
+   rassure jamais à tort : blocage grave ou diagnostic partiel (sans
+   root) ⇒ libellé dégradé / « NON CONCLUANT ».
+3. **IA locale optionnelle** (`--ai`) : Ollama LOCAL uniquement (un moteur
+   distant est refusé), rapport présenté comme donnée et non comme
+   instructions, consultatif (le rapport déterministe fait foi).
+   Repli propre si Ollama est absent/injoignable.
+
+Intégration : `Scripts/sonar_diag.sh` + `MANIFEST/DIAG_RULES.txt` déployés
+par `sonar_export_field_files` (donc `--disk` et `--field-export`),
+entrée **d)** dans le menu de SONAR Field (journalisée), commande
+`--diag-analyze <faits> [--symptom S] [--ai]` pour rejouer sur le poste du
+technicien. Documentation : `docs/DIAGNOSTIC.md`.
+
+### Vérifié
+- 31 nouveaux tests (`tests/diag/run_tests.sh`, relayés par `--self-test`) sur
+  7 scénarios de faits construits à la main : machine saine (silence,
+  100/100), disque mourant, ESP effacée, BitLocker, erreurs machine-check,
+  exécution sans root, garde-fous IA. Un test de contrôle prouve que la
+  vérification « disque sain non accusé » n'est pas vide (le premier jet
+  utilisait `\t` dans `grep -E`, qui ne signifie pas tabulation).
+- Collecteur exécuté pour de vrai (WSL root) : 42 faits réels lus,
+  règles déclenchées correctement.
+- IA réelle testée avec `gemma3` : fonctionne, mais **217 s** sur CPU seul
+  (i7-6600U, sans GPU). Trois défauts trouvés en test réel et corrigés :
+  délai de 300 s trop court (désormais 900 s, `SONAR_AI_TIMEOUT`), prompt
+  condensé + sortie limitée pour réduire le temps, et `python3` — sous
+  Git Bash c'est le faux raccourci du Windows Store (présent mais
+  inutilisable) — remplacé par un test de bon fonctionnement puis repli
+  `sed`. Le message d'erreur accusait à tort « modèle absent » pour un
+  simple délai dépassé : il distingue maintenant délai / modèle / autre.
+  Sortie réelle observée (gemma3, 4 min 10 s) : correcte sur l'essentiel mais
+  avec une **dérive de paraphrase** — « système de fichiers corrompu » alors
+  que le rapport dit « marqué sale », et « fin de vie » durci en « erreurs
+  critiques ». Confirme le choix de conception (IA consultative, rapport
+  déterministe qui fait foi) ; une consigne « reprends les termes exacts »
+  a été ajoutée au prompt, **son effet n'a pas été re-mesuré**.
+- `--self-audit` 21/21, `--self-test` 112 PASS, 0 FAIL (WSL).
+
+### Limites (voir `docs/DIAGNOSTIC.md`)
+Collecte Linux uniquement à ce stade (le WinPE n'a ni PowerShell ni WMI).
+SMART derrière certains ponts USB/RAID reste illisible (règle D012 le dit).
+Règles = heuristiques de terrain, seuils à ajuster.
+
 ## [3.41.0-radar-background] — 2026-09-20
 
 ### Contexte

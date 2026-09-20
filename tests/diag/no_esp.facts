@@ -1,0 +1,23 @@
+# Windows intact mais ESP effacee (double-boot rate). Disque sain.
+sys.diag_root=yes
+sys.firmware=uefi
+sys.secureboot=off
+sys.ram_mb=16384
+sys.mce_count=0
+boot.efi_entries=0
+boot.windows_entry=no
+win.partitions=1
+esp.count=0
+disk.sda.model=Crucial MX500
+disk.sda.rota=0
+disk.sda.tran=sata
+disk.sda.ptable=gpt
+disk.sda.io_errors=0
+disk.sda.smart_overall=PASSED
+disk.sda.smart_realloc=0
+disk.sda.smart_pending=0
+part.sda2.is_esp=no
+part.sda2.bitlocker=no
+part.sda2.fs_state=ok
+part.sda2.has_windows=yes
+part.sda2.free_pct=35

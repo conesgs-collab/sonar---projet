@@ -1112,7 +1112,17 @@ Commandes indépendantes (à la place de --disk):
                                 touche ni Ventoy ni ISO/Portable). Utile
                                 pour rafraîchir une clé existante après un
                                 --field-pin-set, ou après une mise à jour
-                                de sonar_field.sh lui-même.
+                                de sonar_field.sh lui-même. Déploie aussi
+                                le diagnostic intelligent (Scripts/
+                                sonar_diag.sh + MANIFEST/DIAG_RULES.txt).
+  --diag-analyze <FAITS> [--symptom S] [--ai]
+                                Rejoue le moteur de règles du DIAGNOSTIC
+                                INTELLIGENT (tools/sonar_diag.sh) sur des
+                                faits collectés ailleurs (clé bootée sur
+                                la machine en panne : Field-Logs/diag/*/
+                                facts.tsv). --ai ajoute un commentaire
+                                d'un Ollama LOCAL (consultatif, le rapport
+                                déterministe fait foi). Lecture seule.
 
 Couche opérationnelle V2:
   --launcher                  Launcher interactif SONAR
@@ -1883,6 +1893,21 @@ copy_payload_final() {
 # retoucher Ventoy ni le contenu ISO/Portable déjà en place). Commande
 # indépendante — mêmes deux lignes que copy_payload_final, isolées pour
 # pouvoir rafraîchir juste la partie SONAR Field d'une clé existante.
+# sonar_diag_analyze FACTS [--symptom S] [--ai] : rejoue le moteur de regles
+# du diagnostic intelligent (tools/sonar_diag.sh) sur des faits collectes
+# ailleurs (WinPE, Linux live, autre poste) — typiquement sur le PC du
+# technicien, ou Ollama local permet --ai. Lecture seule : ne touche a aucune
+# machine, n'ecrit rien. Role AUDIT requis (lecture) comme --diagnostic.
+sonar_diag_analyze() {
+    sonar_require_role AUDIT || return 1
+    local tool="${SONAR_SCRIPT_DIR}/tools/sonar_diag.sh"
+    [[ -f "$tool" ]] || { echo "[SONAR][ERROR] ${tool} introuvable." >&2; return 2; }
+    [[ $# -ge 1 && "${1:-}" != --* ]] || { echo "Usage: --diag-analyze <faits.tsv> [--symptom boot|bsod|slow|data|password|virus|other] [--ai]" >&2; return 2; }
+    local facts="$1"; shift
+    sonar_audit "DIAG_ANALYZE" "facts=$(basename "$facts");ai=$([[ " $* " == *" --ai "* ]] && echo yes || echo no)"
+    bash "$tool" --analyze "$facts" "$@"
+}
+
 sonar_field_export() {
     local mp="${1:-}"
     [[ -n "$mp" ]] || { echo "[SONAR][ERROR] --field-export nécessite un point de montage." >&2; return 2; }
@@ -2189,10 +2214,15 @@ sonar_field_menu() {
             i=$((i+1))
         done
         [[ ${#names[@]} -eq 0 ]] && echo "  (aucun profil autorisé pour ce niveau)"
+        [[ -f "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" ]] && \
+            echo "  d) DIAGNOSTIC INTELLIGENT — analyse la machine (lecture seule) et dit quoi faire"
         echo "  q) Quitter"
         read -r -p "Choix : " choice
         [[ "$choice" == "q" ]] && break
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice>=1 && choice<=${#names[@]} )); then
+        if [[ "$choice" == "d" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" ]]; then
+            sonar_field_audit "FIELD_DIAG_RUN" "outil=sonar_diag"
+            bash "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" --out "${SONAR_FIELD_LOG_DIR}/diag/DIAG_$(date +%Y%m%d-%H%M%S)" || true
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice>=1 && choice<=${#names[@]} )); then
             sonar_field_show_profile "${names[$((choice-1))]}"
         else
             echo "Choix invalide."
@@ -2219,6 +2249,18 @@ main() {
 main "$@"
 FIELD_SCRIPT_EOF
     chmod +x "${mp}/Scripts/sonar_field.sh" 2>/dev/null || true
+    # Diagnostic intelligent (tools/sonar_diag.sh + sa base de regles) : meme
+    # logique que le reste de SONAR Field — fichiers copies tels quels depuis
+    # le depot (pas de heredoc dupliquee, donc pas de derive possible entre
+    # ce qui est teste et ce qui est deploye).
+    local d="${SONAR_SCRIPT_DIR}/tools"
+    if [[ -f "${d}/sonar_diag.sh" && -f "${d}/diag_rules.txt" ]]; then
+        cp -f "${d}/sonar_diag.sh" "${mp}/Scripts/sonar_diag.sh"
+        cp -f "${d}/diag_rules.txt" "${mp}/MANIFEST/DIAG_RULES.txt"
+        chmod +x "${mp}/Scripts/sonar_diag.sh" 2>/dev/null || true
+    else
+        log "[SONAR] tools/sonar_diag.sh ou tools/diag_rules.txt absent : diagnostic intelligent NON deploye sur la cle."
+    fi
 }
 
 generate_tool_index_final() {
@@ -4513,6 +4555,12 @@ sonar_structural_self_audit() {
     grep -q '^sonar_generate_build_watermark() {' "$self" && echo 'PASS: build watermark present' || { echo 'FAIL: build watermark missing'; errors=$((errors+1)); }
     grep -q '^sonar_protect_catalog_final() {' "$self" && echo 'PASS: catalog protection present' || { echo 'FAIL: catalog protection missing'; errors=$((errors+1)); }
     grep -q '^sonar_policy_check_stale() {' "$self" && echo 'PASS: stale policy.tsv migration check present' || { echo 'FAIL: stale policy.tsv migration check missing'; errors=$((errors+1)); }
+    local _dg_dir; _dg_dir="$(cd "$(dirname "$self")" && pwd)/tools"
+    if [[ -f "${_dg_dir}/sonar_diag.sh" && -f "${_dg_dir}/diag_rules.txt" ]] && bash -n "${_dg_dir}/sonar_diag.sh" 2>/dev/null; then
+        echo 'PASS: diagnostic intelligent present (sonar_diag.sh + diag_rules.txt, bash -n)'
+    else
+        echo 'FAIL: diagnostic intelligent missing or has a syntax error (tools/sonar_diag.sh, tools/diag_rules.txt)'; errors=$((errors+1))
+    fi
     # Garde-fou TSV (item [12], audit externe) : chaque TSV embarque en
     # heredoc doit avoir au moins une tabulation par ligne de donnees. Un
     # editeur qui convertit les tabulations en espaces casse "awk -F'\t'"
@@ -4547,7 +4595,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.41.0-radar-background"
+SONAR_VERSION="3.42.0-intelligent-diagnostic"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4976,6 +5024,17 @@ sonar_self_test_v2() {
             printf 'WARN\t--protect-catalog encrypt/decrypt round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
         fi
         rm -rf "${_pc_mp}" "${_pc_root}"
+        # Diagnostic intelligent : suite de tests du moteur (scenarios de faits
+        # construits a la main, resultats attendus exacts). Chaque ligne
+        # PASS/FAIL est relayee telle quelle ; le nombre d'echecs s'ajoute.
+        if [[ -f "${SONAR_SCRIPT_DIR}/tests/diag/run_tests.sh" ]]; then
+            local _dg_out _dg_rc
+            _dg_out="$(bash "${SONAR_SCRIPT_DIR}/tests/diag/run_tests.sh" 2>&1)"; _dg_rc=$?
+            printf '%s\n' "${_dg_out}"
+            errors=$((errors + _dg_rc))
+        else
+            printf 'WARN\tDiagnostic intelligent : tests/diag/run_tests.sh absent, moteur non teste\n'; warnings=$((warnings+1))
+        fi
         grep -q '^sonar_policy_check_stale() {' "$self" && printf 'PASS\tStale policy.tsv migration check present\n' || { printf 'FAIL\tStale policy.tsv migration check missing\n'; errors=$((errors+1)); }
         local _pol_root _pol_file _pol_bak_count
         _pol_root="$(mktemp -d)"
@@ -5195,6 +5254,12 @@ sonar_self_test_v2() {
             printf 'PASS\tsonar_field.sh smoke test (menu displays, warns about unset PIN, quits cleanly)\n'
         else
             printf 'FAIL\tsonar_field.sh smoke test did not behave as expected\n'; errors=$((errors+1))
+        fi
+        if [[ -x "${_fld_dir}/Scripts/sonar_diag.sh" && -s "${_fld_dir}/MANIFEST/DIAG_RULES.txt" ]] \
+           && grep -q 'DIAGNOSTIC INTELLIGENT' <<<"${_fld_out}"; then
+            printf 'PASS\tSONAR Field deploys the intelligent diagnostic (script + rules) and offers it in its menu\n'
+        else
+            printf 'FAIL\tSONAR Field export is missing the intelligent diagnostic (Scripts/sonar_diag.sh, MANIFEST/DIAG_RULES.txt, menu entry d)\n'; errors=$((errors+1))
         fi
         local _fps_root _fps_out _fps_token
         _fps_root="$(mktemp -d)"
@@ -6196,6 +6261,7 @@ case "${1:-}" in
     --fetch) shift; if sonar_fetch_profile "${1:-}"; then exit 0; else exit $?; fi ;;
     --field-pin-set) shift; if sonar_field_pin_set "${1:-}" "${2:-}" "${3:-ALL}"; then exit 0; else exit $?; fi ;;
     --field-export) shift; if sonar_field_export "${1:-}"; then exit 0; else exit $?; fi ;;
+    --diag-analyze) shift; sonar_diag_analyze "$@"; exit $? ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
     --catalog-validate-embedded) if sonar_embedded_catalog_validate; then exit 0; else exit $?; fi ;;
     --catalog-seal) if sonar_catalog_seal; then exit 0; else exit $?; fi ;;
