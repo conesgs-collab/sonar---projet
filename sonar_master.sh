@@ -1775,7 +1775,7 @@ sonar_prepare_ventoy_theme() {
     # fonctionnel sans, juste moins lisible sur le globe.
     local pixmap_line=""
     if command -v convert >/dev/null 2>&1 \
-       && convert -size 8x8 xc:'rgba(5,10,22,0.78)' PNG32:"${out_dir}/menu_c.png" 2>/dev/null; then
+       && convert -size 8x8 xc:'rgba(0,10,4,0.80)' PNG32:"${out_dir}/menu_c.png" 2>/dev/null; then
         pixmap_line='    menu_pixmap_style = "menu_*"'
     fi
     cat > "${out_dir}/theme.txt" <<THEME_TXT_EOF
@@ -1789,8 +1789,8 @@ terminal-font: "Unifont Regular 16"
     width = 50%
     height = 58%
     item_font = "Unifont Regular 16"
-    item_color = "#ffffff"
-    selected_item_color = "#66ccff"
+    item_color = "#7dff7d"
+    selected_item_color = "#ffffff"
     item_height = 28
     item_padding = 6
     item_spacing = 4
@@ -1839,7 +1839,7 @@ if os.path.isfile(theme_txt):
         "boot_menu_language": "fr",
         "ventoy_left": "2%",
         "ventoy_top": "96%",
-        "ventoy_color": "#66ccff",
+        "ventoy_color": "#7dff7d",
     }
 os.makedirs(os.path.join(mp,"ventoy"),exist_ok=True)
 with open(os.path.join(mp,"ventoy","ventoy.json"),"w",encoding="utf-8") as f:
@@ -4547,7 +4547,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.40.1-ventoy-theme-boot-menu"
+SONAR_VERSION="3.41.0-radar-background"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

@@ -6,6 +6,29 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.41.0-radar-background] — 2026-09-20
+
+### Contexte
+Test réel du 2026-09-20 sur le HP EliteBook 840 G3 : après le fix
+`boot_menu` (3.40.1), la clé démarre **toutes les ISO sans demander de
+code** et affiche le fond personnalisé en plein écran avec les entrées
+de démarrage par-dessus — **confirmé sur matériel**. Ferme le point P0
+« thème Ventoy re-testé sur le HP EliteBook 840 G3 ».
+
+### Changé
+- Nouveau fond fourni par l'opérateur (radar vert / globe, 736×735) :
+  posé sur un canevas noir 800×600 (4:3, comme le `gfxmode` du thème)
+  → aucune déformation quand GRUB l'adapte à l'écran ; bandeau
+  « SONAR - SE / Sekou SANOU - Burkina Faso » incrusté en bas ; PNG8
+  256 couleurs (~139 Ko). Remplace `Branding/default_background.png`
+  (l'ancien globe bleu reste dans l'historique git).
+- Couleurs du menu alignées sur le radar : entrées `#7dff7d`,
+  sélection blanche, panneau sombre teinté vert, texte de version
+  Ventoy `#7dff7d`.
+- Appliqué sur la clé physique (`background.png.bak-globe-bleu` conservé).
+
+`--self-audit` 20/20, `--self-test` 81 PASS, 0 FAIL (WSL).
+
 ## [3.40.1-ventoy-theme-boot-menu] — 2026-09-20
 
 ### Contexte
