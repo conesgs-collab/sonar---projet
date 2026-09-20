@@ -34,13 +34,13 @@ copiée dans l'image montée — le seul geste qui fonctionne sur cet hôte.
 
 ### Vérifié
 - **Boot réel en VM UEFI (VirtualBox) de l'ISO reconstruite** : le menu à 16 options
-  s'affiche, la boîte à outils est présente (`WindowsSystem32sonar`), le
+  s'affiche, la boîte à outils est présente (`Windows\System32\sonar`), le
   collecteur s'exécute, le moteur charge 37 règles et produit le rapport
   (firmware UEFI, machine identifiée, libellé « SMART/matériel non évalués »).
 - Ce test VM a révélé et fait corriger 3 défauts que les tests sur hôte ne
   montraient pas : `PEFirmwareType` est ABSENT du registre WinPE tant que
   `wpeutil UpdateBootInfo` ne l'a pas écrit (firmware « ? ») ; `awk -v`
-  interprète les antislashs des chemins `X:windows...` (0 règle chargée,
+  interprète les antislashs des chemins `X:\windows\...` (0 règle chargée,
   rapport vide mais « 100/100 ») → chemins en barres obliques ; `bcdedit
   /enum` échoue en WinPE (magasin non ouvrable) → le collecteur n'émet plus de
   faux « aucune entrée Windows ».
