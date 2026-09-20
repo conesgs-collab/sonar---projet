@@ -68,6 +68,25 @@ T="$(tsv partial_noroot)"; R="$(report partial_noroot)"
 check "Diag : sans root -> D999 signale"          '[[ -n "$(field "$T" D999 4)" ]]'
 check "Diag : sans root -> NON CONCLUANT (pas 'bon etat')" 'grep -q "NON CONCLUANT" <<<"$R" && ! grep -q "bon etat apparent" <<<"$R"'
 
+# --- portabilite du moteur : meme rapport sous gawk, mawk et busybox awk.
+# (busybox awk = celui du WinPE SONAR-SE ; mawk = awk par defaut de Debian)
+ENGINE="${DIR}/../../tools/diag_engine.awk"
+ref_run() { $1 -f "$ENGINE" -v FACTS="${DIR}/$2.facts" -v RULES="${DIR}/../../tools/diag_rules.txt" -v SYMPTOM="$3" -v MODE="$4" 2>&1; }
+for _alt in "mawk" "busybox awk"; do
+    _bin="${_alt%% *}"
+    if command -v "$_bin" >/dev/null 2>&1; then
+        _ok=true
+        for _sc in "failing_disk boot" "no_esp boot" "bitlocker boot" "memory_bsod bsod" "healthy"; do
+            set -- $_sc
+            [[ "$(ref_run "awk" "$1" "${2:-}" report | md5sum)" == "$(ref_run "$_alt" "$1" "${2:-}" report | md5sum)" ]] || _ok=false
+            [[ "$(ref_run "awk" "$1" "${2:-}" tsv | md5sum)" == "$(ref_run "$_alt" "$1" "${2:-}" tsv | md5sum)" ]] || _ok=false
+        done
+        $_ok && ok "Diag : moteur identique sous '$_alt' (5 scenarios, rapport + tsv)" || ko "Diag : sortie DIFFERENTE sous '$_alt'"
+    else
+        printf 'WARN\tDiag : %s absent, compatibilite non verifiee\n' "$_alt"
+    fi
+done
+
 # --- fins de ligne Windows (CRLF) : meme resultat (regression : "uefi\r" != "uefi")
 _crlf="$(mktemp)"; sed 's/$/\r/' "${DIR}/no_esp.facts" > "$_crlf"
 _crlf_rules="$(mktemp)"; sed 's/$/\r/' "${DIR}/../../tools/diag_rules.txt" > "$_crlf_rules"
@@ -75,6 +94,12 @@ check "Diag : faits en CRLF -> meme rapport qu'en LF" '[[ "$(bash "$DIAG" --anal
 check "Diag : regles en CRLF -> meme rapport qu'en LF" '[[ "$(bash "$DIAG" --analyze "${DIR}/no_esp.facts" --rules "$_crlf_rules" --symptom boot --tsv 2>/dev/null | md5sum)" == "$(tsv no_esp boot | md5sum)" ]]'
 rm -f "$_crlf" "$_crlf_rules"
 
+
+# --- collecte WinPE : le rapport ne rassure jamais sur ce qu'il n'a pas mesure
+T="$(tsv winpe boot)"; R="$(report winpe boot)"
+check "Diag : WinPE -> S010 signale les limites (SMART/journaux)" '[[ -n "$(field "$T" S010 4)" ]]'
+check "Diag : WinPE -> jamais 'bon etat apparent'"             '! grep -q "bon etat apparent" <<<"$R" && grep -q "SMART/materiel non evalues" <<<"$R"'
+check "Diag : WinPE -> la cle SONAR-SE n'est pas analysee comme volume client" '! grep -q "part.v4" "${DIR}/winpe.facts"'
 # --- IA : moteur local injoignable -> repli propre, sans blocage
 check "Diag : --ai avec Ollama injoignable -> repli sans blocage (< 20 s)" 'start=$(date +%s); out="$(SONAR_AI_URL=http://127.0.0.1:9/api/generate bash "$DIAG" --analyze "${DIR}/healthy.facts" --ai 2>&1)"; [[ $(( $(date +%s) - start )) -lt 20 ]] && grep -q "injoignable" <<<"$out" && grep -q "commentaire IA indisponible" <<<"$out" && grep -q "SCORE DE SANTE" <<<"$out"'
 

@@ -51,6 +51,20 @@
     fichier dans boot.wim (montage DISM + copie, PAS de /Add-Package).
     Utilisez -AddRepairMenu:$false pour revenir au cmd.exe brut.
 
+.PARAMETER IncludeToolbox
+    Embarque dans boot.wim (Windows\System32\sonar) une boite a outils qui
+    depasse les seuls binaires Windows : BusyBox for Windows (busybox-w32
+    FRP-6075 w64u, SHA-256 epingle, telecharge depuis frippery.org et refuse
+    si different), le collecteur WinPE, le MEME moteur de regles que sous
+    Linux (diag_engine.awk + diag_rules.txt). Active les options 12 a 16 du
+    menu : diagnostic intelligent (rapport enregistre sur la cle dans
+    Field-Logs\diag), reparation UEFI automatique (bcdboot), chargement de
+    pilotes de stockage a chaud (drvload), lanceur d'outils portables de la
+    cle, shell BusyBox. Comme le menu, c'est de la COPIE de fichiers dans
+    l'image montee (pas de /Add-Package) : non concerne par la limite
+    connue de -IncludePowerShell. Necessite -AddRepairMenu (meme montage).
+    ACTIVE par defaut ; -IncludeToolbox:$false pour l'image sans BusyBox.
+
 .PARAMETER IncludePowerShell
     Tente d'ajouter PowerShell à l'image WinPE (WinPE-WMI > WinPE-NetFx >
     WinPE-Scripting > WinPE-PowerShell, dans cet ordre de dépendance,
@@ -129,6 +143,7 @@ param(
     [bool]$IncludePowerShell = $false,
     [bool]$IncludeBitLockerTools = $false,
     [bool]$AddRepairMenu = $true,
+    [bool]$IncludeToolbox = $true,
     [bool]$BrandBootManager = $true
 )
 
@@ -260,6 +275,49 @@ if ($AddRepairMenu) {
     $menuMountDir = Join-Path $WorkDir "mount_menu"
     New-Item -ItemType Directory -Force -Path $menuMountDir | Out-Null
 
+    # --- Boite a outils (diagnostic intelligent + BusyBox) ---------------------
+    # Pas de /Add-Package (impossible sur cet hote, voir plus haut) : on copie
+    # simplement des fichiers dans l'image montee. BusyBox fournit sh/awk/grep/
+    # dd/vi ; le moteur de diagnostic est le MEME diag_engine.awk que sous Linux.
+    $toolboxDir = $null
+    if ($IncludeToolbox) {
+        # BusyBox for Windows (busybox-w32, Ron Yorston), build FRP-6075 "w64u"
+        # (64 bits, Unicode). SHA-256 epingle : un fichier different est refuse.
+        # Verifie aussi hors ligne par signature GPG (cle publiee sur le compte
+        # GitHub de l'auteur) lors de la mise en place initiale.
+        $bbName = "busybox-w64u-FRP-6075-g169694ebd.exe"
+        $bbUrl = "https://frippery.org/files/busybox/$bbName"
+        $bbSha256 = "6e263d154d8548d1eb936f65d1d8312c80df31c45974e48d6335e4dcc0f4f34c"
+        $toolboxDir = Join-Path $WorkDir "toolbox"
+        New-Item -ItemType Directory -Force -Path $toolboxDir | Out-Null
+
+        $bbCache = Join-Path $WorkDir $bbName
+        if (-not (Test-Path $bbCache) -or (Get-FileHash $bbCache -Algorithm SHA256).Hash.ToLower() -ne $bbSha256) {
+            Write-Host "== Telechargement de BusyBox ($bbName) =="
+            Invoke-WebRequest -Uri $bbUrl -OutFile $bbCache -UseBasicParsing
+        }
+        $bbGot = (Get-FileHash $bbCache -Algorithm SHA256).Hash.ToLower()
+        if ($bbGot -ne $bbSha256) {
+            Remove-Item $bbCache -Force -ErrorAction SilentlyContinue
+            throw "BusyBox : SHA-256 inattendu ($bbGot, attendu $bbSha256) - fichier refuse. Relancez avec -IncludeToolbox:`$false pour construire sans la boite a outils."
+        }
+        Copy-Item $bbCache (Join-Path $toolboxDir "busybox.exe") -Force
+
+        # Fichiers du diagnostic, ecrits en LF sans BOM (busybox sh n'aime pas le CRLF).
+        $tbSources = @{
+            "sonar_diag_winpe.sh" = Join-Path $PSScriptRoot "winpe\sonar_diag_winpe.sh"
+            "diag_engine.awk"     = Join-Path $PSScriptRoot "diag_engine.awk"
+            "diag_rules.txt"      = Join-Path $PSScriptRoot "diag_rules.txt"
+        }
+        foreach ($name in $tbSources.Keys) {
+            $src = $tbSources[$name]
+            if (-not (Test-Path $src)) { throw "Boite a outils : fichier source introuvable : $src" }
+            $text = [System.IO.File]::ReadAllText($src) -replace "`r`n", "`n"
+            [System.IO.File]::WriteAllText((Join-Path $toolboxDir $name), $text, (New-Object System.Text.UTF8Encoding($false)))
+        }
+        Write-Host "Boite a outils preparee : $toolboxDir"
+    }
+
     # Menu batch pur (pas de PowerShell) : reprend exactement les commandes
     # documentees dans docs/WINPE.md (bootrec, bcdedit, diskpart, DISM),
     # juste presentees sans que le technicien ait a en memoriser la syntaxe.
@@ -282,6 +340,11 @@ if ($AddRepairMenu) {
         "echo 9. Exporter les journaux d'evenements (.evtx)"
         "echo 10. Diagnostic reseau (ipconfig, ping)"
         "echo 11. Invite de commandes libre (cmd.exe)"
+        "echo 12. DIAGNOSTIC INTELLIGENT (analyse, score, plan d'action)"
+        "echo 13. Reparation UEFI automatique (bcdboot vers l'ESP)"
+        "echo 14. Charger un pilote de stockage (drvload) et re-scanner"
+        "echo 15. Lancer un outil portable de la cle (CrystalDiskInfo...)"
+        "echo 16. Shell BusyBox (ls, grep, awk, vi, tar...)"
         "echo 0. Redemarrer"
         "echo ============================================"
         "set /p choix=Choix : "
@@ -296,6 +359,11 @@ if ($AddRepairMenu) {
         "if `"%choix%`"==`"9`" goto eventlog_menu"
         "if `"%choix%`"==`"10`" goto network_menu"
         "if `"%choix%`"==`"11`" goto cmdfree"
+        "if `"%choix%`"==`"12`" goto diag_menu"
+        "if `"%choix%`"==`"13`" goto uefi_repair"
+        "if `"%choix%`"==`"14`" goto drvload_menu"
+        "if `"%choix%`"==`"15`" goto tools_menu"
+        "if `"%choix%`"==`"16`" goto bb_shell"
         "if `"%choix%`"==`"0`" wpeutil reboot"
         "goto menu"
         ""
@@ -443,6 +511,105 @@ if ($AddRepairMenu) {
         "cls"
         "cmd /k"
         "goto menu"
+        ""
+        ":findkey"
+        "rem Repere la cle SONAR-SE : le lecteur qui porte MANIFEST\PROFILES.tsv"
+        "set KEY="
+        "for %%d in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do if exist %%d:\MANIFEST\PROFILES.tsv set KEY=%%d:"
+        "exit /b 0"
+        ""
+        ":diag_menu"
+        "cls"
+        "echo --- DIAGNOSTIC INTELLIGENT (lecture seule) ---"
+        "echo Collecte disques, volumes, ESP/BCD, BitLocker, hibernation, firmware,"
+        "echo puis le moteur de regles conclut : score, causes, plan d'action."
+        "set SB=%SystemRoot%\System32\sonar"
+        "if not exist `"%SB%\busybox.exe`" (echo Boite a outils absente de cette image ^(reconstruire avec -IncludeToolbox^). & pause & goto menu)"
+        "call :findkey"
+        "set OUT=X:\sonar_diag"
+        "if defined KEY set OUT=%KEY%\Field-Logs\diag"
+        "if not exist `"%OUT%`" mkdir `"%OUT%`""
+        "set STAMP=manuel"
+        "for /f %%t in ('`"%SB%\busybox.exe`" date +%%Y%%m%%d_%%H%%M%%S') do set STAMP=%%t"
+        "set SYMPT="
+        "set /p SYMPT=Symptome [boot / bsod / slow / data / virus / password / other, Entree = aucun] : "
+        "echo Collecte en cours (quelques secondes)..."
+        "rem awk -v interprete les antislashs (\s, \d...) : chemins passes en barres obliques"
+        "set SBF=%SB:\=/%"
+        "set OUTF=%OUT:\=/%"
+        "`"%SB%\busybox.exe`" sh `"%SBF%/sonar_diag_winpe.sh`" `"%OUTF%/DIAG_%STAMP%.facts`""
+        "`"%SB%\busybox.exe`" awk -f `"%SBF%/diag_engine.awk`" -v `"FACTS=%OUTF%/DIAG_%STAMP%.facts`" -v `"RULES=%SBF%/diag_rules.txt`" -v `"SYMPTOM=%SYMPT%`" -v MODE=report > `"%OUT%\DIAG_%STAMP%.txt`""
+        "`"%SB%\busybox.exe`" cat `"%OUT%\DIAG_%STAMP%.txt`" | more"
+        "echo."
+        "if defined KEY (echo Rapport enregistre sur la cle : %OUT%\DIAG_%STAMP%.txt) else (echo Cle SONAR-SE non detectee - rapport dans X:\sonar_diag ^(perdu au redemarrage^))"
+        "pause"
+        "goto menu"
+        ""
+        ":uefi_repair"
+        "cls"
+        "echo --- Reparation UEFI automatique (bcdboot) ---"
+        "echo Reconstruit les fichiers de demarrage (bootmgfw.efi + BCD) de l'ESP"
+        "echo a partir du Windows installe. Ne touche PAS aux donnees."
+        "echo Si le disque est chiffre (BitLocker), deverrouillez-le d'abord (option 6)."
+        "echo."
+        "set /p lettre=Lettre du Windows cible (ex: C) : "
+        "if not exist `"%lettre%:\Windows\System32\config\SYSTEM`" (echo Windows introuvable sur %lettre%:\ - verifiez la lettre. & pause & goto menu)"
+        "echo list volume> X:\sonar_dp1.txt"
+        "diskpart /s X:\sonar_dp1.txt"
+        "echo."
+        "echo Reperez le volume ESP : FAT32, info Systeme, ~100 a 500 Mo."
+        "set /p espvol=Numero du volume ESP (Entree = annuler) : "
+        "if `"%espvol%`"==`"`" goto menu"
+        ">X:\sonar_dp2.txt echo select volume %espvol%"
+        ">>X:\sonar_dp2.txt echo assign letter=S"
+        "diskpart /s X:\sonar_dp2.txt"
+        "if not exist S:\ (echo Attribution de la lettre S: impossible - abandon. & pause & goto menu)"
+        "set /p go=Reconstruire l'ESP S: depuis %lettre%:\Windows ? (o/n) : "
+        "if /i `"%go%`"==`"o`" bcdboot %lettre%:\Windows /s S: /f UEFI"
+        ">X:\sonar_dp3.txt echo select volume %espvol%"
+        ">>X:\sonar_dp3.txt echo remove letter=S"
+        "diskpart /s X:\sonar_dp3.txt >nul"
+        "echo."
+        "echo Termine. Redemarrez (option 0) et testez le demarrage."
+        "pause"
+        "goto menu"
+        ""
+        ":drvload_menu"
+        "cls"
+        "echo --- Charger un pilote de stockage dans le WinPE en cours ---"
+        "echo Utile si diskpart ne voit aucun disque (NVMe / Intel VMD-RST / RAID)."
+        "echo Le pilote n'est charge que pour cette session ; rien n'est modifie sur le disque."
+        "call :findkey"
+        "if defined KEY echo Dossier conseille : %KEY%\Drivers"
+        "set /p inf=Chemin d'un .inf ou d'un dossier de pilotes : "
+        "if `"%inf%`"==`"`" goto menu"
+        "if /i `"%inf:~-4%`"==`".inf`" (drvload `"%inf%`") else (for /r `"%inf%`" %%f in (*.inf) do drvload `"%%f`")"
+        "echo rescan> X:\sonar_dp4.txt"
+        "echo list disk>> X:\sonar_dp4.txt"
+        "diskpart /s X:\sonar_dp4.txt"
+        "echo."
+        "pause"
+        "goto menu"
+        ""
+        ":tools_menu"
+        "cls"
+        "echo --- Outils portables de la cle ---"
+        "call :findkey"
+        "if not defined KEY (echo Cle SONAR-SE non detectee. & pause & goto menu)"
+        "if not exist `"%KEY%\Portable`" (echo Dossier %KEY%\Portable absent. & pause & goto menu)"
+        "dir /s /b `"%KEY%\Portable\*.exe`""
+        "echo."
+        "set /p tool=Chemin complet de l'outil a lancer (Entree = retour) : "
+        "if `"%tool%`"==`"`" goto menu"
+        "start `"`" `"%tool%`""
+        "goto menu"
+        ""
+        ":bb_shell"
+        "cls"
+        "echo --- Shell BusyBox --- tapez exit pour revenir au menu."
+        "if not exist `"%SystemRoot%\System32\sonar\busybox.exe`" (echo Boite a outils absente de cette image. & pause & goto menu)"
+        "`"%SystemRoot%\System32\sonar\busybox.exe`" sh"
+        "goto menu"
     )
     $startnetPath = Join-Path $WorkDir "startnet.cmd"
     $menuLines | Set-Content -Path $startnetPath -Encoding ASCII
@@ -470,6 +637,7 @@ if ($AddRepairMenu) {
         "echo [%date% %time%] Remplacement de startnet.cmd"
         "copy /y `"$startnetPath`" `"$menuMountDir\Windows\System32\startnet.cmd`""
         "if !errorlevel! neq 0 goto :fail_mounted"
+        "::TOOLBOX::"
         "echo [%date% %time%] Demontage et commit"
         "Dism /Unmount-Image /MountDir:`"$menuMountDir`" /Commit"
         "if !errorlevel! neq 0 goto :fail_mounted"
@@ -481,6 +649,17 @@ if ($AddRepairMenu) {
         "Dism /Unmount-Image /MountDir:`"$menuMountDir`" /Discard"
         "exit /b 1"
     )
+    $toolboxScriptLines = @("echo [%date% %time%] Boite a outils non demandee - ignoree")
+    if ($toolboxDir) {
+        $toolboxScriptLines = @(
+            "echo [%date% %time%] Installation de la boite a outils (BusyBox + diagnostic)"
+            "mkdir `"$menuMountDir\Windows\System32\sonar`""
+            "xcopy /y /q `"$toolboxDir\*`" `"$menuMountDir\Windows\System32\sonar\`""
+            "if !errorlevel! neq 0 goto :fail_mounted"
+            "if not exist `"$menuMountDir\Windows\System32\sonar\busybox.exe`" goto :fail_mounted"
+        )
+    }
+    $menuScriptLines = @($menuScriptLines | ForEach-Object { if ($_ -eq "::TOOLBOX::") { $toolboxScriptLines } else { $_ } })
     $menuScriptLines | Set-Content -Path $menuScript -Encoding ASCII
 
     $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$menuScript`"" -Verb RunAs -Wait -PassThru
@@ -749,9 +928,14 @@ if ($AddRepairMenu) {
         "if !errorlevel! neq 0 exit /b 1"
         "findstr /C:`"SONAR-SE WinPE - Menu de reparation`" `"$verifyMountDir\Windows\System32\startnet.cmd`" >nul"
         "set FOUND=!errorlevel!"
+        "if !FOUND! equ 0 findstr /C:`"diag_menu`" `"$verifyMountDir\Windows\System32\startnet.cmd`" >nul"
+        "if !FOUND! equ 0 set FOUND=!errorlevel!"
         "Dism /Unmount-Image /MountDir:`"$verifyMountDir`" /Discard"
         "exit /b !FOUND!"
     )
+    if ($toolboxDir) {
+        $verifyLines = @($verifyLines | ForEach-Object { $_; if ($_ -like '*if !FOUND! equ 0 set FOUND=!errorlevel!*') { "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\busybox.exe`" set FOUND=2"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\diag_engine.awk`" set FOUND=2" } })
+    }
     $verifyLines | Set-Content -Path $verifyScript -Encoding ASCII
     $verifyProc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$verifyScript`"" -Verb RunAs -Wait -PassThru
     Dismount-DiskImage -ImagePath $OutputIso | Out-Null

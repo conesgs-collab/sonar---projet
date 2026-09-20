@@ -166,6 +166,25 @@ un hôte Windows 10 plus ancien. Voir `CHANGELOG.md` (entrée
 hôte ou avec un ADK plus ancien ; en cas d'échec, le script s'arrête
 proprement (démontage automatique, pas de montage orphelin laissé).
 
+**`-IncludeToolbox` (activé par défaut, ajouté en 3.43.0)** : le WinPE de
+base est « très limité » — cmd.exe et quelques outils, sans PowerShell ni
+WMI, et `Dism /Add-Package` est impossible sur un hôte Windows 10 (voir
+« LIMITE CONNUE » de l'aide du script). Plutôt que de contourner DISM, la
+boîte à outils est **copiée** dans l'image montée (`Windows\System32\sonar`) :
+
+| Option du menu | Ce qu'elle fait |
+|---|---|
+| 12 Diagnostic intelligent | Collecte lecture seule (disques, volumes, ESP/BCD, BitLocker, NTFS sale, hibernation, firmware) puis moteur de règles commun avec Linux : score, causes, plan d'action. Rapport enregistré sur la clé (`Field-Logs\diag`). Pas de SMART ni de journaux (règle `S010`). |
+| 13 Réparation UEFI | `bcdboot <Windows>\Windows /s S: /f UEFI` sur l'ESP choisie (lettre `S:` temporaire, retirée ensuite), avec confirmation. |
+| 14 Pilote de stockage | `drvload` d'un `.inf` ou d'un dossier (`Drivers\` de la clé), puis re-scan diskpart : pour les NVMe / Intel VMD-RST invisibles. Session uniquement, rien d'écrit sur le disque. |
+| 15 Outils portables | Liste et lance les `.exe` de `Portable\` sur la clé. |
+| 16 Shell BusyBox | `ls`, `grep`, `awk`, `vi`, `tar`, `dd`, `hexdump`… |
+
+Provenance de BusyBox : busybox-w32 (Ron Yorston) build FRP-6075 `w64u`,
+téléchargé depuis frippery.org, **SHA-256 épinglé** dans le script (un fichier
+différent est refusé) et signature GPG vérifiée à la mise en place.
+`-IncludeToolbox:$false` pour une image sans BusyBox.
+
 ## Pourquoi cette distinction (construire pour vous ≠ redistribuer)
 
 SONAR-SE **n'embarque et ne télécharge jamais** de WinPE pré-construit

@@ -6,6 +6,62 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.43.0-winpe-toolbox] — 2026-09-20
+
+### Contexte
+Retour terrain : « le WinPE SONAR est très limité ». Cause racine établie :
+sur un hôte Windows 10 (19045), DISM ne sait pas servir une image WinPE 26100
+(`CPEImg::Attach 0x80070057`), donc aucun `/Add-Package` (PowerShell, WMI,
+manage-bde) n'est possible. Au lieu de contourner DISM, la boîte à outils est
+copiée dans l'image montée — le seul geste qui fonctionne sur cet hôte.
+
+### Ajouté
+- `Build-SonarSE-WinPE.ps1 -IncludeToolbox` (défaut : oui) : embarque BusyBox
+  for Windows (busybox-w32 FRP-6075 w64u, **SHA-256 épinglé**, refus si
+  différent), le collecteur WinPE, `diag_engine.awk` et `diag_rules.txt` dans
+  `Windows\System32\sonar`. La vérification finale de l'ISO contrôle le menu
+  ET la présence de la boîte à outils.
+- Menu WinPE, options 12 à 16 : diagnostic intelligent (rapport écrit sur la
+  clé, `Field-Logs\diag`), réparation UEFI automatique (`bcdboot`, ESP en
+  lettre temporaire, confirmation), chargement de pilotes de stockage à chaud
+  (`drvload` + re-scan), lanceur d'outils portables de la clé, shell BusyBox.
+- `tools/winpe/sonar_diag_winpe.sh` : collecteur WinPE (diskpart, reg, bcdedit,
+  fsutil, accès brut aux volumes) qui produit les **mêmes clés de faits** que le
+  collecteur Linux ; le moteur de règles est commun.
+- Règle `S010` : un diagnostic WinPE n'évalue ni SMART ni journaux ; le libellé
+  du score ne dit alors jamais « bon état apparent ». Scénario de test
+  `tests/diag/winpe.facts` + 3 assertions.
+
+### Vérifié
+- **Boot réel en VM UEFI (VirtualBox) de l'ISO reconstruite** : le menu à 16 options
+  s'affiche, la boîte à outils est présente (`WindowsSystem32sonar`), le
+  collecteur s'exécute, le moteur charge 37 règles et produit le rapport
+  (firmware UEFI, machine identifiée, libellé « SMART/matériel non évalués »).
+- Ce test VM a révélé et fait corriger 3 défauts que les tests sur hôte ne
+  montraient pas : `PEFirmwareType` est ABSENT du registre WinPE tant que
+  `wpeutil UpdateBootInfo` ne l'a pas écrit (firmware « ? ») ; `awk -v`
+  interprète les antislashs des chemins `X:windows...` (0 règle chargée,
+  rapport vide mais « 100/100 ») → chemins en barres obliques ; `bcdedit
+  /enum` échoue en WinPE (magasin non ouvrable) → le collecteur n'émet plus de
+  faux « aucune entrée Windows ».
+- Le collecteur a été exécuté (élevé) sur la vraie machine : modèles de
+  disques, type de bus, GPT/MBR, volumes, ESP (bootmgfw + BCD), BitLocker par
+  signature, état NTFS, espace libre ; la clé SONAR-SE et le lecteur du WinPE
+  sont exclus des volumes « client ».
+- Pièges trouvés en test réel et corrigés : `dd if=//./C: bs=16` échoue
+  (« Invalid argument »), la lecture brute exige `bs=512` ou `head -c` ; le
+  modèle de disque est repéré par la ligne « ID » (GUID/8 hexa), pas par un
+  libellé, donc indépendant de la langue ; un chiffre juste avant `>` dans un
+  `echo` cmd (`volume 3> f`) devient une redirection de handle.
+
+### Non vérifié
+- Le boot de l'ISO sur du **matériel réel** via Ventoy (seule une VM a été
+  bootée) ; les options 13 (`bcdboot`), 14 (`drvload`) et 15 n'ont pas été
+  exécutées sur un vrai disque client — elles ne modifient rien sans
+  confirmation, mais leur effet réel reste à constater.
+- La détection de la clé (`MANIFEST\PROFILES.tsv`) et l'écriture du rapport
+  dans `Field-Logs\diag` n'ont pas été testées en WinPE (aucune clé dans la VM).
+
 ## [3.42.1-diag-crlf-safe] — 2026-09-20
 
 ### Contexte

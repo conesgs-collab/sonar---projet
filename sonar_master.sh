@@ -2254,12 +2254,13 @@ FIELD_SCRIPT_EOF
     # le depot (pas de heredoc dupliquee, donc pas de derive possible entre
     # ce qui est teste et ce qui est deploye).
     local d="${SONAR_SCRIPT_DIR}/tools"
-    if [[ -f "${d}/sonar_diag.sh" && -f "${d}/diag_rules.txt" ]]; then
+    if [[ -f "${d}/sonar_diag.sh" && -f "${d}/diag_rules.txt" && -f "${d}/diag_engine.awk" ]]; then
         cp -f "${d}/sonar_diag.sh" "${mp}/Scripts/sonar_diag.sh"
         cp -f "${d}/diag_rules.txt" "${mp}/MANIFEST/DIAG_RULES.txt"
+        cp -f "${d}/diag_engine.awk" "${mp}/Scripts/diag_engine.awk"
         chmod +x "${mp}/Scripts/sonar_diag.sh" 2>/dev/null || true
     else
-        log "[SONAR] tools/sonar_diag.sh ou tools/diag_rules.txt absent : diagnostic intelligent NON deploye sur la cle."
+        log "[SONAR] tools/sonar_diag.sh, diag_rules.txt ou diag_engine.awk absent : diagnostic intelligent NON deploye sur la cle."
     fi
 }
 
@@ -4556,10 +4557,18 @@ sonar_structural_self_audit() {
     grep -q '^sonar_protect_catalog_final() {' "$self" && echo 'PASS: catalog protection present' || { echo 'FAIL: catalog protection missing'; errors=$((errors+1)); }
     grep -q '^sonar_policy_check_stale() {' "$self" && echo 'PASS: stale policy.tsv migration check present' || { echo 'FAIL: stale policy.tsv migration check missing'; errors=$((errors+1)); }
     local _dg_dir; _dg_dir="$(cd "$(dirname "$self")" && pwd)/tools"
-    if [[ -f "${_dg_dir}/sonar_diag.sh" && -f "${_dg_dir}/diag_rules.txt" ]] && bash -n "${_dg_dir}/sonar_diag.sh" 2>/dev/null; then
-        echo 'PASS: diagnostic intelligent present (sonar_diag.sh + diag_rules.txt, bash -n)'
+    if [[ -f "${_dg_dir}/sonar_diag.sh" && -f "${_dg_dir}/diag_rules.txt" && -f "${_dg_dir}/diag_engine.awk" ]] && bash -n "${_dg_dir}/sonar_diag.sh" 2>/dev/null; then
+        echo 'PASS: diagnostic intelligent present (sonar_diag.sh + diag_engine.awk + diag_rules.txt, bash -n)'
     else
         echo 'FAIL: diagnostic intelligent missing or has a syntax error (tools/sonar_diag.sh, tools/diag_rules.txt)'; errors=$((errors+1))
+    fi
+    # Boite a outils WinPE : collecteur + build (busybox sh -n n'existe pas ici : sh -n suffit, syntaxe POSIX).
+    if [[ -f "${_dg_dir}/winpe/sonar_diag_winpe.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_diag_winpe.sh" 2>/dev/null \
+       && grep -q 'IncludeToolbox' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
+       && grep -Eq '\$bbSha256 = "[0-9a-f]{64}"' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null; then
+        echo 'PASS: boite a outils WinPE presente (collecteur sh -n, -IncludeToolbox, SHA-256 BusyBox epingle)'
+    else
+        echo 'FAIL: boite a outils WinPE incomplete (tools/winpe/sonar_diag_winpe.sh, -IncludeToolbox ou SHA-256 BusyBox epingle)'; errors=$((errors+1))
     fi
     # Garde-fou TSV (item [12], audit externe) : chaque TSV embarque en
     # heredoc doit avoir au moins une tabulation par ligne de donnees. Un
@@ -4595,7 +4604,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.42.1-diag-crlf-safe"
+SONAR_VERSION="3.43.0-winpe-toolbox"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5255,7 +5264,7 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tsonar_field.sh smoke test did not behave as expected\n'; errors=$((errors+1))
         fi
-        if [[ -x "${_fld_dir}/Scripts/sonar_diag.sh" && -s "${_fld_dir}/MANIFEST/DIAG_RULES.txt" ]] \
+        if [[ -x "${_fld_dir}/Scripts/sonar_diag.sh" && -s "${_fld_dir}/Scripts/diag_engine.awk" && -s "${_fld_dir}/MANIFEST/DIAG_RULES.txt" ]] \
            && grep -q 'DIAGNOSTIC INTELLIGENT' <<<"${_fld_out}"; then
             printf 'PASS\tSONAR Field deploys the intelligent diagnostic (script + rules) and offers it in its menu\n'
         else

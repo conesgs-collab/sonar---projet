@@ -101,9 +101,14 @@ B002 :: HIGH :: boot :: part.*.is_esp == yes && part.*.bootmgfw == no && win.par
 
 ## Limites connues (honnêtement)
 
-- **Linux uniquement pour la collecte** aujourd'hui. Le WinPE SONAR-SE n'a ni
-  PowerShell ni WMI : `Add-Package` y échoue sur un hôte Windows 10 (voir
-  `docs/WINPE.md`), la collecte Windows est donc traitée à part.
+- **WinPE : collecte « lite »**. Le WinPE n'a ni PowerShell ni WMI
+  (`Add-Package` y échoue sur un hôte Windows 10, voir `docs/WINPE.md`) ; le
+  diagnostic y tourne donc avec BusyBox for Windows embarqué
+  (`tools/winpe/sonar_diag_winpe.sh` + le **même** `diag_engine.awk`, option 12
+  du menu). Il lit disques, volumes, ESP/BCD, BitLocker, état NTFS,
+  hibernation, firmware/Secure Boot, mais **ni SMART ni journaux** : la règle
+  `S010` le signale et le libellé du score ne dit jamais « bon état apparent »
+  dans ce mode. Pour SMART/mémoire/journaux, démarrer SystemRescue.
 - SMART derrière certains ponts USB ou contrôleurs RAID reste illisible
   (constat `D012` l'indique au lieu de le taire).
 - La détection « sale / hibernation » NTFS s'appuie sur `ntfs-3g.probe`
