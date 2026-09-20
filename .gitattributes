@@ -5,3 +5,9 @@
 # autocrlf setting.
 *.sh text eol=lf
 hooks/pre-commit text eol=lf
+# Diagnostic intelligent : les regles et les scenarios de faits sont lus par
+# awk (et deployes tels quels sur la cle, lue sous Linux). Un CR en fin de ligne
+# fausserait les comparaisons ("uefi\r" != "uefi").
+tools/diag_rules.txt text eol=lf
+tests/diag/*.facts text eol=lf
+*.awk text eol=lf

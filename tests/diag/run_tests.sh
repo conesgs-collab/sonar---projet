@@ -68,6 +68,13 @@ T="$(tsv partial_noroot)"; R="$(report partial_noroot)"
 check "Diag : sans root -> D999 signale"          '[[ -n "$(field "$T" D999 4)" ]]'
 check "Diag : sans root -> NON CONCLUANT (pas 'bon etat')" 'grep -q "NON CONCLUANT" <<<"$R" && ! grep -q "bon etat apparent" <<<"$R"'
 
+# --- fins de ligne Windows (CRLF) : meme resultat (regression : "uefi\r" != "uefi")
+_crlf="$(mktemp)"; sed 's/$/\r/' "${DIR}/no_esp.facts" > "$_crlf"
+_crlf_rules="$(mktemp)"; sed 's/$/\r/' "${DIR}/../../tools/diag_rules.txt" > "$_crlf_rules"
+check "Diag : faits en CRLF -> meme rapport qu'en LF" '[[ "$(bash "$DIAG" --analyze "$_crlf" --symptom boot --tsv 2>/dev/null | md5sum)" == "$(tsv no_esp boot | md5sum)" ]]'
+check "Diag : regles en CRLF -> meme rapport qu'en LF" '[[ "$(bash "$DIAG" --analyze "${DIR}/no_esp.facts" --rules "$_crlf_rules" --symptom boot --tsv 2>/dev/null | md5sum)" == "$(tsv no_esp boot | md5sum)" ]]'
+rm -f "$_crlf" "$_crlf_rules"
+
 # --- IA : moteur local injoignable -> repli propre, sans blocage
 check "Diag : --ai avec Ollama injoignable -> repli sans blocage (< 20 s)" 'start=$(date +%s); out="$(SONAR_AI_URL=http://127.0.0.1:9/api/generate bash "$DIAG" --analyze "${DIR}/healthy.facts" --ai 2>&1)"; [[ $(( $(date +%s) - start )) -lt 20 ]] && grep -q "injoignable" <<<"$out" && grep -q "commentaire IA indisponible" <<<"$out" && grep -q "SCORE DE SANTE" <<<"$out"'
 

@@ -6,6 +6,39 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.42.1-diag-crlf-safe] — 2026-09-20
+
+### Contexte
+Relecture après 3.42.0 : `.gitattributes` ne forçait le LF que pour `*.sh`.
+Avec `core.autocrlf=true` (défaut de Git pour Windows), `tools/diag_rules.txt`
+et `tests/diag/*.facts` auraient été extraits en CRLF sur un poste Windows,
+puis copiés tels quels sur la clé et lus sous Linux : un CR en fin de ligne
+fausse silencieusement les comparaisons (`uefi\r` ≠ `uefi`), donc des règles
+ne se déclencheraient plus, sans aucune erreur.
+
+### Corrigé
+- `.gitattributes` : LF forcé pour `tools/diag_rules.txt`,
+  `tests/diag/*.facts` et `*.awk`.
+- Le moteur retire lui-même les caractères de contrôle de fin de ligne
+  (`[[:cntrl:]]`, portable gawk/mawk/busybox) à la lecture des faits et des
+  règles : robuste même si un fichier est édité sous Windows.
+- 2 tests de non-régression (faits en CRLF, règles en CRLF ⇒ même rapport).
+
+### Vérifié, et pièges rencontrés
+- Contrôle du test : sans le correctif, la règle B001 disparaît avec des
+  faits CRLF (0 ligne) ; avec, elle est là (1 ligne) — sous un vrai `gawk`
+  Linux (WSL). **Sous Git Bash le même contrôle est vide** : l'`awk` d'MSYS lit
+  en mode texte Windows et avale déjà les CR. Un test passé « au vert » sous
+  Git Bash n'aurait rien prouvé.
+- Deux tentatives d'écriture du `\r` ont mal tourné avant le bon résultat :
+  `sed` a inséré un vrai octet CR dans le code (invisible, fonctionnel mais
+  fragile), puis `perl -pi` a converti le fichier entier en CRLF. Les deux
+  ont été détectés en comptant les octets 0x0d (`tr -cd '\r' | wc -c`), pas
+  avec `grep -c $'\r'`, qui compte à tort toutes les lignes dans cet
+  environnement. Solution finale sans aucun antislash : classe POSIX.
+
+`--self-audit` 21/21, `--self-test` 114 PASS, 0 FAIL (WSL).
+
 ## [3.42.0-intelligent-diagnostic] — 2026-09-20
 
 ### Contexte

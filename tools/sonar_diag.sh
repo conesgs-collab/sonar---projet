@@ -519,6 +519,7 @@ BEGIN {
     cat["D"] = "Disque"; cat["B"] = "Demarrage"; cat["F"] = "Systeme de fichiers / donnees"
     cat["M"] = "Materiel (memoire, thermique, batterie)"; cat["S"] = "Systeme"; cat["Y"] = "Symptome signale"
     while ((getline line < FACTS) > 0) {
+        gsub(/[[:cntrl:]]+$/, "", line)
         if (line ~ /^#/ || line == "") continue
         p = index(line, "\t"); if (p == 0) p = index(line, "=")
         if (p == 0) continue
@@ -528,6 +529,7 @@ BEGIN {
     if (SYMPTOM != "") F["sys.symptom"] = SYMPTOM
     n = 0; nrules = 0; bad = 0
     while ((getline line < RULES) > 0) {
+        gsub(/[[:cntrl:]]+$/, "", line)
         if (line ~ /^[ \t]*#/ || line ~ /^[ \t]*$/) continue
         if (split(line, R, / :: /) < 11 || !(R[2] in sevrank)) { bad++; continue }
         nrules++
