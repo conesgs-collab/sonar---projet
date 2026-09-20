@@ -21,11 +21,19 @@
 #   ./sonar_diag.sh --analyze facts.tsv        rejoue les regles sur des faits
 #                                              collectes ailleurs (WinPE, autre PC)
 #   ./sonar_diag.sh --analyze facts.tsv --ai   + commentaire IA (Ollama local)
+#   ./sonar_diag.sh --client-report [DOSSIER]  rapport CLIENT (PDF + texte) assemble a partir
+#                                              du rapport technique, sans IA (phrases prêtes :
+#                                              client_templates.txt) ; DOSSIER = sortie d'un
+#                                              diagnostic (defaut : le plus recent sur la cle)
+#        options : --client-name "Nom"  --sign-key CLE.pem  --watermark FICHIER  --format pdf|txt|both
+#   ./sonar_diag.sh --sign-keygen DOSSIER      cree la paire de cles de signature (ECDSA P-256)
+#   ./sonar_diag.sh --verify-client-report rapport.pdf [--pubkey CLE.pub.pem]
+#
 #
 # Symptomes : boot | bsod | slow | data | password | virus | other
 set -uo pipefail
 
-SONAR_DIAG_VERSION="1.0.0"
+SONAR_DIAG_VERSION="1.1.0"
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
 SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 
@@ -38,7 +46,7 @@ USE_AI=false
 QUIET=false
 
 usage() {
-    sed -n '2,29p' "$SELF" | sed 's/^# \{0,1\}//'
+    sed -n '2,/^set -uo pipefail/p' "$SELF" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
 log() { $QUIET || echo "[SONAR-DIAG] $*" >&2; }
@@ -414,6 +422,12 @@ MENU
 
 find_sonar_key() {
     local m
+    # SONAR_KEY_DIR (vide ou chemin) court-circuite la recherche : tests reproductibles,
+    # et technicien qui veut forcer une cle precise.
+    if [[ -n "${SONAR_KEY_DIR+x}" ]]; then
+        [[ -n "$SONAR_KEY_DIR" && -f "$SONAR_KEY_DIR/MANIFEST/PROFILES.tsv" ]] && { echo "$SONAR_KEY_DIR"; return 0; }
+        return 1
+    fi
     for m in /run/media/*/* /media/*/* /mnt/*; do
         [[ -f "$m/MANIFEST/PROFILES.tsv" ]] && { echo "$m"; return 0; }
     done
@@ -432,6 +446,198 @@ pick_out_dir() {
     fi
 }
 
+# ============================================================================
+# 4. RAPPORT CLIENT (sans IA) : phrases pretes + PDF scelle/signe
+#    findings.tsv (rapport technique) -> client_report.awk (choisit des phrases
+#    de client_templates.txt) -> text2pdf.awk (PDF ASCII pur) -> sceau + signature.
+# ============================================================================
+CLIENT_MODE=false; CLIENT_SRC=""; CLIENT_NAME=""; SIGN_KEY="${SONAR_SIGN_KEY:-}"
+WATERMARK=""; CLIENT_FORMAT="both"; VERIFY_PDF=""; PUBKEY=""; KEYGEN_DIR=""
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -r "$1" | awk '{print $1}'
+    else return 1; fi
+}
+
+sha256_stdin_16() { { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16; }
+
+find_asset() {   # find_asset NOM_FICHIER [NOM_ALTERNATIF_SUR_LA_CLE]
+    local c
+    for c in "${SELF_DIR}/$1" "${SELF_DIR}/../tools/$1" "${SELF_DIR}/../MANIFEST/${2:-$1}"; do
+        [[ -s "$c" ]] && { echo "$c"; return 0; }
+    done
+    return 1
+}
+
+find_watermark() {
+    local c key
+    for c in "$WATERMARK" "${SELF_DIR}/../MANIFEST/BUILD_WATERMARK.txt"; do
+        [[ -n "$c" && -s "$c" ]] && { echo "$c"; return 0; }
+    done
+    if key="$(find_sonar_key 2>/dev/null)" && [[ -s "$key/MANIFEST/BUILD_WATERMARK.txt" ]]; then
+        echo "$key/MANIFEST/BUILD_WATERMARK.txt"; return 0
+    fi
+    return 1
+}
+
+latest_diag_source() {   # dossier ou fichier .facts le plus recent (les noms portent l'horodatage)
+    local key base c best=""
+    local -a cands=()
+    if key="$(find_sonar_key 2>/dev/null)"; then cands+=("$key"/Field-Logs/diag/DIAG_*); fi
+    cands+=(./SONAR_DIAG_* /tmp/SONAR_DIAG_*)
+    for c in "${cands[@]}"; do
+        [[ -e "$c" ]] || continue
+        if [[ -d "$c" && -s "$c/facts.tsv" ]] || [[ -f "$c" && "$c" == *.facts ]]; then
+            base="${c##*/}"
+            if [[ -z "$best" || "$base" > "${best##*/}" ]]; then best="$c"; fi
+        fi
+    done
+    [[ -n "$best" ]] && { echo "$best"; return 0; }
+    return 1
+}
+
+# sceau : lignes "markup" ajoutees au rapport (H intertitre, P paragraphe, M chasse fixe)
+client_seal() {   # client_seal REF BODY_HASH NOW WM_FILE|"" SIGNED(yes|no) FPR
+    local ref="$1" bh="$2" now="$3" wm="$4" signed="$5" fpr="$6" v
+    printf 'X\t140\n'      # le sceau reste d'un seul tenant : jamais coupe par un saut de page
+    printf 'H\tSceau d%sauthenticité\n' "'"
+    printf 'P\tEmpreinte du contenu et filigrane de la clé SONAR-SE : toute modification du fichier après sa création est détectable.\n'
+    printf 'M\tReference       : %s\n' "$ref"
+    printf 'M\tSHA-256 contenu : %s\n' "$bh"
+    printf 'M\tGenere le       : %s   sonar_diag %s\n' "$now" "$SONAR_DIAG_VERSION"
+    if [[ -n "$wm" ]]; then
+        for v in ID TIMESTAMP OPERATOR LABEL SIGNATURE; do
+            printf 'M\tBuild %-10s: %s\n' "$v" "$(awk -F= -v k="SONAR_BUILD_$v" '$1==k {sub(/^[^=]*=/, ""); gsub(/[[:cntrl:]]/, ""); print; exit}' "$wm")"
+        done
+    else
+        printf 'M\tFiligrane build : non disponible (cle SONAR-SE non reconnue)\n'
+    fi
+    if [[ "$signed" == yes ]]; then
+        printf 'M\tSignature       : ECDSA P-256 / SHA-256, cle %s, fichier .sig joint\n' "$fpr"
+    else
+        printf 'M\tSignature       : NON SIGNE (aucune cle de signature fournie)\n'
+    fi
+}
+
+markup_to_txt() {   # seul H, P et M apparaissent dans le sceau
+    awk -F'\t' '$1=="H" {print ""; print $2; print "----------------------------------------------"; next}
+                $1=="P" {print $2; next} $1=="M" {print $2}'
+}
+
+client_report_run() {
+    local src="$CLIENT_SRC" outdir base findings facts tpl car t2p now ref bh wm signed=no fpr="" mk tmp d
+    tpl="$(find_asset client_templates.txt CLIENT_TEMPLATES.txt)" || { echo "[SONAR-DIAG] ERREUR : client_templates.txt introuvable." >&2; return 2; }
+    car="$(find_asset client_report.awk)" || { echo "[SONAR-DIAG] ERREUR : client_report.awk introuvable." >&2; return 2; }
+    t2p="$(find_asset text2pdf.awk)" || { echo "[SONAR-DIAG] ERREUR : text2pdf.awk introuvable." >&2; return 2; }
+    case "$CLIENT_FORMAT" in pdf|txt|both) ;; *) echo "Format inconnu : $CLIENT_FORMAT (pdf|txt|both)" >&2; return 2 ;; esac
+    if [[ -n "$SIGN_KEY" ]]; then
+        command -v openssl >/dev/null 2>&1 || { echo "[SONAR-DIAG] ERREUR : openssl absent, signature impossible." >&2; return 2; }
+        [[ -r "$SIGN_KEY" ]] || { echo "[SONAR-DIAG] ERREUR : cle de signature illisible : $SIGN_KEY" >&2; return 2; }
+        fpr="$(openssl pkey -in "$SIGN_KEY" -pubout -outform DER 2>/dev/null | sha256_stdin_16)"
+        [[ -n "$fpr" ]] || { echo "[SONAR-DIAG] ERREUR : cle de signature invalide : $SIGN_KEY" >&2; return 2; }
+        signed=yes
+    fi
+
+    [[ -n "$src" ]] || src="$(latest_diag_source)" || { echo "[SONAR-DIAG] Aucun diagnostic trouve : lancez d'abord sonar_diag.sh, ou indiquez un dossier/fichier de faits." >&2; return 2; }
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' RETURN
+    if [[ -d "$src" ]]; then
+        outdir="$src"; base="client_report"; facts="$src/facts.tsv"
+        [[ -s "$facts" ]] || { echo "[SONAR-DIAG] Pas de facts.tsv dans $src" >&2; return 2; }
+        findings="$src/findings.tsv"
+        [[ -s "$findings" ]] || { analyze "$facts" tsv > "$tmp/findings.tsv" || return $?; findings="$tmp/findings.tsv"; }
+    elif [[ -f "$src" ]]; then
+        facts="$src"; d="$(dirname "$src")"; base="$(basename "${src%.*}")_client"
+        if [[ -n "$OUT_DIR" ]]; then outdir="$OUT_DIR"; mkdir -p "$outdir"
+        elif [[ -w "$d" ]]; then outdir="$d"
+        else outdir="$(pick_out_dir)"; mkdir -p "$outdir"; fi
+        analyze "$facts" tsv > "$tmp/findings.tsv" || return $?; findings="$tmp/findings.tsv"
+    else
+        echo "[SONAR-DIAG] Source introuvable : $src" >&2; return 2
+    fi
+
+    now="${SONAR_DIAG_NOW:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+    ref="SE-$(sha256_file "$findings" | cut -c1-10 | tr 'a-f' 'A-F')"
+    CLIENT_NAME="${CLIENT_NAME//[[:cntrl:]]/}"; CLIENT_NAME="${CLIENT_NAME//\\/}"
+
+    mk="$tmp/body.mk"
+    awk -f "$car" -v FINDINGS="$findings" -v FACTS="$facts" -v TEMPLATES="$tpl" -v FORMAT=markup \
+        -v CLIENT="$CLIENT_NAME" -v DATE="${now:0:10}" -v REF="$ref" > "$mk" || return $?
+    bh="$(sha256_file "$mk")"
+    wm="$(find_watermark)" || wm=""
+
+    client_seal "$ref" "$bh" "$now" "$wm" "$signed" "$fpr" > "$tmp/seal.mk"
+    local wmid="" wmshort="sans filigrane"
+    if [[ -n "$wm" ]]; then wmid="$(awk -F= '$1=="SONAR_BUILD_ID" {print $2; exit}' "$wm" | tr -d '[:cntrl:]')"; wmshort="build ${wmid:0:12}"; fi
+
+    local pdf="$outdir/${base}.pdf" txt="$outdir/${base}.txt" out_list=""
+    if [[ "$CLIENT_FORMAT" != txt ]]; then
+        cat "$mk" "$tmp/seal.mk" | LC_ALL=C awk -f "$t2p" \
+            -v TITLE="Rapport d'état de l'appareil - $ref" -v AUTHOR="SONAR-SE" \
+            -v KEYWORDS="ref=$ref; $wmshort; sha256=$bh" -v FOOT="SONAR-SE - Réf. $ref - $wmshort" \
+            -v PDFDATE="$(printf '%s' "$now" | tr -d ':TZ-')" -v DOCID="${bh:0:32}" > "$pdf" || return $?
+        out_list="$pdf"
+    fi
+    if [[ "$CLIENT_FORMAT" != pdf ]]; then
+        { LC_ALL=C awk -f "$car" -v FINDINGS="$findings" -v FACTS="$facts" -v TEMPLATES="$tpl" -v FORMAT=txt \
+              -v CLIENT="$CLIENT_NAME" -v DATE="${now:0:10}" -v REF="$ref"
+          markup_to_txt < "$tmp/seal.mk"; } > "$txt" || return $?
+        out_list="$out_list $txt"
+    fi
+    local f
+    for f in $out_list; do
+        printf '%s  %s\n' "$(sha256_file "$f")" "$(basename "$f")" > "$f.sha256"
+        if [[ "$signed" == yes ]]; then
+            openssl dgst -sha256 -sign "$SIGN_KEY" -out "$f.sig" "$f" || { echo "[SONAR-DIAG] ERREUR : signature echouee pour $f" >&2; return 1; }
+        fi
+        echo "Rapport client : $f  ($([[ $signed == yes ]] && echo "signe, cle $fpr" || echo "NON signe : aucune cle fournie"))"
+    done
+    [[ -n "$wm" ]] || log "Filigrane de build introuvable : le sceau l'indique (utilisez --watermark ou lancez depuis la cle SONAR-SE)."
+    return 0
+}
+
+sign_keygen() {
+    local d="$KEYGEN_DIR"
+    command -v openssl >/dev/null 2>&1 || { echo "openssl absent." >&2; return 2; }
+    mkdir -p "$d" || return 2
+    [[ -e "$d/client_sign.key" ]] && { echo "Refus d'ecraser $d/client_sign.key (une cle existe deja)." >&2; return 2; }
+    ( umask 077; openssl ecparam -name prime256v1 -genkey -noout -out "$d/client_sign.key" ) || return 1
+    openssl ec -in "$d/client_sign.key" -pubout -out "$d/client_sign.pub.pem" 2>/dev/null || return 1
+    chmod 600 "$d/client_sign.key" 2>/dev/null || true
+    echo "Cle privee   : $d/client_sign.key   (SECRETE : ne la mettez pas sur la cle SONAR-SE)"
+    echo "Cle publique : $d/client_sign.pub.pem   (a donner a qui doit verifier vos rapports)"
+    echo "Empreinte    : $(openssl pkey -in "$d/client_sign.key" -pubout -outform DER 2>/dev/null | sha256_stdin_16)"
+}
+
+verify_client_report() {
+    local f="$VERIFY_PDF" exp act rc=0
+    [[ -s "$f" ]] || { echo "Fichier introuvable : $f" >&2; return 2; }
+    if [[ -s "$f.sha256" ]]; then
+        exp="$(awk '{print $1; exit}' "$f.sha256")"; act="$(sha256_file "$f")"
+        if [[ "$exp" == "$act" ]]; then echo "OK    integrite : l'empreinte SHA-256 correspond ($act)"
+        else echo "ECHEC integrite : le fichier a ete modifie (attendu $exp, calcule $act)"; return 1; fi
+    else
+        echo "ATTENTION : pas de fichier .sha256 a cote du rapport : integrite non verifiable."; rc=3
+    fi
+    if [[ -s "$f.sig" ]]; then
+        if [[ -z "$PUBKEY" ]]; then
+            echo "ATTENTION : signature presente mais --pubkey non fourni : authenticite NON verifiee."; rc=3
+        elif ! command -v openssl >/dev/null 2>&1; then
+            echo "ATTENTION : openssl absent : signature non verifiable."; rc=3
+        elif openssl dgst -sha256 -verify "$PUBKEY" -signature "$f.sig" "$f" >/dev/null 2>&1; then
+            echo "OK    authenticite : signature valide avec la cle publique fournie"
+        else
+            echo "ECHEC authenticite : la signature ne correspond pas a ce fichier avec cette cle"; return 1
+        fi
+    else
+        echo "ATTENTION : rapport non signe (pas de fichier .sig) : authenticite non verifiable."; rc=3
+    fi
+    echo "Sceau lu dans le PDF :"
+    grep -a -o '(\(Reference[^)]*\|Build [A-Z]*[^)]*\|Signature[^)]*\))' "$f" 2>/dev/null | sed 's/^(/  /; s/)$//' || true
+    return $rc
+}
+
 main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -443,6 +649,14 @@ main() {
             --ai)       USE_AI=true; shift ;;
             --tsv)      MODE_TSV=true; shift ;;
             --quiet)    QUIET=true; shift ;;
+            --client-report) CLIENT_MODE=true; if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then CLIENT_SRC="$2"; shift; fi; shift ;;
+            --client-name)   CLIENT_NAME="${2:-}"; shift 2 ;;
+            --sign-key)      SIGN_KEY="${2:-}"; shift 2 ;;
+            --watermark)     WATERMARK="${2:-}"; shift 2 ;;
+            --format)        CLIENT_FORMAT="${2:-}"; shift 2 ;;
+            --sign-keygen)   KEYGEN_DIR="${2:-}"; shift 2 ;;
+            --verify-client-report) VERIFY_PDF="${2:-}"; shift 2 ;;
+            --pubkey)        PUBKEY="${2:-}"; shift 2 ;;
             --version)  echo "sonar_diag ${SONAR_DIAG_VERSION}"; exit 0 ;;
             -h|--help)  usage; exit 0 ;;
             *) echo "Option inconnue : $1 (voir --help)" >&2; exit 2 ;;
@@ -450,6 +664,10 @@ main() {
     done
     case "$SYMPTOM" in ""|boot|bsod|slow|data|password|virus|other) ;; *)
         echo "Symptome inconnu : $SYMPTOM (boot|bsod|slow|data|password|virus|other)" >&2; exit 2 ;; esac
+
+    if [[ -n "$KEYGEN_DIR" ]]; then sign_keygen; exit $?; fi
+    if [[ -n "$VERIFY_PDF" ]]; then verify_client_report; exit $?; fi
+    if $CLIENT_MODE; then client_report_run; exit $?; fi
 
     if [[ -n "$ANALYZE_ONLY" ]]; then
         [[ -s "$ANALYZE_ONLY" ]] || { echo "Fichier de faits introuvable : $ANALYZE_ONLY" >&2; exit 2; }
@@ -483,6 +701,7 @@ main() {
     fi
     echo
     echo "Rapport enregistre dans : $out  (report.txt, findings.tsv, facts.tsv)"
+    echo "Pour le client : $0 --client-report \"$out\"   (PDF + texte, sans IA)"
 }
 
 main "$@"

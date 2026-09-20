@@ -99,6 +99,56 @@ B002 :: HIGH :: boot :: part.*.is_esp == yes && part.*.bootmgfw == no && win.par
   `sonar_master.sh --self-test`). Ajouter un scénario `tests/diag/*.facts` et
   ses assertions pour chaque nouvelle règle.
 
+## Rapport client (`--client-report`) — sans IA
+
+Le technicien garde le rapport technique (`report.txt`, tout le détail) ; le client
+reçoit une page qui dit l'essentiel en langage simple.
+
+```bash
+sudo ./sonar_diag.sh --symptom boot                       # rapport technique, comme avant
+./sonar_diag.sh --client-report /chemin/DIAG_2026...  \
+        --client-name "Mme Ouédraogo" --sign-key ~/sonar_sign/client_sign.key
+```
+
+- **Sans IA.** `tools/client_report.awk` ne fait que *choisir* des phrases écrites à la main
+  dans `tools/client_templates.txt` (28 cellules : 7 profils × 4 gravités, plus 6 verdicts
+  globaux et des surcharges par règle : BitLocker, disque mourant, disque plein, batterie…).
+  Modifier une phrase = modifier ce fichier. Même constats ⇒ même rapport, octet pour octet.
+- **Jamais rassurant à tort.** Diagnostic sans root ou depuis le WinPE ⇒ verdict « nous ne
+  pouvons pas conclure » ; un constat critique l'emporte toujours sur « partiel ». Les
+  constats sans profil et purement informatifs ne sont pas montrés au client.
+- **Pas de jargon.** Pas de SMART, de secteurs, de `sda`, de `bcdedit` : un test l'interdit.
+  La référence `SE-XXXXXXXXXX` (dérivée du rapport technique) permet au technicien de retrouver
+  le dossier ; le détail reste chez lui.
+- **Sorties** : `client_report.pdf` (A4, ASCII pur, écrit par `tools/text2pdf.awk` : aucune
+  bibliothèque, aucun binaire) et `client_report.txt` (e-mail / impression). `--format pdf|txt|both`.
+
+### Sceau, filigrane et signature — ce que ça prouve, et ce que ça ne prouve pas
+
+Le PDF se termine par un **sceau** : référence, SHA-256 du contenu, date, et le **filigrane de
+build existant** (`MANIFEST/BUILD_WATERMARK.txt` : ID, date, opérateur, label, signature HMAC).
+S'il n'est pas trouvé, le sceau écrit « non disponible » — il n'invente rien.
+
+La **signature** est détachée (`rapport.pdf.sig`, ECDSA P-256 / SHA-256, via `openssl`) et
+accompagnée de `rapport.pdf.sha256`. Ce n'est **pas** une signature PDF intégrée reconnue par
+Acrobat (qui exige un certificat émis par une autorité) : c'est une signature de fichier,
+vérifiable par quiconque a la clé publique.
+
+```bash
+./sonar_diag.sh --sign-keygen ~/sonar_sign          # une fois : client_sign.key (SECRÈTE) + .pub.pem
+./sonar_diag.sh --verify-client-report rapport.pdf --pubkey client_sign.pub.pem
+#   0 = intégrité et signature valides   1 = modifié / mauvaise clé   3 = non vérifiable (pas de clé publique, pas de signature)
+```
+
+- Le filigrane HMAC ne se vérifie **que** sur la machine qui détient le secret de build
+  (`sonar_master.sh --verify-watermark`) : le client ne peut pas le contrôler, il sert à
+  retracer la clé USB d'origine.
+- Sans clé de signature, le rapport est produit mais marqué **NON SIGNE**, et la vérification
+  ne prétend jamais le contraire (code 3).
+- La clé privée ne doit **pas** être sur la clé SONAR-SE : quiconque la copierait pourrait
+  signer à votre nom. Gardez-la sur le poste du technicien.
+- `SONAR_KEY_DIR` force (ou désactive, si vide) la recherche de la clé SONAR-SE.
+
 ## Limites connues (honnêtement)
 
 - **WinPE : collecte « lite »**. Le WinPE n'a ni PowerShell ni WMI

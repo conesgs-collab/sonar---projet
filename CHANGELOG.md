@@ -6,6 +6,36 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.44.0-client-report] — 2026-09-20
+
+### Contexte
+Le rapport technique est fait pour le technicien ; un client n'en tire rien. Demande : que
+le client lise une phrase claire pendant que le technicien garde les détails, sans IA, avec
+une sortie PDF signée portant le filigrane de build existant.
+
+### Ajouté
+- `tools/client_templates.txt` : une phrase de constat et une recommandation prêtes pour
+  chacun des 7 profils × 4 gravités (28 cellules), 6 verdicts globaux, 3 textes fixes et des
+  surcharges par règle (`@F003` BitLocker, `@D001`, `@F004`, `@F002`, `@M003`, `@M006`).
+- `sonar_diag.sh --client-report [DOSSIER|faits]` (`--client-name`, `--format`) : assemble le
+  rapport à partir de `findings.tsv` avec `tools/client_report.awk` (awk pur, déterministe).
+- `tools/text2pdf.awk` : générateur PDF 1.4 en awk pur (ASCII, polices standard, xref exacte),
+  identique sous gawk, mawk et busybox awk ; validé par `qpdf --check` et un rendu poppler.
+- Sceau (référence, SHA-256 du contenu, filigrane de build) + signature détachée ECDSA
+  (`--sign-key`, `--sign-keygen`, `--verify-client-report`, `--pubkey`).
+- SONAR Field : entrée de menu `c) RAPPORT CLIENT` ; `--field-export` déploie les 3 fichiers.
+- 34 tests (`Client :`) dont : chaque cellule de gabarit présente, aucun jargon dans le texte
+  client, jamais « aucun signe de panne » en diagnostic partiel/WinPE, critique jamais masqué
+  par « partiel », PDF bien formé, déterminisme, signature valide / modifiée / mauvaise clé /
+  empreinte falsifiée, filigrane présent ou déclaré absent.
+
+### À savoir
+- La signature est un fichier `.sig` détaché, pas une signature PDF intégrée reconnue par
+  Acrobat. Le filigrane HMAC n'est vérifiable que sur la machine qui détient le secret de build.
+- La clé privée de signature ne doit pas se trouver sur la clé SONAR-SE.
+- `SONAR_KEY_DIR` permet d'isoler les tests de la vraie clé (les tests l'utilisent : une
+  première exécution avait trouvé et lu le filigrane de la clé physique montée sous WSL).
+
 ## [3.43.0-winpe-toolbox] — 2026-09-20
 
 ### Contexte

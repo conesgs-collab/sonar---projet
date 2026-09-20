@@ -2216,12 +2216,24 @@ sonar_field_menu() {
         [[ ${#names[@]} -eq 0 ]] && echo "  (aucun profil autorisé pour ce niveau)"
         [[ -f "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" ]] && \
             echo "  d) DIAGNOSTIC INTELLIGENT — analyse la machine (lecture seule) et dit quoi faire"
+        [[ -f "${SONAR_FIELD_KEY}/Scripts/client_report.awk" ]] && \
+            echo "  c) RAPPORT CLIENT — PDF en langage simple, tire du dernier diagnostic"
         echo "  q) Quitter"
         read -r -p "Choix : " choice
         [[ "$choice" == "q" ]] && break
         if [[ "$choice" == "d" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" ]]; then
             sonar_field_audit "FIELD_DIAG_RUN" "outil=sonar_diag"
             bash "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" --out "${SONAR_FIELD_LOG_DIR}/diag/DIAG_$(date +%Y%m%d-%H%M%S)" || true
+        elif [[ "$choice" == "c" && -f "${SONAR_FIELD_KEY}/Scripts/client_report.awk" ]]; then
+            local _cdir _cname
+            _cdir="$(ls -d "${SONAR_FIELD_LOG_DIR}"/diag/DIAG_*/ 2>/dev/null | sort | tail -1)"
+            if [[ -z "$_cdir" ]]; then
+                echo "Aucun diagnostic sur la cle : lancez d'abord l'option d."
+            else
+                read -r -p "Nom du client (Entree = sans nom) : " _cname
+                sonar_field_audit "FIELD_CLIENT_REPORT" "source=$(basename "$_cdir")"
+                bash "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" --client-report "${_cdir%/}" --client-name "$_cname" || true
+            fi
         elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice>=1 && choice<=${#names[@]} )); then
             sonar_field_show_profile "${names[$((choice-1))]}"
         else
@@ -2261,6 +2273,14 @@ FIELD_SCRIPT_EOF
         chmod +x "${mp}/Scripts/sonar_diag.sh" 2>/dev/null || true
     else
         log "[SONAR] tools/sonar_diag.sh, diag_rules.txt ou diag_engine.awk absent : diagnostic intelligent NON deploye sur la cle."
+    fi
+    # Rapport client (--client-report) : phrases pretes + mise en page PDF.
+    if [[ -f "${d}/client_templates.txt" && -f "${d}/client_report.awk" && -f "${d}/text2pdf.awk" ]]; then
+        cp -f "${d}/client_templates.txt" "${mp}/MANIFEST/CLIENT_TEMPLATES.txt"
+        cp -f "${d}/client_report.awk" "${mp}/Scripts/client_report.awk"
+        cp -f "${d}/text2pdf.awk" "${mp}/Scripts/text2pdf.awk"
+    else
+        log "[SONAR] tools/client_templates.txt, client_report.awk ou text2pdf.awk absent : rapport client NON deploye sur la cle."
     fi
 }
 
@@ -4562,6 +4582,12 @@ sonar_structural_self_audit() {
     else
         echo 'FAIL: diagnostic intelligent missing or has a syntax error (tools/sonar_diag.sh, tools/diag_rules.txt)'; errors=$((errors+1))
     fi
+    if [[ -f "${_dg_dir}/client_templates.txt" && -f "${_dg_dir}/client_report.awk" && -f "${_dg_dir}/text2pdf.awk" ]] \
+       && bash -n "${_dg_dir}/sonar_diag.sh" 2>/dev/null && grep -q -- '--client-report' "${_dg_dir}/sonar_diag.sh"; then
+        echo 'PASS: rapport client present (client_templates.txt + client_report.awk + text2pdf.awk, option --client-report)'
+    else
+        echo 'FAIL: rapport client incomplet (tools/client_templates.txt, client_report.awk, text2pdf.awk ou --client-report)'; errors=$((errors+1))
+    fi
     # Boite a outils WinPE : collecteur + build (busybox sh -n n'existe pas ici : sh -n suffit, syntaxe POSIX).
     if [[ -f "${_dg_dir}/winpe/sonar_diag_winpe.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_diag_winpe.sh" 2>/dev/null \
        && grep -q 'IncludeToolbox' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
@@ -4604,7 +4630,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.43.0-winpe-toolbox"
+SONAR_VERSION="3.44.0-client-report"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5269,6 +5295,12 @@ sonar_self_test_v2() {
             printf 'PASS\tSONAR Field deploys the intelligent diagnostic (script + rules) and offers it in its menu\n'
         else
             printf 'FAIL\tSONAR Field export is missing the intelligent diagnostic (Scripts/sonar_diag.sh, MANIFEST/DIAG_RULES.txt, menu entry d)\n'; errors=$((errors+1))
+        fi
+        if [[ -s "${_fld_dir}/Scripts/client_report.awk" && -s "${_fld_dir}/Scripts/text2pdf.awk" && -s "${_fld_dir}/MANIFEST/CLIENT_TEMPLATES.txt" ]] \
+           && grep -q 'RAPPORT CLIENT' <<<"${_fld_out}"; then
+            printf 'PASS\tSONAR Field deploys the client report (awk programs + templates) and offers it in its menu\n'
+        else
+            printf 'FAIL\tSONAR Field export is missing the client report (Scripts/client_report.awk, Scripts/text2pdf.awk, MANIFEST/CLIENT_TEMPLATES.txt, menu entry c)\n'; errors=$((errors+1))
         fi
         local _fps_root _fps_out _fps_token
         _fps_root="$(mktemp -d)"

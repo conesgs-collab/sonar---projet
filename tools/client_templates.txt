@@ -1,0 +1,85 @@
+# client_templates.txt — phrases prêtes pour le rapport CLIENT de SONAR-SE.
+#
+# Lues par tools/client_report.awk. Aucune IA : chaque phrase est écrite ici, à la main,
+# relue par un humain, et le rapport client ne fait que CHOISIR parmi elles à partir des
+# constats du rapport technique. Modifier une phrase = modifier ce fichier, rien d'autre.
+#
+# Format (séparateur " :: ", encodage UTF-8, fins de ligne LF) :
+#   CLE :: GRAVITE :: PHRASE_CONSTAT :: PHRASE_RECOMMANDATION
+#
+#   CLE = un profil SONAR-SE (data-recovery, boot-repair, hardware-diagnostic, disk-clone,
+#         malware, password-reset) ou "general" (constat sans profil dédié),
+#         ou "@ID" (ex. @F003) : surcharge pour UNE règle précise (prioritaire sur le profil),
+#         ou "_VERDICT" (GRAVITE = sain | surveiller | degrade | critique | partiel | winpe),
+#         ou "_TEXTE" (GRAVITE = introduction | limites | confidentialite).
+#   GRAVITE = CRITICAL | HIGH | MEDIUM | INFO (ou "*" pour une surcharge @ID valable partout).
+#
+# Règles d'écriture : une phrase, langage simple, pas de jargon, pas de promesse qu'on ne peut
+# pas tenir (« vos données sont récupérables » est interdit), jamais rassurant quand le
+# diagnostic est partiel. Le détail technique reste dans le rapport du technicien.
+# Un {machine} dans une phrase est remplacé par le nom de l'appareil.
+
+# ----------------------------------------------------------------------------- TEXTES
+_TEXTE :: introduction :: Ce document résume, en langage simple, l'état de {machine} d'après le diagnostic réalisé par notre technicien. :: -
+_TEXTE :: limites :: Ce résumé est établi à partir de mesures automatiques et de règles éprouvées ; il ne remplace pas l'avis du technicien et ne constitue pas une garantie. Un appareil sans signe de panne peut encore tomber en panne. :: -
+_TEXTE :: confidentialite :: Ce rapport ne contient ni vos fichiers, ni vos mots de passe : uniquement l'état de l'appareil. Le détail technique reste chez le technicien. :: -
+
+# ----------------------------------------------------------------------------- VERDICT GLOBAL
+_VERDICT :: sain :: Nous n'avons relevé aucun signe de panne sur ce qui a pu être mesuré. :: Continuez à sauvegarder régulièrement vos fichiers importants.
+_VERDICT :: surveiller :: Nous avons relevé sur cet appareil des points à corriger ou à surveiller. :: -
+_VERDICT :: degrade :: L'état de votre appareil est dégradé : des problèmes réels ont été constatés. :: Faites d'abord une sauvegarde de ce qui compte pour vous, puis suivez les recommandations ci-dessous.
+_VERDICT :: critique :: Votre appareil présente un risque sérieux de panne ou de perte de données. :: Cessez de l'utiliser autant que possible et suivez en priorité la première recommandation de cette liste.
+_VERDICT :: partiel :: Le diagnostic n'a pu être mené qu'en partie : nous ne pouvons pas conclure sur l'état de l'appareil. :: Un contrôle complet est nécessaire avant de tirer une conclusion ; ne considérez pas cet appareil comme en bon état.
+_VERDICT :: winpe :: Aucun problème de configuration n'a été relevé, mais l'état physique du disque et de la mémoire n'a pas pu être mesuré dans ces conditions. :: Un contrôle complet du disque et de la mémoire reste à faire pour pouvoir conclure.
+
+# ----------------------------------------------------------------------------- PAR PROFIL ET GRAVITE
+# --- data-recovery : risque pour les données
+data-recovery :: CRITICAL :: Le disque de votre appareil signale lui-même qu'il est sur le point de tomber en panne : vos fichiers sont en danger immédiat. :: Éteignez l'appareil et ne le rallumez que pour copier vos fichiers ; ne tentez aucune réparation vous-même.
+data-recovery :: HIGH :: Le disque montre des signes d'usure avancée : il peut tomber en panne à tout moment et certains fichiers peuvent déjà être abîmés. :: Faites une copie de vos fichiers importants dès maintenant, avant toute autre intervention, puis prévoyez le remplacement du disque.
+data-recovery :: MEDIUM :: Le système de fichiers a été interrompu brutalement (coupure, batterie) et demande une vérification. :: Sauvegardez vos fichiers, puis laissez-nous effectuer la vérification dans de bonnes conditions.
+data-recovery :: INFO :: Une perte ou une inaccessibilité de données a été signalée. :: Ne rien enregistrer de nouveau sur l'appareil tant que nous n'avons pas récupéré ce qui peut l'être.
+
+# --- boot-repair : l'appareil ne démarre pas correctement
+boot-repair :: CRITICAL :: Les éléments qui permettent à l'appareil de démarrer sont absents ou détruits. :: Ne forcez pas de réinstallation ; nous pouvons reconstruire le démarrage en conservant vos données.
+boot-repair :: HIGH :: Les éléments de démarrage de Windows sont endommagés ou manquants, ce qui explique que l'appareil ne démarre pas. :: Nous pouvons réparer le démarrage sans effacer vos données ; évitez de lancer des outils de réparation trouvés sur Internet.
+boot-repair :: MEDIUM :: La configuration de démarrage de l'appareil est incomplète ou incohérente. :: Une correction rapide du démarrage est recommandée pour éviter un blocage au prochain redémarrage.
+boot-repair :: INFO :: Aucune installation de Windows n'a été trouvée sur les disques visibles. :: Nous devons vérifier si le disque est bien détecté (réglages de l'appareil, chiffrement) avant de conclure.
+
+# --- hardware-diagnostic : pièces matérielles
+hardware-diagnostic :: CRITICAL :: Un composant de l'appareil est dans un état critique (chaleur ou erreurs matérielles graves). :: Éteignez l'appareil et ne l'utilisez plus avant contrôle du matériel.
+hardware-diagnostic :: HIGH :: Des erreurs matérielles ou une chaleur excessive ont été relevées : l'appareil peut se bloquer ou redémarrer seul. :: Prévoyez un contrôle du matériel (mémoire, refroidissement) ; en attendant, sauvegardez vos fichiers.
+hardware-diagnostic :: MEDIUM :: Un composant montre de l'usure ou une surchauffe modérée (batterie, refroidissement). :: Un nettoyage ou un remplacement de la pièce concernée est conseillé pour retrouver de bonnes performances.
+hardware-diagnostic :: INFO :: Certaines mesures matérielles n'ont pas pu être relevées sur cet appareil. :: Un contrôle complémentaire peut être fait sur demande.
+
+# --- disk-clone : disque à copier avant qu'il ne lâche
+disk-clone :: CRITICAL :: Le disque rencontre de graves erreurs de lecture : chaque utilisation supplémentaire aggrave le risque de perte. :: Une copie complète du disque vers un disque neuf doit être faite avant tout autre travail.
+disk-clone :: HIGH :: Le disque rencontre des erreurs de lecture répétées. :: Nous recommandons de copier le disque entier vers un disque sain avant de poursuivre les réparations.
+disk-clone :: MEDIUM :: Le disque montre des irrégularités qui justifient une copie de précaution. :: Une copie de précaution du disque est conseillée avant toute intervention.
+disk-clone :: INFO :: Le disque est ancien mais ne montre pas de défaut mesurable. :: Prévoyez son remplacement et une sauvegarde régulière.
+
+# --- malware : logiciels malveillants
+malware :: CRITICAL :: Une infection active est très probable sur l'appareil. :: Débranchez l'appareil d'Internet, changez vos mots de passe depuis un autre appareil, et ne payez aucune rançon.
+malware :: HIGH :: Des signes d'infection sont présents. :: Ne vous connectez à aucun compte important depuis cet appareil avant son nettoyage complet.
+malware :: MEDIUM :: Un comportement suspect a été relevé qui mérite une vérification. :: Une analyse antivirus complète, faite hors du système, est recommandée.
+malware :: INFO :: Vous soupçonnez une infection : une vérification antivirus hors-ligne est recommandée. :: Ne pas ouvrir de fichiers douteux depuis l'appareil ; nous ferons l'analyse depuis un système externe.
+
+# --- password-reset : accès au compte
+password-reset :: CRITICAL :: L'accès au compte de l'appareil est bloqué et les données sont protégées. :: Munissez-vous d'une preuve que l'appareil vous appartient ; nous ne pourrons intervenir qu'à cette condition.
+password-reset :: HIGH :: L'accès à un compte est bloqué et ne peut pas être rétabli sans intervention. :: Munissez-vous d'une preuve de propriété de l'appareil ; nous vous guiderons dans la récupération de l'accès.
+password-reset :: MEDIUM :: L'accès à un compte demande à être rétabli. :: Nous pouvons rétablir l'accès sur présentation d'une preuve de propriété de l'appareil.
+password-reset :: INFO :: Le mot de passe d'un compte Windows a été perdu. :: Nous pouvons rétablir l'accès sur présentation d'une preuve de propriété de l'appareil ; vos fichiers ne sont pas effacés.
+
+# --- general : constats sans profil dédié
+general :: CRITICAL :: Un problème sérieux a été relevé sur l'appareil. :: Cessez de l'utiliser et contactez-nous avant toute autre action.
+general :: HIGH :: Un problème important a été relevé sur l'appareil. :: Faites une sauvegarde de vos fichiers puis suivez nos recommandations sans attendre.
+general :: MEDIUM :: Un point de faiblesse a été relevé (espace disponible, réglages, usure). :: Corrigez-le à votre convenance : il n'est pas urgent mais peut dégrader l'usage à terme.
+general :: INFO :: Une information technique a été relevée sans impact immédiat sur votre usage. :: Aucune action nécessaire de votre part.
+
+# ----------------------------------------------------------------------------- SURCHARGES PAR REGLE
+# BitLocker : le point décisif pour le client est la clé de récupération.
+@F003 :: HIGH :: Le disque de votre appareil est chiffré (BitLocker) : sans la clé de récupération, personne ne peut lire vos fichiers, pas même nous. :: Retrouvez votre clé de récupération de 48 chiffres (compte Microsoft, compte professionnel ou document imprimé) avant de venir ; ne réinitialisez surtout pas la puce de sécurité de l'appareil.
+@D001 :: * :: Le disque de votre appareil a lui-même déclaré une panne imminente : vos fichiers sont en danger immédiat. :: Éteignez l'appareil ; nous copierons vos fichiers en priorité, avant toute réparation, et sans garantie de pouvoir tout sauver.
+@F004 :: MEDIUM :: Le disque est presque plein : l'appareil devient lent et les mises à jour risquent d'échouer. :: Libérez de l'espace en supprimant ou en déplaçant des fichiers volumineux ; nous pouvons vous aider à faire le tri.
+@F002 :: MEDIUM :: Windows est en veille prolongée : certaines données sont encore en cours d'utilisation. :: Éteignez complètement l'appareil (Maj + Arrêter) avant toute intervention.
+@M003 :: MEDIUM :: L'appareil manque de mémoire vive pour un usage confortable. :: Ajouter de la mémoire vive, si l'appareil le permet, est le moyen le plus efficace de le rendre plus rapide.
+@M006 :: MEDIUM :: La batterie est usée : elle tient moins longtemps et peut gonfler avec l'âge. :: Remplacez la batterie ; si elle est gonflée ou chauffe, cessez immédiatement de l'utiliser.
