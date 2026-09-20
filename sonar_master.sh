@@ -1760,11 +1760,43 @@ sonar_prepare_ventoy_theme() {
     # de thème, ce qui explique pourquoi la taille de l'image n'a jamais
     # eu d'influence sur le crash (3 tailles radicalement différentes,
     # même échec identique — la taille n'était jamais la variable en
-    # cause). theme.txt minimal : une seule directive necessaire pour
-    # afficher l'image de fond, syntaxe GRUB2 standard.
+    # cause).
+    #
+    # CORRIGE 2026-09-20 (test reel HP EliteBook 840 G3) : le theme.txt
+    # precedent ne contenait QUE desktop-image/title-text — le crash GRUB
+    # avait disparu, mais la clé restait figée sur le fond d'écran sans
+    # aucun menu. Un theme GRUB2 (gfxmenu) ne dessine un menu que si le
+    # composant "+ boot_menu" y est declare ; sans lui, seul le fond
+    # s'affiche. Le commentaire d'origine ("une seule directive necessaire")
+    # etait faux. Position choisie pour laisser le bandeau du bas
+    # (titre/credit incrustes, ~74-92% de hauteur) degage.
+    # Panneau sombre semi-transparent derriere le menu (menu_c.png,
+    # style "menu_*") seulement si ImageMagick est present : le menu reste
+    # fonctionnel sans, juste moins lisible sur le globe.
+    local pixmap_line=""
+    if command -v convert >/dev/null 2>&1 \
+       && convert -size 8x8 xc:'rgba(5,10,22,0.78)' PNG32:"${out_dir}/menu_c.png" 2>/dev/null; then
+        pixmap_line='    menu_pixmap_style = "menu_*"'
+    fi
     cat > "${out_dir}/theme.txt" <<THEME_TXT_EOF
 desktop-image: "background.png"
 title-text: ""
+terminal-font: "Unifont Regular 16"
+
++ boot_menu {
+    left = 6%
+    top = 10%
+    width = 50%
+    height = 58%
+    item_font = "Unifont Regular 16"
+    item_color = "#ffffff"
+    selected_item_color = "#66ccff"
+    item_height = 28
+    item_padding = 6
+    item_spacing = 4
+    scrollbar = false
+${pixmap_line}
+}
 THEME_TXT_EOF
     sonar_audit "VENTOY_THEME_INSTALLED" "source=${src}"
 }
@@ -1805,8 +1837,8 @@ if os.path.isfile(theme_txt):
         "file": "/ventoy/theme/theme.txt",
         "gfxmode": "800x600,1024x768",
         "boot_menu_language": "fr",
-        "ventoy_left": "10%",
-        "ventoy_top": "38%",
+        "ventoy_left": "2%",
+        "ventoy_top": "96%",
         "ventoy_color": "#66ccff",
     }
 os.makedirs(os.path.join(mp,"ventoy"),exist_ok=True)
@@ -4515,7 +4547,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.40.0-winpe-boot-branding"
+SONAR_VERSION="3.40.1-ventoy-theme-boot-menu"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -4989,6 +5021,13 @@ sonar_self_test_v2() {
             printf 'PASS\tVentoy theme.txt generated with desktop-image directive\n'
         else
             printf 'FAIL\tVentoy theme.txt missing or malformed\n'; errors=$((errors+1))
+        fi
+        # Regression 2026-09-20 : sans "+ boot_menu", GRUB n'affiche que le
+        # fond d'ecran, aucun menu (constate sur materiel reel).
+        if grep -q '^+ boot_menu {' "${_vt_mp}/ventoy/theme/theme.txt" 2>/dev/null; then
+            printf 'PASS\tVentoy theme.txt declares a boot_menu component (menu is drawn)\n'
+        else
+            printf 'FAIL\tVentoy theme.txt has no boot_menu — GRUB would show the background only\n'; errors=$((errors+1))
         fi
         ( PERSISTENCE_COUNT=0
           source <(sonar_selftest_extract_fn "$self" generate_ventoy_json_final)

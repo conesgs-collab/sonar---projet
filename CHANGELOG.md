@@ -6,6 +6,46 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.40.1-ventoy-theme-boot-menu] — 2026-09-20
+
+### Contexte
+Premier vrai test de boot sur le HP EliteBook 840 G3 depuis le fix
+`theme.txt` (v3.35.0) : **plus de crash GRUB** (`alloc magic is broken`
+n'apparaît plus — ce fix-là est donc confirmé), mais la clé reste figée
+sur le fond d'écran SONAR-SE, sans aucun menu.
+
+### Cause
+Le `theme.txt` généré ne contenait que `desktop-image` et `title-text`.
+Un thème GRUB2 (gfxmenu) ne dessine un menu que si le composant
+`+ boot_menu { ... }` y est déclaré ; sans lui, seul le fond s'affiche.
+Le commentaire d'origine dans `sonar_prepare_ventoy_theme` ("une seule
+directive nécessaire") était faux — erreur d'analyse de ma part en
+3.35.0 : je n'avais vérifié que la disparition du crash, pas l'affichage
+effectif du menu. La documentation Ventoy (`plugin_theme.html`) ne donne
+pas d'exemple complet de `theme.txt`, donc ce point n'était pas
+découvrable par simple lecture.
+
+### Corrigé
+- `theme.txt` déclare maintenant `+ boot_menu` (gauche 6 %, haut 10 %,
+  50 × 58 %, texte blanc, sélection `#66ccff`), police `Unifont Regular
+  16` (nom standard de `unicode.pf2` de GRUB ; un nom inconnu retombe sur
+  la première police chargée).
+- Panneau sombre semi-transparent derrière le menu (`menu_c.png`, style
+  `menu_*`), généré par ImageMagick **seulement s'il est présent** — le
+  menu reste fonctionnel sans, juste moins lisible sur le globe.
+- Texte de version Ventoy déplacé de 10 %/38 % (au milieu de la zone du
+  menu) vers 2 %/96 % (bas de l'écran).
+- Test `--self-test` ajouté : échoue si `theme.txt` n'a pas de
+  `boot_menu` (`--self-test` : 81 PASS, 0 FAIL ; `--self-audit` : 20/20).
+- Appliqué sur la clé physique, avec sauvegardes
+  (`theme.txt.bak-20260920`, `ventoy.json.bak-20260920`).
+
+### Non vérifié
+**Pas encore reconfirmé par un boot réel.** L'affichage du menu est la
+conséquence attendue de `+ boot_menu`, pas un fait observé. Si le menu
+reste invisible, retour arrière immédiat : `ventoy.json` → retirer le
+bloc `"theme"`.
+
 ## [3.40.0-winpe-boot-branding] — 2026-09-18
 
 ### Contexte
