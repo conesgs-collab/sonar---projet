@@ -19,6 +19,8 @@
 #   sonar_recover.sh image --source /dev/sdX --dest DOSSIER            ddrescue en 2 passes vers DOSSIER/disk.img
 #   sonar_recover.sh copy  --source SRC --dest DOSSIER [--what user|all|CHEMIN...] [--part N]
 #   sonar_recover.sh verify --dest DOSSIER                             relit la copie et compare au manifeste
+#   sonar_recover.sh carve --source IMG|DEV --dest DOSSIER [--types jpg,pdf,zip]  fichiers SUPPRIMES : recherche par signatures
+#                                                                      (PhotoRec, lecture seule) ; classe CONNU / NOUVEAU
 #   SRC = image (.img/.raw), périphérique (/dev/sdb3, /dev/loop0...) ou dossier déjà monté EN LECTURE SEULE.
 #   --what user (défaut) : Bureau, Documents, Images, Vidéos, Musique, Téléchargements de chaque utilisateur
 #                          Windows (Users/*), sinon /home ; --what all : tout ; --what CHEMIN : ce sous-chemin.
@@ -28,7 +30,7 @@ set -uo pipefail
 
 SONAR_RECOVER_VERSION="1.0.0"
 SELF="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
-CMD=""; SRC=""; DEST=""; DIAG=""; WHAT="user"; WHAT_PATHS=(); PART=""; ASSUME_YES=false
+CMD=""; SRC=""; DEST=""; DIAG=""; TYPES=""; WHAT="user"; WHAT_PATHS=(); PART=""; ASSUME_YES=false
 MNT_ROOT="${SONAR_RECOVER_MOUNT_ROOT:-/mnt/sonar-recover}"
 
 usage() { sed -n '2,/^set -uo pipefail/p' "$SELF" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
         --source) SRC="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
         --dest)   DEST="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
         --diag)   DIAG="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+        --types)  TYPES="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
         --part)   PART="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
         --what)   WHAT="${2:-user}"; shift $(( $# > 1 ? 2 : 1 ))
                   while [[ $# -gt 0 && "${1:0:2}" != "--" ]]; do WHAT_PATHS+=("$1"); shift; done ;;
@@ -94,7 +97,7 @@ cmd_plan() {
     step=$((step + 1))
     if has Y003 || has F006 || has B001; then
         echo "$step. Si des fichiers SUPPRIMÉS ou une partition disparue sont en cause : après la copie, passez à la"
-        echo "   recherche par signatures (PhotoRec / TestDisk) sur l'IMAGE — pas encore automatisée ici."
+        echo "   recherche par signatures sur l'IMAGE :  sonar_recover.sh carve --source disk.img --dest /chemin/DESTINATION"
         step=$((step + 1))
     fi
     echo "$step. VÉRIFICATION :  sonar_recover.sh verify --dest /chemin/DESTINATION   puis rapport client."
@@ -304,10 +307,67 @@ cmd_image() {
     [[ "$bad" -eq 0 ]]
 }
 
+# ------------------------------------------------------------------------------------------------ carving (fichiers supprimés)
+# Recherche par SIGNATURES (PhotoRec) : retrouve des fichiers dont le nom et le dossier ont disparu (supprimés,
+# système de fichiers détruit). PhotoRec ne fait que LIRE la source. Les résultats sont classés :
+#   CONNU   le SHA-256 correspond à un fichier déjà copié par « copy » (donc pas une découverte)
+#   NOUVEAU absent de la copie : candidat « fichier supprimé » — à contrôler à la main
+# Limites annoncées dans le résumé : noms et dates d'origine perdus ; un fichier fragmenté peut être corrompu.
+find_photorec() {
+    local c
+    for c in "${SONAR_PHOTOREC:-}" "$(command -v photorec 2>/dev/null)" "$(command -v photorec_static 2>/dev/null)" \
+             "$(dirname "$SELF")"/../Portable/TestDisk/*/photorec_static "$(dirname "$SELF")"/../Portable/TestDisk/photorec_static; do
+        [[ -n "$c" && -x "$c" ]] && { echo "$c"; return 0; }
+    done
+    return 1
+}
+
+cmd_carve() {
+    [[ -n "$SRC" ]] || die "--source est obligatoire"
+    [[ -b "$SRC" || -f "$SRC" ]] || die "la source doit être un périphérique ou un fichier image"
+    local pr; pr="$(find_photorec)" || die "photorec introuvable (TestDisk : sonar_master.sh --fetch data-recovery, ou paquet testdisk)"
+    check_dest
+    if [[ -b "$SRC" ]]; then
+        [[ "$(disk_of "$SRC")" != "$(disk_of "$(dest_device "$DEST")")" || -z "$(disk_of "$SRC")" ]] || die "la destination est sur le MÊME disque que la source : refus"
+    fi
+    local out="$DEST/carved" spec="partition_none,fileopt,everything,enable,search" t sel=""
+    if [[ -n "$TYPES" ]]; then
+        for t in ${TYPES//,/ }; do [[ "$t" =~ ^[a-z0-9]+$ ]] || die "type invalide : $t"; sel="${sel},${t},enable"; done
+        spec="partition_none,fileopt,everything,disable${sel},search"
+    fi
+    (( $(stat -c %s "$SRC" 2>/dev/null || blockdev --getsize64 "$SRC") + 1 <= $(free_bytes "$DEST") * 4 )) || say "ATTENTION : la place disponible peut être insuffisante pour tout ce que la recherche retrouvera"
+    rm -rf "$out"; mkdir -p "$out"
+    audit CARVE_START "src=$SRC dest=$out types=${TYPES:-all}"
+    say "Recherche par signatures (lecture seule de la source) : $pr"
+    "$pr" /log /d "$out/" /cmd "$SRC" "$spec" >"$DEST/photorec.out" 2>&1 || { say "photorec a échoué (voir $DEST/photorec.out)"; audit CARVE_FAILED "rc=$?"; exit 1; }
+    local M="$DEST/CARVED_MANIFEST.tsv" f h known nnew=0 nknown=0 total=0
+    local -A have=()
+    if [[ -s "$DEST/RECOVERY_MANIFEST.tsv" ]]; then
+        while IFS=$'\t' read -r h _ _ _ st; do [[ "$h" == SHA256 || "$st" != OK ]] || have["$h"]=1; done < "$DEST/RECOVERY_MANIFEST.tsv"
+    fi
+    printf 'SHA256\tSIZE\tEXT\tPATH\tCLASS\n' > "$M"
+    while IFS= read -r -d '' f; do
+        h="$(sha256sum "$f" | awk '{print $1}')"; total=$((total + 1))
+        if [[ -n "${have[$h]:-}" ]]; then known=CONNU; nknown=$((nknown + 1)); else known=NOUVEAU; nnew=$((nnew + 1)); fi
+        printf '%s\t%s\t%s\t%s\t%s\n' "$h" "$(stat -c %s "$f")" "${f##*.}" "${f#"$DEST"/}" "$known" >> "$M"
+    done < <(find "$out" -type f -not -name 'report.xml' -not -name '*.log' -print0 2>/dev/null)
+    {
+        echo "SONAR-SE — résumé de recherche par signatures ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+        echo "Source        : $SRC   Types : ${TYPES:-tous}"
+        echo "Fichiers retrouvés : $total   dont déjà présents dans la copie (CONNU) : $nknown   candidats (NOUVEAU) : $nnew"
+        echo "Répartition   : $(awk -F'\t' 'NR>1 {c[$3]++} END {for (e in c) printf "%s=%d ", e, c[e]}' "$M")"
+        echo "Limites       : noms et dates d'origine PERDUS ; un fichier fragmenté peut être corrompu ; « NOUVEAU » ne prouve pas que"
+        echo "                le fichier a été supprimé par le propriétaire. À contrôler avant de le remettre au client."
+    } | tee "$DEST/CARVED_SUMMARY.txt"
+    audit CARVE_DONE "total=$total new=$nnew known=$nknown"
+    return 0
+}
+
 case "$CMD" in
     plan)   cmd_plan ;;
     copy)   cmd_copy ;;
     verify) cmd_verify ;;
     image)  cmd_image ;;
+    carve)  cmd_carve ;;
     *)      usage; exit 2 ;;
 esac

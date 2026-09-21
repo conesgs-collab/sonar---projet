@@ -6,6 +6,28 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.49.0-recovery-carving] — 2026-09-21
+
+### Ajouté
+- `sonar_recover.sh carve` : recherche des fichiers **supprimés** par signatures (PhotoRec, lecture seule de la
+  source), classement `CONNU` / `NOUVEAU` par SHA-256 contre la copie déjà faite, résumé qui annonce les limites
+  (noms perdus, fragmentation). `plan` renvoie vers `carve` au lieu de « pas encore automatisé ».
+- 6 tests : un zip supprimé d'un NTFS est retrouvé octet pour octet ; le zip conservé est reconnu ; source
+  intacte ; type invalide refusé. Suite `recover` : 50 vérifications, stables sur 2 exécutions.
+
+### Corrigé grâce à un vrai téléchargement
+- L'archive **réelle** de TestDisk (SHA-256 conforme à notre manifeste scellé) était refusée par le post-traitement
+  de `--fetch` : GNU tar appelle `lbzip2` pour un `.tar.bz2`, absent d'un système minimal ; le message
+  « extraction refusée » ne disait rien. Les fixtures n'avaient pas vu ce cas. Le décompresseur est maintenant
+  choisi explicitement (bzip2/lbzip2/pbzip2, gzip, xz, lzip), avec repli sur `7z` et un message qui NOMME l'outil manquant.
+  Résultat : `photorec_static` 7.2 fonctionnel après `--fetch`.
+- Une erreur de ma part (syntaxe PhotoRec `enable,zip` au lieu de `zip,enable`) faisait ne rien retrouver : le test
+  l'a attrapée avant livraison.
+
+### Non vérifié
+- Le repli 7z n'a été exercé que sur l'archive TestDisk réelle (pas de fixture `.tar.bz2` sans bzip2).
+- Carving : JPEG/PDF/Office, gros volumes, fichiers fragmentés ; toujours pas de vrai disque physique abîmé.
+
 ## [3.48.0-data-recovery] — 2026-09-21
 
 ### Contexte

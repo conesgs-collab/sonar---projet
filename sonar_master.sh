@@ -4341,10 +4341,28 @@ sonar_fetch_extract() {
             unzip -q -o "$f" -d "$d" >/dev/null || return 1 ;;
         *.tar.bz2|*.tar.gz|*.tgz|*.tar.xz|*.tar.lz|*.tar)
             command -v tar >/dev/null 2>&1 || return 2
-            case "$f" in *.tar.lz) command -v lzip >/dev/null 2>&1 || { echo "[SONAR] lzip absent : impossible de decompresser $(basename "$f")." >&2; return 2; } ;; esac
-            names="$(tar -tf "$f" 2>/dev/null)" || return 1
+            # Le decompresseur est choisi explicitement : GNU tar appelle lbzip2 pour .bz2 sur certaines
+            # distributions, absent d'un systeme minimal (constate sur l'archive TestDisk reelle : echec
+            # generique « extraction refusee »). Sans decompresseur dedie, repli sur 7z si present.
+            local dec="" c viaz=false
+            case "$f" in
+                *.tar.bz2) for c in bzip2 lbzip2 pbzip2; do command -v "$c" >/dev/null 2>&1 && { dec="$c"; break; }; done; [[ -n "$dec" ]] || dec="bzip2" ;;
+                *.tar.gz|*.tgz) dec="gzip" ;;
+                *.tar.xz) dec="xz" ;;
+                *.tar.lz) dec="lzip" ;;
+            esac
+            if [[ -n "$dec" ]] && ! command -v "$dec" >/dev/null 2>&1; then
+                if command -v 7z >/dev/null 2>&1; then viaz=true
+                else echo "[SONAR] ${dec} absent (et 7z aussi) : impossible de decompresser $(basename "$f") — installez ${dec}." >&2; return 2; fi
+            fi
+            if $viaz; then
+                names="$(7z x -so "$f" 2>/dev/null | tar -t 2>/dev/null)" || return 1
+            else
+                names="$(tar ${dec:+-I "$dec"} -tf "$f" 2>/dev/null)" || return 1
+            fi
             sonar_fetch_names_safe <<<"$names" || { echo "[SONAR][ERROR] $(basename "$f") : nom d'entree dangereux — extraction REFUSEE." >&2; return 1; }
-            tar -xf "$f" -C "$d" --no-same-owner --no-same-permissions || return 1 ;;
+            if $viaz; then 7z x -so "$f" 2>/dev/null | tar -x -C "$d" --no-same-owner --no-same-permissions || return 1
+            else tar ${dec:+-I "$dec"} -xf "$f" -C "$d" --no-same-owner --no-same-permissions || return 1; fi ;;
         *.deb)
             if command -v dpkg-deb >/dev/null 2>&1; then
                 names="$(dpkg-deb -c "$f" 2>/dev/null | awk '{print $6}' | sed 's|^\./||')" || return 1
@@ -4873,7 +4891,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.48.0-data-recovery"
+SONAR_VERSION="3.49.0-recovery-carving"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

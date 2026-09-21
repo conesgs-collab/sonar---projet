@@ -65,6 +65,14 @@ printf 'note\n' > "$T/rw/Users/Alice/Desktop/note.txt"
 printf 'cache\n' > "$T/rw/Users/Alice/AppData/Local/junk.tmp"
 printf 'pub\n' > "$T/rw/Users/Public/pub.txt"
 printf 'sys\n' > "$T/rw/Windows/System32/dummy.dll"
+HAVE_ZIP=0
+if command -v zip >/dev/null 2>&1; then
+    # kept.zip reste dans Documents ; deleted.zip est SUPPRIME (ses clusters restent sur le disque : cible du carving)
+    head -c 300000 /dev/urandom > "$T/kz.bin"; head -c 300000 /dev/urandom > "$T/dz.bin"
+    ( cd "$T" && zip -q -0 kept.zip kz.bin && zip -q -0 deleted.zip dz.bin )
+    cp "$T/kept.zip" "$T/rw/Users/Alice/Documents/kept.zip"; cp "$T/deleted.zip" "$T/rw/Users/Alice/Documents/deleted.zip"
+    sync; rm -f "$T/rw/Users/Alice/Documents/deleted.zip"; HAVE_ZIP=1
+fi
 sync; umount "$T/rw"; losetup -d "$L"
 if [[ ! -s "$IMG" ]] || ! sfdisk -l "$IMG" >/dev/null 2>&1; then printf 'WARN\tRecover : construction du disque de test impossible ici\n'; exit "$fails"; fi
 H0="$(sha256sum "$IMG" | awk '{print $1}')"
@@ -78,7 +86,7 @@ check "Recover copy : --what user ne copie ni AppData, ni Windows, ni Public"   
 LCK="$(losetup -rf --show -o $((2048*512)) "$IMG")"; mkdir -p "$T/chk"; mount -o ro "$LCK" "$T/chk" 2>/dev/null
 check "Recover copy : contenu identique a la source (photo)"                     'cmp -s "$DEST/files/Users/Alice/Pictures/photo.bin" "$T/chk/Users/Alice/Pictures/photo.bin"'
 umount "$T/chk" 2>/dev/null; losetup -d "$LCK" 2>/dev/null
-check "Recover copy : le manifeste liste chaque fichier avec son SHA-256 et OK"  '[[ "$(grep -c "	OK$" "$DEST/RECOVERY_MANIFEST.tsv")" -eq 4 && "$(awk -F"\t" "\$4==\"Users/Alice/Documents/rapport.txt\" {print \$1}" "$DEST/RECOVERY_MANIFEST.tsv")" == "$(sha256sum "$DEST/files/Users/Alice/Documents/rapport.txt" | awk "{print \$1}")" ]]'
+check "Recover copy : le manifeste liste chaque fichier avec son SHA-256 et OK"  '[[ "$(grep -c "	OK$" "$DEST/RECOVERY_MANIFEST.tsv")" -eq $((4 + ${HAVE_ZIP:-0})) && "$(awk -F"\t" "\$4==\"Users/Alice/Documents/rapport.txt\" {print \$1}" "$DEST/RECOVERY_MANIFEST.tsv")" == "$(sha256sum "$DEST/files/Users/Alice/Documents/rapport.txt" | awk "{print \$1}")" ]]'
 check "Recover copy : le resume dit ce qui n'est PAS tente"                       'grep -q "Non tenté" "$DEST/RECOVERY_SUMMARY.txt" && grep -q "ne garantit pas" "$DEST/RECOVERY_SUMMARY.txt"'
 H1="$(sha256sum "$IMG" | awk '{print $1}')"
 check "Recover copy : la SOURCE est intacte (hash de l'image identique avant/apres)" '[[ "$H0" == "$H1" ]]'
@@ -134,6 +142,24 @@ if command -v ddrescue >/dev/null 2>&1; then
     check "Recover : on peut copier depuis l'image obtenue (chaine image -> copie)" '[[ -s "$T/out_from_img/files/Users/Alice/Documents/comptes é ü.txt" ]]'
 else
     printf 'WARN\tRecover : ddrescue absent, imagerie NON testee ici\n'
+fi
+
+# --- fichiers SUPPRIMES : recherche par signatures (PhotoRec), classee CONNU / NOUVEAU
+PR="${SONAR_PHOTOREC:-$(command -v photorec 2>/dev/null || command -v photorec_static 2>/dev/null)}"
+if [[ -n "$PR" && -x "$PR" && $HAVE_ZIP -eq 1 ]]; then
+    export SONAR_PHOTOREC="$PR"
+    DC="$T/out_carve"; cp -r "$DEST" "$DC" 2>/dev/null   # repart de la copie (pour la classe CONNU)
+    H_DEL="$(sha256sum "$T/deleted.zip" | awk '{print $1}')"; H_KEPT="$(sha256sum "$T/kept.zip" | awk '{print $1}')"
+    HC0="$(sha256sum "$IMG" | awk '{print $1}')"
+    bash "$RC" carve --source "$IMG" --dest "$DC" --types zip >"$T/carve.log" 2>&1; rcc=$?
+    check "Recover carve : code 0"                                                    '[[ $rcc -eq 0 ]]'
+    check "Recover carve : le fichier SUPPRIME est retrouve, identique octet pour octet, classe NOUVEAU" 'awk -F"\t" -v h="$H_DEL" "\$1==h && \$5==\"NOUVEAU\"" "$DC/CARVED_MANIFEST.tsv" | grep -q .'
+    check "Recover carve : le fichier deja copie est reconnu (CONNU), pas presente comme decouverte"  'awk -F"\t" -v h="$H_KEPT" "\$1==h && \$5==\"CONNU\"" "$DC/CARVED_MANIFEST.tsv" | grep -q .'
+    check "Recover carve : le resume annonce les limites (noms perdus, fragmentation)" 'grep -q "PERDUS" "$DC/CARVED_SUMMARY.txt" && grep -q "fragmenté" "$DC/CARVED_SUMMARY.txt"'
+    check "Recover carve : la SOURCE est intacte apres la recherche"                  '[[ "$(sha256sum "$IMG" | awk "{print \$1}")" == "$HC0" ]]'
+    check "Recover carve : un type invalide est refuse (code 2)"                      'bash "$RC" carve --source "$IMG" --dest "$T/o8" --types "zip;rm" >/dev/null 2>&1; [[ $? -eq 2 ]]'
+else
+    printf 'WARN\tRecover : photorec (SONAR_PHOTOREC) ou zip absent, carving NON teste ici\n'
 fi
 
 # --- disque DEFAILLANT simule (device-mapper : un cluster de la photo renvoie des erreurs d'E/S)
