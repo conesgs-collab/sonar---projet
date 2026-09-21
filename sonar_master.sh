@@ -4864,8 +4864,8 @@ sonar_structural_self_audit() {
         echo 'FAIL: audit de WinPE tiers incomplet (tools/sonar_pe_audit.sh, pe_audit_indicators.txt, tests/pe_audit/run_tests.sh)'; errors=$((errors+1))
     fi
     if [[ -f "${_dg_dir}/winpe/sonar_check_awk.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_check_awk.sh" 2>/dev/null \
-       && grep -q ':diagsources' "${_dg_dir}/Build-SonarSE-WinPE.ps1" && [[ -f "${SONAR_SCRIPT_DIR}/tests/winpe/run_tests.sh" ]]; then
-        echo 'PASS: diagnostic WinPE lisant les regles/le moteur de la cle (garde-fou awk, repli integre, tests)'
+       && grep -q ':diagsources' "${_dg_dir}/Build-SonarSE-WinPE.ps1" && sh -n "${_dg_dir}/winpe/sonar_assistant.sh" 2>/dev/null && [[ -f "${_dg_dir}/winpe/sonar_banner.txt" ]] && [[ -f "${SONAR_SCRIPT_DIR}/tests/winpe/run_tests.sh" ]]; then
+        echo 'PASS: WinPE : regles/moteur lus sur la cle (garde-fou awk, repli integre) + assistant guide (tests)'
     else
         echo 'FAIL: diagnostic WinPE depuis la cle incomplet (tools/winpe/sonar_check_awk.sh, :diagsources dans Build-SonarSE-WinPE.ps1, tests/winpe)'; errors=$((errors+1))
     fi
@@ -4912,7 +4912,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.50.0-winpe-key-rules"
+SONAR_VERSION="3.51.0-winpe-assistant"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

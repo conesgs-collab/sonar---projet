@@ -6,6 +6,50 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.51.0-winpe-assistant] — 2026-09-21
+
+### Contexte
+Le WinPE démarrait sur un menu de 17 outils à choisir et enchaîner à la main, avec le clavier et l'habillage par défaut de
+Windows. Demande : un WinPE « propre » au nom de SONAR, où les étapes s'enchaînent d'elles-mêmes et où le technicien
+n'a qu'à donner son accord ou non, clavier AZERTY français par défaut.
+
+### Ajouté
+- **Assistant guidé** (`tools/winpe/sonar_assistant.sh`, embarqué dans l'ISO) : après une bannière SONAR, **Entrée** lance
+  l'assistant, **M** ouvre le menu manuel (conservé). L'assistant pose **une seule question** (le symptôme), fait
+  **tout seul** l'inventaire et le diagnostic (lecture seule), puis **propose** les étapes utiles une à une : BitLocker
+  (déverrouillage), sauvegarde des fichiers vers la clé (sans `AppData`, avant toute réparation), réparation UEFI (`bcdboot`),
+  contrôle des fichiers système, etc. La lettre du Windows, le volume de l'ESP et la destination sur la clé sont **trouvés
+  automatiquement** ; s'il y a plusieurs Windows, l'assistant **demande** au lieu de deviner.
+- **Règle d'accord** : une étape qui **modifie** quelque chose est refusée **par défaut** (o/N) — sans réponse claire,
+  rien n'est fait. Toute décision (oui/non, code retour, origine des règles/du moteur) est journalisée sur la clé
+  (`Field-Logs\assistant\ASSIST_*.log`) ; **la clé de récupération BitLocker n'apparaît ni à l'écran, ni dans le journal, ni dans le rapport**.
+- **Marque SONAR** : bannière ASCII « SONAR SE » (`sonar_banner.txt`), titre de fenêtre `SONAR - SE`, et fond d'écran
+  généré depuis `Branding\default_background.png` (`winpe.jpg`, non bloquant si absent).
+- **Clavier AZERTY français par défaut** : `wpeutil SetKeyboardLayout 040c:0000040c` dès le démarrage.
+- Menu manuel : option **18** (relancer l'assistant) ; le menu de 17 outils reste intégralement disponible.
+- Vérification finale de l'ISO : présence de `sonar_assistant.sh` et de la ligne clavier dans `startnet.cmd`.
+- Tests : `tests/winpe/run_assistant_tests.sh` (26 vérifications, outils Windows remplacés par des *stubs* qui enregistrent
+  l'appel : on vérifie ce qui serait lancé, dans quel ordre, et surtout ce qui ne l'est **pas** quand le technicien refuse) ;
+  `tests/winpe/test_menu_diag_sources.ps1` passe de 6 à 10 vérifications **sur un vrai `cmd.exe` avec le vrai BusyBox** (écran
+  d'accueil, Entrée → assistant, retour au menu) ; 5 contrôles statiques ajoutés à `tests/winpe/run_tests.sh` (45 PASS au total).
+
+### Non vérifié
+- **Aucun démarrage réel de cette version** : l'ISO n'est pas encore reconstruite avec ces changements (l'ISO déployée sur
+  la clé est la précédente, à menu de 17 outils). La reconstruction nécessite l'UAC (présence physique).
+- **Logo Windows au démarrage** : l'animation de démarrage vient de `bootres.dll`, un fichier signé Microsoft ; le modifier
+  casserait Secure Boot. Rien n'a été patché. Dans la VM de test aucun logo n'apparaît ; sur du **vrai matériel / via Ventoy**,
+  ce qui s'affiche avant le bureau n'a pas été observé (photo ou description bienvenue).
+- L'assistant n'a pas tourné sur un **vrai WinPE avec une vraie clé** : les appels `manage-bde`, `bcdboot`, `diskpart`,
+  `robocopy`, `sfc`, `chkdsk` sont testés par *stubs* ; le comportement de `read -s` (saisie masquée de la clé BitLocker) dans la
+  console WinPE n'est pas vérifié (repli sur `read` visible prévu).
+- Disposition AZERTY : commande documentée de WinPE, effet réel non vu (l'automate VirtualBox tape en QWERTY US).
+
+### Comment tester
+`bash tests/winpe/run_tests.sh` (Linux/WSL) ; sous Windows :
+`powershell -File tests\winpe\test_menu_diag_sources.ps1 -BusyBox <busybox.exe>` ; puis reconstruire l'ISO
+(`.\tools\Build-SonarSE-WinPE.ps1 -SkipAdkInstall …`), la démarrer, vérifier bannière, clavier (taper `a`, `q`, `1` avec Maj),
+Entrée → assistant.
+
 ## [3.50.0-winpe-key-rules] — 2026-09-21
 
 ### Contexte

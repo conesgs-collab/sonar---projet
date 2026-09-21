@@ -33,4 +33,13 @@ check "WinPE build : la copie integree reste le repli (les 3 fichiers sont toujo
 check "WinPE build : le moteur pris sur la cle passe par le garde-fou"              'grep -q "sonar_check_awk.sh" "$PS1" && grep -q "goto diagsrc_refused" "$PS1"'
 check "WinPE build : l'origine est affichee ET consignee dans le rapport"           'grep -q "echo    regles : %RULSRC%" "$PS1" && grep -q "Sources : regles = %RULSRC%" "$PS1"'
 check "WinPE build : la commande awk utilise ENGF/RULF (plus de chemin integre en dur)" 'grep -q "awk -f .\"%ENGF%" "$PS1" && grep -q "RULES=%RULF%" "$PS1"'
+check "WinPE build : clavier AZERTY francais par defaut (wpeutil SetKeyboardLayout 040c:0000040c)" 'grep -q "wpeutil SetKeyboardLayout 040c:0000040c" "$PS1"'
+check "WinPE build : titre de fenetre SONAR et banniere SONAR (plus de marque generique a l'accueil)" 'grep -q "\"title SONAR - SE\"" "$PS1" && grep -q "sonar_banner.txt" "$PS1" && grep -q "Assistant guide" "$PS1"'
+check "WinPE build : l'assistant et sa banniere sont embarques, et l'ISO finale est verifiee pour eux" 'grep -q "\"sonar_assistant.sh\"  = " "$PS1" && grep -q "sonar.sonar_assistant.sh" "$PS1"'
+check "WinPE build : fond d'ecran SONAR genere depuis Branding et copie dans winpe.jpg (non bloquant)" 'grep -q "Branding.default_background.png" "$PS1" && grep -q "::WALLPAPER::" "$PS1" && [[ -f "${DIR}/../../Branding/default_background.png" ]]'
+check "WinPE build : le menu manuel reste (option 18 relance l'assistant, texte verifie par le build conserve)" 'grep -q "goto assistant" "$PS1" && grep -q "SONAR-SE WinPE - Menu de reparation" "$PS1"'
+# l'assistant lui-meme (etapes proposees, refus par defaut, cle BitLocker jamais journalisee) : suite dediee
+_ao="$(bash "${DIR}/run_assistant_tests.sh" 2>&1)"; _arc=$?
+printf '%s\n' "$_ao"
+fails=$((fails + _arc))
 exit "$fails"

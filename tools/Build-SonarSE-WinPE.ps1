@@ -505,6 +505,8 @@ if ($AddRepairMenu) {
             "sonar_check_awk.sh"  = Join-Path $PSScriptRoot "winpe\sonar_check_awk.sh"
             "diag_engine.awk"     = Join-Path $PSScriptRoot "diag_engine.awk"
             "diag_rules.txt"      = Join-Path $PSScriptRoot "diag_rules.txt"
+            "sonar_assistant.sh"  = Join-Path $PSScriptRoot "winpe\sonar_assistant.sh"
+            "sonar_banner.txt"    = Join-Path $PSScriptRoot "winpe\sonar_banner.txt"
         }
         foreach ($name in $tbSources.Keys) {
             $src = $tbSources[$name]
@@ -515,12 +517,75 @@ if ($AddRepairMenu) {
         Write-Host "Boite a outils preparee : $toolboxDir"
     }
 
+    # Fond d'ecran SONAR (remplace le fond bleu uni de WinPE) : Branding\default_background.png -> winpe.jpg.
+    # Non bloquant : sans image ou sans System.Drawing, le WinPE garde son fond d'origine.
+    $wallpaperJpg = $null
+    $wallSrc = Join-Path $PSScriptRoot "..\Branding\default_background.png"
+    if (Test-Path $wallSrc) {
+        try {
+            Add-Type -AssemblyName System.Drawing
+            $wallpaperJpg = Join-Path $WorkDir "winpe.jpg"
+            $img = [System.Drawing.Image]::FromFile((Resolve-Path $wallSrc).Path)
+            try { $img.Save($wallpaperJpg, [System.Drawing.Imaging.ImageFormat]::Jpeg) } finally { $img.Dispose() }
+            Write-Host "Fond d'ecran SONAR prepare : $wallpaperJpg"
+        } catch {
+            Write-Warning "Fond d'ecran SONAR non genere ($($_.Exception.Message)) : le fond WinPE d'origine est conserve."
+            $wallpaperJpg = $null
+        }
+    }
+
     # Menu batch pur (pas de PowerShell) : reprend exactement les commandes
     # documentees dans docs/WINPE.md (bootrec, bcdedit, diskpart, DISM),
     # juste presentees sans que le technicien ait a en memoriser la syntaxe.
     $menuLines = @(
         "@echo off"
         "wpeinit"
+        "rem Clavier AZERTY francais par defaut (langue 040c, disposition 0000040c)"
+        "wpeutil SetKeyboardLayout 040c:0000040c"
+        "title SONAR - SE"
+        "set SB=%SystemRoot%\System32\sonar"
+        ":start"
+        "cls"
+        "call :banner"
+        "echo   Bienvenue. SONAR enchaine les etapes ; vous n'avez qu'a repondre oui ou non."
+        "echo."
+        "echo     [Entree]  Assistant guide (recommande)"
+        "echo     [M]       Menu manuel (outils a la carte)"
+        "echo."
+        "set ANS="
+        "set /p ANS=Votre choix : "
+        "if /i `"%ANS%`"==`"M`" goto menu"
+        "if not exist `"%SB%\sonar_assistant.sh`" (echo Assistant absent de cette image ^(reconstruire avec -IncludeToolbox^) - menu manuel. & pause & goto menu)"
+        "goto assistant"
+        ""
+        ":banner"
+        "if exist `"%SB%\sonar_banner.txt`" (`"%SB%\busybox.exe`" cat `"%SB%\sonar_banner.txt`") else (echo   SONAR - SE  ^|  Assistant de depannage)"
+        "exit /b 0"
+        ""
+        ":assistant"
+        "cls"
+        "call :banner"
+        "call :findkey"
+        "set OUT=X:\sonar_assist"
+        "if defined KEY set OUT=%KEY%\Field-Logs\assistant"
+        "if not exist `"%OUT%`" mkdir `"%OUT%`""
+        "rem chemins en barres obliques pour busybox/awk (awk -v interprete les antislashs)"
+        "set SBF=%SB:\=/%"
+        "set OUTF=%OUT:\=/%"
+        "call :diagsources"
+        "echo."
+        "set SONAR_KEY=%KEY%"
+        "set SONAR_SB=%SBF%"
+        "set SONAR_ENGINE=%ENGF%"
+        "set SONAR_RULES=%RULF%"
+        "set SONAR_OUT=%OUTF%"
+        "set SONAR_RULSRC=%RULSRC%"
+        "set SONAR_ENGSRC=%ENGSRC%"
+        "`"%SB%\busybox.exe`" sh `"%SBF%/sonar_assistant.sh`""
+        "echo."
+        "pause"
+        "goto menu"
+        ""
         ":menu"
         "cls"
         "echo ============================================"
@@ -543,6 +608,7 @@ if ($AddRepairMenu) {
         "echo 15. Lancer un outil portable de la cle (CrystalDiskInfo...)"
         "echo 16. Shell BusyBox (ls, grep, awk, vi, tar...)"
         "echo 17. PowerShell (si present dans cette image)"
+        "echo 18. Relancer l'assistant guide (etapes automatiques, oui/non)"
         "echo 0. Redemarrer"
         "echo ============================================"
         "set /p choix=Choix : "
@@ -563,6 +629,7 @@ if ($AddRepairMenu) {
         "if `"%choix%`"==`"15`" goto tools_menu"
         "if `"%choix%`"==`"16`" goto bb_shell"
         "if `"%choix%`"==`"17`" goto ps_shell"
+        "if `"%choix%`"==`"18`" goto assistant"
         "if `"%choix%`"==`"0`" wpeutil reboot"
         "goto menu"
         ""
@@ -884,6 +951,7 @@ if ($AddRepairMenu) {
         "copy /y `"$startnetPath`" `"$menuMountDir\Windows\System32\startnet.cmd`""
         "if !errorlevel! neq 0 goto :fail_mounted"
         "::TOOLBOX::"
+        "::WALLPAPER::"
         "echo [%date% %time%] Demontage et commit"
         "Dism /Unmount-Image /MountDir:`"$menuMountDir`" /Commit"
         "if !errorlevel! neq 0 goto :fail_mounted"
@@ -905,7 +973,19 @@ if ($AddRepairMenu) {
             "if not exist `"$menuMountDir\Windows\System32\sonar\busybox.exe`" goto :fail_mounted"
         )
     }
-    $menuScriptLines = @($menuScriptLines | ForEach-Object { if ($_ -eq "::TOOLBOX::") { $toolboxScriptLines } else { $_ } })
+    # Fond d'ecran SONAR : propriete de TrustedInstaller si un winpe.jpg existe deja -> takeown/icacls avant de le remplacer.
+    # Un echec ici n'annule pas le build (le fond d'origine reste).
+    $wallScriptLines = @("echo [%date% %time%] Fond d'ecran SONAR non demande - ignore")
+    if ($wallpaperJpg) {
+        $wpTarget = "$menuMountDir\Windows\System32\winpe.jpg"
+        $wallScriptLines = @(
+            "echo [%date% %time%] Fond d'ecran SONAR"
+            "if exist `"$wpTarget`" takeown /f `"$wpTarget`" >nul & icacls `"$wpTarget`" /grant Administrators:F >nul"
+            "copy /y `"$wallpaperJpg`" `"$wpTarget`" >nul"
+            "if !errorlevel! neq 0 echo [%date% %time%] AVERTISSEMENT : fond d'ecran SONAR non copie - fond d'origine conserve"
+        )
+    }
+    $menuScriptLines = @($menuScriptLines | ForEach-Object { if ($_ -eq "::TOOLBOX::") { $toolboxScriptLines } elseif ($_ -eq "::WALLPAPER::") { $wallScriptLines } else { $_ } })
     $menuScriptLines | Set-Content -Path $menuScript -Encoding ASCII
 
     $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$menuScript`"" -Verb RunAs -Wait -PassThru
@@ -1180,7 +1260,7 @@ if ($AddRepairMenu) {
         "exit /b !FOUND!"
     )
     if ($toolboxDir) {
-        $verifyLines = @($verifyLines | ForEach-Object { $_; if ($_ -like '*if !FOUND! equ 0 set FOUND=!errorlevel!*') { "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\busybox.exe`" set FOUND=2"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\diag_engine.awk`" set FOUND=2" } })
+        $verifyLines = @($verifyLines | ForEach-Object { $_; if ($_ -like '*if !FOUND! equ 0 set FOUND=!errorlevel!*') { "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\busybox.exe`" set FOUND=2"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\diag_engine.awk`" set FOUND=2"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\sonar_assistant.sh`" set FOUND=2"; "if !FOUND! equ 0 (findstr /C:`"SetKeyboardLayout 040c:0000040c`" `"$verifyMountDir\Windows\System32\startnet.cmd`" >nul || set FOUND=4)" } })
     }
     if ($serviced) {
         $verifyLines = @($verifyLines | ForEach-Object { $_; if ($_ -like '*if !FOUND! equ 0 set FOUND=!errorlevel!*') { "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\manage-bde.exe`" set FOUND=3"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`" set FOUND=3" } })

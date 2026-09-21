@@ -42,11 +42,29 @@ $batch = foreach ($l in $lines) {
 }
 $batch | Set-Content "$root\startnet_t.cmd" -Encoding ASCII
 Copy-Item $BusyBox "$emb\busybox.exe"
-foreach ($f in "sonar_diag_winpe.sh", "sonar_check_awk.sh") { Copy-Item "$repo\tools\winpe\$f" $emb }
+foreach ($f in "sonar_diag_winpe.sh", "sonar_check_awk.sh", "sonar_assistant.sh", "sonar_banner.txt") { Copy-Item "$repo\tools\winpe\$f" $emb }
 Copy-Item "$repo\tools\diag_engine.awk", "$repo\tools\diag_rules.txt" $emb
 Copy-Item "$env:windir\System32\hostname.exe" "$root\bin\wpeinit.exe"
 Copy-Item "$env:windir\System32\hostname.exe" "$root\bin\wpeutil.exe"
-Set-Content "$root\in.txt" "12`r`nboot`r`n`r`n0`r`n" -Encoding ASCII
+Set-Content "$root\in.txt" "M`r`n12`r`nboot`r`n`r`n0`r`n" -Encoding ASCII   # M = menu manuel (l'ecran d'accueil propose l'assistant par defaut)
+Set-Content "$root\in_assist.txt" "`r`n1`r`nn`r`nn`r`nn`r`nn`r`nn`r`n`r`n0`r`n" -Encoding ASCII   # Entree = assistant, symptome 1, tout refuse, Entree (pause), 0
+@"
+sys.collector=winpe
+sys.diag_root=yes
+sys.firmware=uefi
+part.v1.fstype=NTFS
+part.v1.letter=C
+part.v1.is_esp=no
+part.v1.bitlocker=no
+part.v1.has_windows=yes
+part.v2.fstype=FAT32
+part.v2.is_esp=yes
+part.v2.bootmgfw=no
+part.v2.bcd=no
+part.v2.bitlocker=no
+win.partitions=1
+esp.count=1
+"@ | Set-Content "$root\assist.facts" -Encoding ASCII
 $env:PATH = "$root\bin;$env:PATH"
 
 function New-Key($name, $rules, $engine) {
@@ -56,11 +74,11 @@ function New-Key($name, $rules, $engine) {
     if ($engine) { Copy-Item $engine "$k\Scripts\diag_engine.awk" }
     $k
 }
-function Run-Menu($name, $keyDir) {
+function Run-Menu($name, $keyDir, $inFile = "in.txt") {
     cmd /c "subst X: `"$root\xdrv`"" | Out-Null
     if ($keyDir) { cmd /c "subst Z: `"$keyDir`"" | Out-Null }
     $out = "$root\out_$name.txt"
-    $cl = '/c ""' + "$root\startnet_t.cmd" + '" < "' + "$root\in.txt" + '" > "' + $out + '" 2>&1"'
+    $cl = '/c ""' + "$root\startnet_t.cmd" + '" < "' + "$root\$inFile" + '" > "' + $out + '" 2>&1"'
     $p = Start-Process cmd.exe -ArgumentList $cl -PassThru -WindowStyle Hidden
     if (-not $p.WaitForExit(90000)) {
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
@@ -93,6 +111,16 @@ try {
 
     $r = Run-Menu "5" $null
     if ($r.Console -match 'non detectee' -and $r.Console -match 'regles : INTEGREES' -and $r.Console -match 'Base : 37 regles') { Pass "aucune cle : copies integrees, message « non detectee », diagnostic mene a bien" } else { Fail "aucune cle : comportement d'origine perdu" }
+
+    # --- ecran d'accueil : Entree lance l'ASSISTANT (banniere SONAR, cle trouvee, sources annoncees, sortie sur la cle)
+    $env:SONAR_ASSIST_FACTS = ("$root\assist.facts" -replace '\\', '/')
+    $k6 = New-Key "s6" "$repo\tools\diag_rules.txt" "$repo\tools\diag_engine.awk"
+    $r = Run-Menu "6" $k6 "in_assist.txt"
+    Remove-Item Env:SONAR_ASSIST_FACTS -ErrorAction SilentlyContinue
+    if ($r.Console -match 'Assistant de depannage' -and $r.Console -match 'Sekou SANOU') { Pass "accueil : banniere SONAR affichee (nom SONAR, plus de titre generique)" } else { Fail "accueil : banniere SONAR absente" }
+    if ($r.Console -match 'regles : CLE Z:' -and $r.Console -match 'ETAPE 1 : Symptome' -and $r.Console -match 'ETAPE \d+ : Inventaire') { Pass "Entree -> assistant : cle trouvee, sources annoncees, etapes enchainees" } else { Fail "Entree ne lance pas l'assistant correctement" }
+    if ($r.Console -match 'Reparation du demarrage|Reparer le demarrage UEFI') { Pass "assistant : la reparation UEFI est proposee pour un ESP sans BCD" } else { Fail "assistant : reparation UEFI non proposee" }
+    if ($r.Console -match 'Menu de reparation') { Pass "assistant : rend la main au menu manuel a la fin" } else { Fail "assistant : pas de retour au menu manuel" }
 } finally {
     cmd /c "subst Z: /d" 2>$null | Out-Null; cmd /c "subst X: /d" 2>$null | Out-Null
     cmd /c "rmdir /s /q `"$root`"" 2>$null | Out-Null
