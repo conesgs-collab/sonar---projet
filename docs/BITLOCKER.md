@@ -39,8 +39,19 @@ sur volume réel s'active avec `SONAR_BL_TEST_IMAGE=... SONAR_BL_TEST_OFFSET=...
 - Volume déchiffré mais NTFS « sale » ou en hibernation : le montage en lecture seule peut refuser ;
   l'outil le dit sans rien modifier.
 
-## Depuis le WinPE SONAR-SE : non
-`manage-bde` demande WMI, absent du WinPE de base ; l'ajouter passe par `Dism /Add-Package`, impossible
-sur un hôte Windows 10 (voir `docs/WINPE.md`). Testé le 2026-09-21 : copier `manage-bde.exe` et ses DLL
-tirées de `WinPE-SecureStartup.cab` dans un WinPE en marche donne `0x80040154 Class not registered`
-(le fournisseur WMI BitLocker vit dans `WinPE-WMI.cab`). Le déverrouillage passe donc par Linux.
+## Depuis le WinPE SONAR-SE : oui, avec les composants ADK (3.46.0)
+`manage-bde` demande WMI. Sur cet hôte Windows 10, `Dism /Add-Package` échoue sur une image WinPE 26100,
+mais **le même DISM, lancé dans un WinPE 26100 en marche, fonctionne** : `Build-SonarSE-WinPE.ps1`
+(`-IncludeAdkComponents`, activé par défaut) fait ce servicing dans une VM VirtualBox et ajoute WMI,
+StorageWMI, SecureStartup (BitLocker), NetFx, Scripting, PowerShell et les cmdlets DISM.
+
+Vérifié le 2026-09-21 en VM UEFI sur le même volume BitLocker de test que ci-dessus :
+`manage-bde -status C:` → « Locked » ; `manage-bde -unlock C: -RecoveryPassword …` →
+« The password successfully unlocked volume C: » ; `type C:\secret.txt` → contenu lu ;
+`powershell Get-Volume` → volumes listés.
+
+Avant ces composants (test du 2026-09-21, WinPE de base) : copier `manage-bde.exe` et ses DLL dans un
+WinPE en marche donnait `0x80040154 Class not registered` — le fournisseur WMI BitLocker vit dans
+`WinPE-WMI.cab`. Le menu WinPE (option 6) utilise `manage-bde` et affiche l'alternative Linux si l'image
+n'a pas les composants. La clé de récupération y est saisie à l'écran (visible) : préférez
+`sonar_bitlocker.sh` (saisie masquée) quand un Linux est disponible.

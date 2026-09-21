@@ -4614,6 +4614,7 @@ sonar_structural_self_audit() {
     # Boite a outils WinPE : collecteur + build (busybox sh -n n'existe pas ici : sh -n suffit, syntaxe POSIX).
     if [[ -f "${_dg_dir}/winpe/sonar_diag_winpe.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_diag_winpe.sh" 2>/dev/null \
        && grep -q 'IncludeToolbox' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
+       && grep -q 'IncludeAdkComponents' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
        && grep -Eq '\$bbSha256 = "[0-9a-f]{64}"' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null; then
         echo 'PASS: boite a outils WinPE presente (collecteur sh -n, -IncludeToolbox, SHA-256 BusyBox epingle)'
     else
@@ -4653,7 +4654,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.45.0-bitlocker-unlock"
+SONAR_VERSION="3.46.0-winpe-adk-components"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"

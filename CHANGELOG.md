@@ -6,6 +6,38 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.46.0-winpe-adk-components] — 2026-09-21
+
+### Contexte
+Suite de « le WinPE est très limité » et « débloquer BitLocker ». Cause racine : `Dism /Add-Package` échoue
+sur cet hôte Windows 10 pour une image WinPE 26100 (`0x80070057`), donc ni PowerShell, ni WMI, ni
+`manage-bde`. Découverte : le **même DISM lancé dans un WinPE 26100 en marche** fonctionne.
+
+### Ajouté
+- `Build-SonarSE-WinPE.ps1 -IncludeAdkComponents` (défaut : oui) : servicing dans une VM VirtualBox UEFI
+  sans fenêtre (ISO de servicing + ISO des `.cab` de l'ADK + disque de travail VHD), puis récupération de
+  la `boot.wim` servie (montage VHD, une élévation) ; suite du build inchangée. Sans VirtualBox : avertit
+  et construit l'image sans composants. `-ServicingTimeoutMinutes`, `-ServicedBootWim` (reprise).
+  Paquets : WMI, NetFx, Scripting, PowerShell, StorageWMI, DismCmdlets, SecureStartup (+ en-US).
+- Menu WinPE : `wpeinit` au démarrage (il manquait : WMI/réseau ne s'initialisaient pas) ; option 6
+  affiche `manage-bde -status` ; option 17 PowerShell ; la vérification finale de l'ISO contrôle
+  `manage-bde.exe` et `powershell.exe` quand les composants sont demandés.
+
+### Vérifié (VM UEFI, volume BitLocker réel)
+- Le servicing automatique (script généré par le build) a fini en ~8 min : 16 paquets « Installed »,
+  `SERVICING_OK`, `boot.wim` de 503 Mo.
+- WinPE construit avec cette `boot.wim` : `manage-bde -unlock C: -RecoveryPassword …` → « The password
+  successfully unlocked volume C: », fichier lu ; `powershell Get-Volume` → volumes listés.
+
+### NON vérifié — à faire avec l'utilisateur présent (fenêtres UAC)
+- **Le build complet de bout en bout n'a pas abouti** : deux essais se sont arrêtés sur une élévation UAC
+  refusée (personne devant l'écran) — d'abord à la récupération du VHD, puis dès `copype` à la reprise.
+  Le `boot.wim` servi a été extrait par un autre chemin (VBoxManage + WSL) pour tester.
+- Donc non testés : l'étape `get.ps1` (montage du VHD), le menu à 17 options par-dessus l'image servie, la
+  vérification finale de l'ISO, `-ServicedBootWim`. Aucun nouvel ISO n'a été copié sur la clé (elle garde
+  l'ISO 3.43.0).
+- Un bug rencontré et corrigé : `rmdir` d'un dossier absent écrivait sur stderr et arrêtait le script.
+
 ## [3.45.0-bitlocker-unlock] — 2026-09-21
 
 ### Contexte

@@ -185,6 +185,29 @@ téléchargé depuis frippery.org, **SHA-256 épinglé** dans le script (un fich
 différent est refusé) et signature GPG vérifiée à la mise en place.
 `-IncludeToolbox:$false` pour une image sans BusyBox.
 
+**`-IncludeAdkComponents` (activé par défaut, ajouté en 3.46.0)** : PowerShell, WMI, BitLocker
+(`manage-bde`), stockage WMI et cmdlets DISM, dans le WinPE — la limite « très limité » à la racine.
+
+Ce qui bloquait : sur cet hôte Windows 10, `Dism /Add-Package` sur une image WinPE 26100 échoue
+(`CPEImg::Attach 0x80070057`). Ce qui marche : **le même DISM lancé dans un WinPE 26100 en
+marche**. Le script fait donc le servicing là-bas, sans intervention :
+
+1. il prépare une ISO de servicing (la `boot.wim` du build + un `startnet.cmd` qui la sert, restaure
+   le `startnet.cmd` par défaut, puis éteint) et une ISO portant les `.cab` de **votre** ADK ;
+2. une VM VirtualBox UEFI (4 Go, sans fenêtre, disque de travail VHD) les démarre ; l'ajout des
+   7 paquets (+ langue en-US) et l'écriture de l'image prennent ~20 à 40 min en émulation ;
+3. il récupère la `boot.wim` servie (montage du VHD, une élévation UAC) et continue comme avant :
+   menu, boîte à outils, marque, ISO, vérification (qui contrôle aussi `manage-bde.exe` et
+   `powershell.exe`).
+
+Prérequis : VirtualBox. Sans lui le script **avertit** et fabrique l'image sans composants (pas
+d'échec silencieux). `-ServicingTimeoutMinutes` (60 par défaut) ; `-IncludeAdkComponents:$false`
+pour s'en passer. Rien de Microsoft n'est redistribué : les `.cab` viennent de votre ADK.
+
+Effets côté menu : option 6 (BitLocker) affiche `manage-bde -status` puis déverrouille avec la clé
+de récupération ; option 17 : PowerShell ; le menu lance `wpeinit` (il manquait : sans lui, WMI et
+le réseau ne s'initialisent pas).
+
 ## Pourquoi cette distinction (construire pour vous ≠ redistribuer)
 
 SONAR-SE **n'embarque et ne télécharge jamais** de WinPE pré-construit

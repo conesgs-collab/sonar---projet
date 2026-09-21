@@ -144,6 +144,9 @@ param(
     [bool]$IncludeBitLockerTools = $false,
     [bool]$AddRepairMenu = $true,
     [bool]$IncludeToolbox = $true,
+    [bool]$IncludeAdkComponents = $true,
+    [int]$ServicingTimeoutMinutes = 60,
+    [string]$ServicedBootWim = "",
     [bool]$BrandBootManager = $true
 )
 
@@ -227,6 +230,199 @@ if (-not (Test-Path (Join-Path $stageDir "media\sources\boot.wim"))) {
     throw "Échec de la création de l'environnement WinPE — voir $stageLog ci-dessus."
 }
 
+
+# ----------------------------------------------------------------------------
+# Composants Microsoft (PowerShell, WMI, BitLocker) — servicing DANS un WinPE
+# ----------------------------------------------------------------------------
+# Sur cet hote (Windows 10 19045) `Dism /Add-Package` sur une image WinPE 26100
+# echoue (CPEImg::Attach 0x80070057, voir l'aide de -IncludePowerShell). Le meme
+# DISM, lance DANS un WinPE 26100 en marche, fonctionne (teste le 2026-09-21 en
+# VM : WMI, NetFx, Scripting, PowerShell, StorageWMI, SecureStartup, chacun avec
+# son paquet de langue). On fait donc le servicing la-bas :
+#   1. une ISO "de servicing" (la meme boot.wim + un startnet.cmd qui sert la
+#      boot.wim puis eteint la machine) et une ISO portant les .cab de l'ADK ;
+#   2. une VM VirtualBox les demarre SANS intervention, sur un disque de travail ;
+#   3. on recupere la boot.wim servie sur le disque de travail, et le reste du
+#      script (menu, boite a outils, marque) continue dessus comme avant.
+# Rien de Microsoft n'est redistribue : les .cab viennent de VOTRE ADK.
+$serviced = $false
+if ($IncludeAdkComponents -and $ServicedBootWim) {
+    # Reprise : une boot.wim deja servie (par un build precedent, dossier svc\boot_serviced.wim) est reutilisee.
+    if (-not (Test-Path $ServicedBootWim)) { throw "-ServicedBootWim introuvable : $ServicedBootWim" }
+    Write-Host "== Reutilisation de la boot.wim deja servie : $ServicedBootWim =="
+    Copy-Item $ServicedBootWim (Join-Path $stageDir "media\sources\boot.wim") -Force
+    $serviced = $true
+    $IncludeAdkComponents = $false
+}
+if ($IncludeAdkComponents -and -not $serviced) {
+    $vbm = $null
+    foreach ($c in @((Get-Command VBoxManage.exe -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }), "$env:ProgramFiles\Oracle\VirtualBox\VBoxManage.exe")) {
+        if ($c -and (Test-Path $c)) { $vbm = $c; break }
+    }
+    $ocDir = Join-Path $WinPeDir "amd64\WinPE_OCs"
+    $ocList = @("WinPE-WMI", "WinPE-NetFx", "WinPE-Scripting", "WinPE-PowerShell", "WinPE-StorageWMI", "WinPE-DismCmdlets", "WinPE-SecureStartup")
+    if (-not $vbm) {
+        Write-Warning "VirtualBox (VBoxManage.exe) introuvable : PowerShell, WMI et BitLocker NE SONT PAS ajoutes (le WinPE reste minimal). Installez VirtualBox, ou -IncludeAdkComponents:`$false pour ne plus voir ce message."
+    } elseif (-not (Test-Path $ocDir)) {
+        Write-Warning "Dossier des composants ADK introuvable ($ocDir) : composants non ajoutes."
+    } else {
+        Write-Host "== Ajout de PowerShell / WMI / BitLocker (servicing dans une VM WinPE, ~20 a 40 min, elevations requises) =="
+        $svcDir = Join-Path $WorkDir "svc"
+        if (Test-Path $svcDir) { cmd /c "rmdir /s /q `"$svcDir`"" | Out-Null }
+        New-Item -ItemType Directory -Force -Path (Join-Path $svcDir "ocs\WinPE_OCs\en-us") | Out-Null
+        foreach ($p in $ocList) {
+            Copy-Item (Join-Path $ocDir "$p.cab") (Join-Path $svcDir "ocs\WinPE_OCs\") -ErrorAction Stop
+            Copy-Item (Join-Path $ocDir "en-us\${p}_en-us.cab") (Join-Path $svcDir "ocs\WinPE_OCs\en-us\") -ErrorAction Stop
+        }
+
+        # startnet.cmd de servicing : sert la boot.wim, restaure le startnet par defaut, eteint.
+        $pkgLoop = ($ocList -join " ")
+        $svcStartnet = @(
+            "@echo off"
+            "wpeinit"
+            "call :main > X:\svc.log 2>&1"
+            "wpeutil shutdown"
+            "exit /b"
+            ""
+            ":main"
+            "set SRC="
+            "set OCS="
+            "for %%d in (C D E F G H I J K) do if exist %%d:\sources\boot.wim set SRC=%%d:"
+            "for %%d in (C D E F G H I J K) do if exist %%d:\WinPE_OCs\WinPE-WMI.cab set OCS=%%d:\WinPE_OCs"
+            "echo SRC=%SRC% OCS=%OCS%"
+            "if not defined SRC exit /b 21"
+            "if not defined OCS exit /b 22"
+            "> X:\dp.txt echo select disk 0"
+            ">> X:\dp.txt echo clean"
+            ">> X:\dp.txt echo create partition primary"
+            ">> X:\dp.txt echo format fs=ntfs quick label=SVC"
+            ">> X:\dp.txt echo assign letter=S"
+            "diskpart /s X:\dp.txt"
+            "if not exist S:\ exit /b 23"
+            "mkdir S:\m S:\scratch"
+            "copy %SRC%\sources\boot.wim S:\boot.wim"
+            "dism /Mount-Image /ImageFile:S:\boot.wim /Index:1 /MountDir:S:\m /ScratchDir:S:\scratch"
+            "if errorlevel 1 goto :fail"
+            "for %%p in ($pkgLoop) do ("
+            "  echo ===== %%p"
+            "  dism /Image:S:\m /Add-Package /PackagePath:`"%OCS%\%%p.cab`" /ScratchDir:S:\scratch"
+            "  if errorlevel 1 goto :fail_mounted"
+            "  dism /Image:S:\m /Add-Package /PackagePath:`"%OCS%\en-us\%%p_en-us.cab`" /ScratchDir:S:\scratch"
+            "  if errorlevel 1 goto :fail_mounted"
+            ")"
+            "dism /Image:S:\m /Get-Packages /Format:Table > S:\packages.txt"
+            "echo wpeinit> S:\m\Windows\System32\startnet.cmd"
+            "dism /Unmount-Image /MountDir:S:\m /Commit"
+            "if errorlevel 1 goto :fail"
+            "echo OK> S:\SERVICING_OK.flag"
+            "copy X:\svc.log S:\svc.log"
+            "exit /b 0"
+            ":fail_mounted"
+            "dism /Unmount-Image /MountDir:S:\m /Discard"
+            ":fail"
+            "echo FAILED> S:\SERVICING_FAILED.flag"
+            "copy X:\svc.log S:\svc.log"
+            "exit /b 12"
+        )
+
+        # ISO de servicing = copie du media + boot.wim montee pour remplacer startnet.cmd
+        $svcMedia = Join-Path $svcDir "media"
+        robocopy (Join-Path $stageDir "media") $svcMedia /E /NFL /NDL /NJH /NJS /NP | Out-Null
+        $svcStartnetPath = Join-Path $svcDir "startnet.cmd"
+        $svcStartnet | Set-Content -Path $svcStartnetPath -Encoding ASCII
+        $svcMount = Join-Path $svcDir "mount"
+        New-Item -ItemType Directory -Force -Path $svcMount | Out-Null
+        $svcWim = Join-Path $svcMedia "sources\boot.wim"
+        $prepScript = Join-Path $svcDir "prep.cmd"
+        $prepLog = Join-Path $svcDir "prep_log.txt"
+        @(
+            "@echo off"
+            "setlocal enabledelayedexpansion"
+            "call :main > `"$prepLog`" 2>&1"
+            "exit /b !errorlevel!"
+            ":main"
+            "call `"$setEnvBat`""
+            "Dism /Cleanup-Mountpoints"
+            "Dism /Mount-Image /ImageFile:`"$svcWim`" /Index:1 /MountDir:`"$svcMount`""
+            "if !errorlevel! neq 0 exit /b 1"
+            "copy /y `"$svcStartnetPath`" `"$svcMount\Windows\System32\startnet.cmd`""
+            "if !errorlevel! neq 0 goto :fail_mounted"
+            "Dism /Unmount-Image /MountDir:`"$svcMount`" /Commit"
+            "if !errorlevel! neq 0 goto :fail_mounted"
+            "exit /b 0"
+            ":fail_mounted"
+            "Dism /Unmount-Image /MountDir:`"$svcMount`" /Discard"
+            "exit /b 1"
+        ) | Set-Content -Path $prepScript -Encoding ASCII
+        $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$prepScript`"" -Verb RunAs -Wait -PassThru
+        if ($proc.ExitCode -ne 0) { Get-Content $prepLog -ErrorAction SilentlyContinue | Write-Host; throw "Preparation de l'image de servicing echouee (voir $prepLog)." }
+
+        $oscd = Find-ToolInAdk "oscdimg.exe"
+        $oscdDir = Split-Path $oscd -Parent
+        $noprompt = Join-Path $oscdDir "efisys_noprompt.bin"
+        $etfs = Join-Path $oscdDir "etfsboot.com"
+        if (-not (Test-Path $noprompt) -or -not (Test-Path $etfs)) { throw "efisys_noprompt.bin / etfsboot.com introuvables sous $oscdDir." }
+        $prevEap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+        $svcIso = Join-Path $svcDir "svc.iso"; $ocsIso = Join-Path $svcDir "ocs.iso"
+        & $oscd "-bootdata:2#p0,e,b`"$etfs`"#pEF,e,b`"$noprompt`"" -u1 -udfver102 $svcMedia $svcIso 2>&1 | Out-Null
+        & $oscd -m -u2 -lOCS (Join-Path $svcDir "ocs") $ocsIso 2>&1 | Out-Null
+        $ErrorActionPreference = $prevEap
+        if (-not (Test-Path $svcIso) -or -not (Test-Path $ocsIso)) { throw "Creation des ISO de servicing echouee." }
+
+        # VM : 4 Go, UEFI (efisys_noprompt : aucune touche a presser), disque de travail VHD dynamique 10 Go
+        $vm = "sonar-winpe-svc-$PID"
+        $vhd = Join-Path $svcDir "scratch.vhd"
+        & $vbm createvm --name $vm --ostype Windows11_64 --register --basefolder $svcDir | Out-Null
+        & $vbm modifyvm $vm --memory 4096 --cpus 2 --firmware efi --graphicscontroller vmsvga --vram 16 | Out-Null
+        & $vbm createmedium disk --filename $vhd --format VHD --variant Standard --size 10240 | Out-Null
+        & $vbm storagectl $vm --name SATA --add sata --controller IntelAHCI --portcount 4 | Out-Null
+        & $vbm storageattach $vm --storagectl SATA --port 0 --device 0 --type dvddrive --medium $svcIso | Out-Null
+        & $vbm storageattach $vm --storagectl SATA --port 1 --device 0 --type dvddrive --medium $ocsIso | Out-Null
+        & $vbm storageattach $vm --storagectl SATA --port 2 --device 0 --type hdd --medium $vhd | Out-Null
+        Write-Host "VM de servicing '$vm' demarree (sans fenetre) — patience, l'image est reecrite en emulation."
+        & $vbm startvm $vm --type headless | Out-Null
+        $deadline = (Get-Date).AddMinutes($ServicingTimeoutMinutes)
+        do {
+            Start-Sleep -Seconds 15
+            $state = (& $vbm showvminfo $vm --machinereadable | Select-String '^VMState="(.*)"').Matches.Groups[1].Value
+        } while ($state -eq "running" -and (Get-Date) -lt $deadline)
+        if ($state -eq "running") {
+            & $vbm controlvm $vm poweroff | Out-Null
+            Start-Sleep -Seconds 5
+            & $vbm unregistervm $vm --delete | Out-Null
+            throw "Servicing WinPE : delai de $ServicingTimeoutMinutes min depasse — VM arretee. Relancez avec un delai plus long (-ServicingTimeoutMinutes) ou -IncludeAdkComponents:`$false."
+        }
+
+        # recuperation de la boot.wim servie sur le disque de travail (montage VHD : elevation)
+        $outWim = Join-Path $svcDir "boot_serviced.wim"
+        $getScript = Join-Path $svcDir "get.ps1"
+        $getLog = Join-Path $svcDir "get_log.txt"
+        @(
+            "`$ErrorActionPreference = 'Stop'"
+            "Start-Transcript -Path '$getLog' | Out-Null"
+            "Mount-DiskImage -ImagePath '$vhd' | Out-Null"
+            "try {"
+            "  Start-Sleep -Seconds 3"
+            "  `$v = Get-Volume | Where-Object { `$_.FileSystemLabel -eq 'SVC' } | Select-Object -First 1"
+            "  if (-not `$v) { throw 'volume SVC introuvable' }"
+            "  `$r = `$v.DriveLetter + ':\'"
+            "  Copy-Item (`$r + 'svc.log') '$svcDir\svc.log' -ErrorAction SilentlyContinue"
+            "  Copy-Item (`$r + 'packages.txt') '$svcDir\packages.txt' -ErrorAction SilentlyContinue"
+            "  if (Test-Path (`$r + 'SERVICING_OK.flag')) { Copy-Item (`$r + 'boot.wim') '$outWim' -Force }"
+            "} finally { Dismount-DiskImage -ImagePath '$vhd' | Out-Null; Stop-Transcript | Out-Null }"
+        ) | Set-Content -Path $getScript -Encoding UTF8
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$getScript`"" -Verb RunAs -Wait
+        & $vbm unregistervm $vm --delete | Out-Null
+        if (-not (Test-Path $outWim)) {
+            if (Test-Path (Join-Path $svcDir "svc.log")) { Get-Content (Join-Path $svcDir "svc.log") -Tail 40 | Write-Host }
+            throw "Le servicing dans la VM n'a pas abouti (pas de SERVICING_OK) — journaux : $svcDir\svc.log, get_log.txt. Relancez avec -IncludeAdkComponents:`$false pour l'image sans composants."
+        }
+        Copy-Item $outWim (Join-Path $stageDir "media\sources\boot.wim") -Force
+        $serviced = $true
+        Write-Host "Composants ajoutes : PowerShell, WMI, StorageWMI, DismCmdlets, BitLocker (manage-bde). Paquets : $svcDir\packages.txt"
+        if (Test-Path $svcMedia) { cmd /c "rmdir /s /q `"$svcMedia`"" | Out-Null }
+    }
+}
 if ($BrandBootManager) {
     # Renomme les entrees BCD ("Windows Boot Manager"/"Windows Setup" ->
     # "SONAR - SE") et desactive l'animation graphique de demarrage
@@ -323,7 +519,7 @@ if ($AddRepairMenu) {
     # juste presentees sans que le technicien ait a en memoriser la syntaxe.
     $menuLines = @(
         "@echo off"
-        "wpeutil InitializeNetwork"
+        "wpeinit"
         ":menu"
         "cls"
         "echo ============================================"
@@ -345,6 +541,7 @@ if ($AddRepairMenu) {
         "echo 14. Charger un pilote de stockage (drvload) et re-scanner"
         "echo 15. Lancer un outil portable de la cle (CrystalDiskInfo...)"
         "echo 16. Shell BusyBox (ls, grep, awk, vi, tar...)"
+        "echo 17. PowerShell (si present dans cette image)"
         "echo 0. Redemarrer"
         "echo ============================================"
         "set /p choix=Choix : "
@@ -364,6 +561,7 @@ if ($AddRepairMenu) {
         "if `"%choix%`"==`"14`" goto drvload_menu"
         "if `"%choix%`"==`"15`" goto tools_menu"
         "if `"%choix%`"==`"16`" goto bb_shell"
+        "if `"%choix%`"==`"17`" goto ps_shell"
         "if `"%choix%`"==`"0`" wpeutil reboot"
         "goto menu"
         ""
@@ -424,7 +622,9 @@ if ($AddRepairMenu) {
         ":bitlocker_menu"
         "cls"
         "echo --- Deverrouillage BitLocker ---"
-        "if not exist `"%WINDIR%\System32\manage-bde.exe`" (echo. & echo manage-bde.exe absent de cette image WinPE ^(composant WinPE-SecureStartup non inclus au build^). & echo Reconstruire avec -IncludeBitLockerTools si l'ADK le permet sur votre poste ^(voir docs/WINPE.md^). & echo. & pause & goto menu)"
+        "if not exist `"%WINDIR%\System32\manage-bde.exe`" (echo. & echo manage-bde.exe absent de cette image WinPE ^(composants ADK non ajoutes au build : VirtualBox absent ou -IncludeAdkComponents:$false^). & echo Alternative : demarrer SystemRescue puis SONAR Field, option b ^(deverrouillage BitLocker en lecture seule^). & echo. & pause & goto menu)"
+        "manage-bde -status"
+        "echo."
         "echo Necessaire avant bootrec/DISM/SFC si le disque cible est chiffre"
         "echo (chiffrement de l'appareil active par defaut sur la plupart des"
         "echo PC recents) - sinon ces outils ne peuvent pas lire le disque."
@@ -602,6 +802,13 @@ if ($AddRepairMenu) {
         "set /p tool=Chemin complet de l'outil a lancer (Entree = retour) : "
         "if `"%tool%`"==`"`" goto menu"
         "start `"`" `"%tool%`""
+        "goto menu"
+        ""
+        ":ps_shell"
+        "cls"
+        "if not exist `"%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe`" (echo PowerShell absent de cette image ^(composants ADK non ajoutes au build^). & pause & goto menu)"
+        "echo --- PowerShell --- tapez exit pour revenir au menu."
+        "powershell -NoLogo -NoProfile"
         "goto menu"
         ""
         ":bb_shell"
@@ -935,6 +1142,9 @@ if ($AddRepairMenu) {
     )
     if ($toolboxDir) {
         $verifyLines = @($verifyLines | ForEach-Object { $_; if ($_ -like '*if !FOUND! equ 0 set FOUND=!errorlevel!*') { "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\busybox.exe`" set FOUND=2"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\sonar\diag_engine.awk`" set FOUND=2" } })
+    }
+    if ($serviced) {
+        $verifyLines = @($verifyLines | ForEach-Object { $_; if ($_ -like '*if !FOUND! equ 0 set FOUND=!errorlevel!*') { "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\manage-bde.exe`" set FOUND=3"; "if !FOUND! equ 0 if not exist `"$verifyMountDir\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`" set FOUND=3" } })
     }
     $verifyLines | Set-Content -Path $verifyScript -Encoding ASCII
     $verifyProc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$verifyScript`"" -Verb RunAs -Wait -PassThru
