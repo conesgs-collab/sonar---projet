@@ -6,6 +6,62 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.50.0-winpe-key-rules] — 2026-09-21
+
+### Contexte
+Les règles et le moteur du diagnostic WinPE étaient figés dans l'ISO (`Windows\System32\sonar\`, 535 Mo) : modifier une
+règle imposait de reconstruire l'ISO et de la redéployer sur chaque clé. Précision sur le contexte de la demande : le WinPE
+n'embarque pas `sonar_diag.sh` (script Linux) mais `sonar_diag_winpe.sh` (collecteur), `diag_engine.awk` et `diag_rules.txt`.
+
+### Ajouté
+- **Le menu WinPE (option 12) lit les règles et le moteur sur la clé SONAR-SE.** Au lancement du diagnostic, il cherche la
+  clé sur les lecteurs **D: à Z:** (celui qui porte `MANIFEST\PROFILES.tsv` ; C: — le disque du client — et X: — le WinPE —
+  ne sont plus cherchés). S'il trouve `MANIFEST\DIAG_RULES.txt` et/ou `Scripts\diag_engine.awk`, il les utilise ; sinon la
+  copie embarquée reste le **repli** (comportement d'avant, aucune clé n'est requise). Règles et moteur sont choisis
+  **séparément**.
+- **L'origine est toujours dite** : trois lignes à l'écran (« regles : CLE Z: … — 37 regle(s) », « moteur : INTEGRE dans
+  l'ISO »…), et une ligne `Sources : regles = … ; moteur = …` **ajoutée au rapport** enregistré, pour qu'un rapport porte la
+  trace de ce qui l'a produit.
+- **Garde-fou sur le moteur pris sur la clé** (`tools/winpe/sonar_check_awk.sh`, embarqué dans l'ISO) : un moteur awk est du
+  *code*. Les lecteurs D: à Z: peuvent porter la clé USB ou le disque externe du client, et le WinPE tourne en administrateur ;
+  un `diag_engine.awk` piégé y serait exécuté. Le moteur de la clé est donc refusé (repli sur l'embarqué, message explicite)
+  s'il contient `system(`, un pipe vers/depuis une commande ou une redirection de sortie (les textes entre guillemets sont
+  neutralisés avant, sinon le vrai moteur — qui affiche des `|` — était refusé). Les **règles** sont des données : pas de contrôle.
+- Tests : `tests/winpe/run_tests.sh` (16 vérifications : le vrai moteur est accepté, 6 moteurs malveillants refusés, garanties
+  statiques du build) ; `tests/winpe/test_menu_diag_sources.ps1` (Windows) : **exécute le menu tel que le build l'écrit**
+  (extrait par l'analyseur PowerShell) sur un vrai `cmd.exe` avec le vrai `busybox.exe` de l'ISO, 6 scénarios — clé complète,
+  règles modifiées sur la clé (le moteur travaille bien avec les 2 règles de la clé), moteur piégé refusé, clé sans fichiers,
+  aucune clé. Passent tous.
+- Le moteur awk et les règles ne sont **pas modifiés**. `--field-export` déployait déjà `Scripts/diag_engine.awk` et
+  `MANIFEST/DIAG_RULES.txt` sur la clé : ce sont ces fichiers-là qui sont lus.
+
+### Changement de comportement à connaître
+- La recherche de la clé (`:findkey`, aussi utilisée pour les rapports, les pilotes et les outils portables) ne regarde plus C:.
+- Il faut **reconstruire l'ISO une fois** pour embarquer ce nouveau menu ; ensuite, une règle modifiée n'exige plus qu'un
+  `--field-export` sur la clé.
+- Règles de la clé et collecteur embarqué évoluent séparément : une règle qui s'appuie sur un fait que le collecteur embarqué
+  n'émet pas ne se déclenchera simplement pas (le moteur ignore les faits absents) ; un nouveau fait exige de reconstruire l'ISO.
+
+### Non vérifié — nécessite un vrai test avec clé
+- **Aucun essai sur un vrai WinPE booté avec la clé branchée** : la logique est exécutée sur `cmd.exe` Windows (pas dans un
+  WinPE), avec `wpeinit`/`wpeutil` remplacés par des exécutables inertes et X:/Z: simulés par `subst`.
+- **L'ISO n'a pas été reconstruite** : le menu modifié n'est pas dans l'ISO actuellement sur la clé.
+- La liste réelle des lettres D:–Z: (le test la restreint à Y/Z), et l'attribution réelle de la lettre de la clé par WinPE.
+- Le garde-fou est un filtre statique de jetons littéraux : il arrête un moteur piégé écrit naïvement, pas un adversaire qui
+  contrôle déjà la clé SONAR-SE elle-même (la clé reste une racine de confiance).
+
+### Comment tester avec une vraie clé
+1. Reconstruire l'ISO : `.\tools\Build-SonarSE-WinPE.ps1 -SkipAdkInstall -OutputIso .\SONAR-SE-WinPE-amd64.iso -ServicedBootWim <boot_serviced.wim>`
+   (UAC à accepter), la copier dans `E:\ISO\WinPE\`, et `sonar_master.sh --field-export /mnt/e` pour les fichiers de la clé.
+2. Booter le WinPE depuis la clé, menu → **12** : l'écran doit annoncer « regles : CLE X: … » et « moteur : CLE X: … ».
+3. Sur la clé, éditer une règle de `MANIFEST\DIAG_RULES.txt` (ex. ajouter/retirer une ligne), **sans toucher à l'ISO**, relancer
+   le 12 : le nombre de règles affiché et le `Base : N regles` du rapport doivent suivre la modification.
+4. Repli : renommer `MANIFEST\DIAG_RULES.txt` puis relancer : « regles : INTEGREES dans l'ISO ». Débrancher toute clé : « cle
+   SONAR-SE non detectee », le diagnostic doit quand même se terminer.
+5. Garde-fou : remplacer `Scripts\diag_engine.awk` par un fichier contenant `BEGIN { system("calc.exe") }` : le menu doit annoncer
+   « moteur de la cle REFUSE » et utiliser l'embarqué (aucune calculatrice ne doit s'ouvrir). Remettre le vrai moteur ensuite.
+6. Regarder la dernière ligne de `Field-Logs\diag\DIAG_*.txt` : `Sources : regles = … ; moteur = …`.
+
 ## [3.49.2-audit-lock-and-log-fixes] — 2026-09-21
 
 ### Contexte

@@ -4863,6 +4863,12 @@ sonar_structural_self_audit() {
     else
         echo 'FAIL: audit de WinPE tiers incomplet (tools/sonar_pe_audit.sh, pe_audit_indicators.txt, tests/pe_audit/run_tests.sh)'; errors=$((errors+1))
     fi
+    if [[ -f "${_dg_dir}/winpe/sonar_check_awk.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_check_awk.sh" 2>/dev/null \
+       && grep -q ':diagsources' "${_dg_dir}/Build-SonarSE-WinPE.ps1" && [[ -f "${SONAR_SCRIPT_DIR}/tests/winpe/run_tests.sh" ]]; then
+        echo 'PASS: diagnostic WinPE lisant les regles/le moteur de la cle (garde-fou awk, repli integre, tests)'
+    else
+        echo 'FAIL: diagnostic WinPE depuis la cle incomplet (tools/winpe/sonar_check_awk.sh, :diagsources dans Build-SonarSE-WinPE.ps1, tests/winpe)'; errors=$((errors+1))
+    fi
     # Boite a outils WinPE : collecteur + build (busybox sh -n n'existe pas ici : sh -n suffit, syntaxe POSIX).
     if [[ -f "${_dg_dir}/winpe/sonar_diag_winpe.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_diag_winpe.sh" 2>/dev/null \
        && grep -q 'IncludeToolbox' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
@@ -4906,7 +4912,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.49.2-audit-lock-and-log-fixes"
+SONAR_VERSION="3.50.0-winpe-key-rules"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5378,7 +5384,7 @@ sonar_self_test_v2() {
         fi
         # Recuperation de donnees (disque de test CONSTRUIT : NTFS, secteurs defectueux simules) et audit de PE tiers.
         local _tsuite _tout _trc
-        for _tsuite in recover pe_audit; do
+        for _tsuite in recover pe_audit winpe; do
             if [[ -f "${SONAR_SCRIPT_DIR}/tests/${_tsuite}/run_tests.sh" ]]; then
                 _tout="$(bash "${SONAR_SCRIPT_DIR}/tests/${_tsuite}/run_tests.sh" 2>&1)"; _trc=$?
                 printf '%s\n' "${_tout}"
