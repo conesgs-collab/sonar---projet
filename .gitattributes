@@ -12,3 +12,4 @@ tools/diag_rules.txt text eol=lf
 tests/diag/*.facts text eol=lf
 *.awk text eol=lf
 tools/client_templates.txt text eol=lf
+tools/pe_audit_indicators.txt text eol=lf
