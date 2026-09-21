@@ -6,6 +6,30 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.49.2-audit-lock-and-log-fixes] — 2026-09-21
+
+### Contexte
+Audit de sécurité adversarial de `sonar_master.sh` (RBAC, secrets, jetons, hashchain), méthode : lecture puis **rejeu de
+chaque hypothèse** sur une racine de confiance isolée. Rapport complet : `docs/SECURITY_AUDIT_2026-09-21.md`
+(7 trouvailles significatives + 6 basses ; ce qui est déjà documenté comme volontaire a été écarté).
+
+### Corrigé (2 trouvailles, avec tests de non-régression ; les deux sont vérifiées avant/après)
+- **HAUTE — le verrou de rôle se contournait avec une variable d'environnement.** `SONAR_ROLE_LOCK_ENFORCED_SIG` n'était
+  jamais initialisée : `SONAR_ROLE=Admin SONAR_ROLE_LOCK_ENFORCED_SIG='Admin::'` donnait le rôle Admin **sans jeton**.
+  Affectation simple à la déclaration. Le test échoue sans le correctif (vérifié).
+- **MOYENNE — falsification du journal par `SONAR_ROLE_IDENTITY`.** L'identité (variable d'environnement non vérifiée pour
+  un rôle libre-service) était ajoutée **après** l'assainissement centralisé : un saut de ligne forgeait une fausse
+  élévation Admin dans `audit.log`. Identité assainie à l'ajout.
+
+### NON corrigé — décisions à prendre (détail et correctifs minimaux dans le rapport)
+Émission de jeton sans contrôle de rôle ; racine de confiance surchargeable par l'environnement (dont `SONAR_AUDIT_LOG=/dev/null`) ;
+chaîne de hachage sans clé (troncature et réécriture complète non détectées) ; `.lock` inutilisable → audit perdu sans arrêter
+l'action ; jeton passé en argument de ligne de commande. Non corrigés parce que chacun demande un choix produit ou casserait
+des tests et des workflows existants ; aucun n'est traité par ce correctif.
+
+### Non vérifié
+Comportement sous `sudo` réel (`env_reset`) ; `hash="UNAVAILABLE"` sans outil SHA-256 ; contrôle des droits de `SONAR_ROLE_TOKEN_FILE`.
+
 ## [3.49.1-export-guards] — 2026-09-21
 
 ### Corrigé

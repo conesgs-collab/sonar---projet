@@ -180,6 +180,11 @@ SONAR_ROLE_TOKEN="${SONAR_ROLE_TOKEN:-}"
 SONAR_ROLE_TOKEN_FILE="${SONAR_ROLE_TOKEN_FILE:-}"
 SONAR_ROLE_IDENTITY="${SONAR_ROLE_IDENTITY:-}"
 SONAR_ROLE_DENY_REASON=""
+# Affectation SIMPLE (jamais "${VAR:-}") : cette variable memorise « le verrou a deja ete verifie pour ce
+# (role, jeton, fichier) ». Si elle etait heritee de l'environnement, exporter SONAR_ROLE_LOCK_ENFORCED_SIG='Admin::'
+# avec SONAR_ROLE=Admin faisait retourner sonar_role_enforce_lock avant toute verification : role Admin sans
+# AUCUN jeton (verifie 2026-09-21, audit adversarial — voir CHANGELOG 3.49.2).
+SONAR_ROLE_LOCK_ENFORCED_SIG=""
 
 sonar_role_secret_exists() { [[ -s "${SONAR_ROLE_SECRET_FILE}" ]]; }
 
@@ -608,10 +613,14 @@ sonar_audit() {
         # verifiee au meme titre qu'un jeton signe (roles elevated,
         # SONAR_ROLE_IDENTITY assigne en ligne 355 apres verification HMAC).
         # Trouve 2026-09-17 — voir CHANGELOG.md.
+        # L'identite est assainie ICI, apres l'assainissement de event/details plus haut : elle est ajoutee
+        # apres eux, et pour un role libre-service c'est une variable d'env NON verifiee — un saut de ligne ou une
+        # tabulation dedans forgeait de fausses lignes dans audit.log/hashchain.log (verifie 2026-09-21).
+        local _sid; _sid="$(sonar_sanitize_value "${SONAR_ROLE_IDENTITY}")"
         if sonar_role_is_self_service "${SONAR_ROLE}"; then
-            details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY} (auto-declaree, non authentifiee)"
+            details="${details:+${details};}identity=${_sid} (auto-declaree, non authentifiee)"
         else
-            details="${details:+${details};}identity=${SONAR_ROLE_IDENTITY}"
+            details="${details:+${details};}identity=${_sid}"
         fi
     fi
     # Serialize the read-prev/append sequence below with flock when available:
@@ -4897,7 +4906,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.49.1-export-guards"
+SONAR_VERSION="3.49.2-audit-lock-and-log-fixes"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5136,6 +5145,29 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tRole escalation without token was NOT blocked\n'; errors=$((errors+1))
         fi
+        # Regression (audit adversarial 2026-09-21) : le marqueur interne « verrou deja verifie » ne doit JAMAIS
+        # pouvoir etre fourni par l'environnement (Admin sans jeton avec SONAR_ROLE_LOCK_ENFORCED_SIG='Admin::').
+        local _es_root _es_out _es_before _es_after
+        _es_root="$(mktemp -d)"
+        _es_out="$(SONAR_ROOT="${_es_root}" SONAR_ROLE=Admin SONAR_ROLE_LOCK_ENFORCED_SIG='Admin::' "$self" --security-status 2>/dev/null)"
+        if grep -q 'role: Technician' <<< "${_es_out}"; then
+            printf 'PASS\tRole lock cannot be bypassed by exporting SONAR_ROLE_LOCK_ENFORCED_SIG\n'
+        else
+            printf 'FAIL\tSONAR_ROLE_LOCK_ENFORCED_SIG from the environment bypassed the role lock (Admin without a token)\n'; errors=$((errors+1))
+        fi
+        # Regression : une identite auto-declaree (env, role libre-service) ne doit pas pouvoir forger de lignes de journal.
+        SONAR_ROOT="${_es_root}" "$self" --role-bootstrap >/dev/null 2>&1
+        _es_before="$(wc -l < "${_es_root}/Secure/Logs/audit.log")"
+        SONAR_ROOT="${_es_root}" SONAR_ROLE_IDENTITY=$'x\n2026-01-01T00:00:00Z\tAdmin\tROLE_ELEVATION_GRANTED\trole=Admin;identity=root' "$self" --role-issue-token Admin forged.test >/dev/null 2>&1
+        _es_after="$(wc -l < "${_es_root}/Secure/Logs/audit.log")"
+        _es_out="$(SONAR_ROOT="${_es_root}" "$self" --verify-hashchain 2>&1)"   # capture d'abord : "| grep -q" sous pipefail = SIGPIPE
+        if [[ $((_es_after - _es_before)) -eq 1 ]] && [[ -z "$(awk -F'\t' '$3=="ROLE_ELEVATION_GRANTED" || $1 ~ /^2026-01-01/' "${_es_root}/Secure/Logs/audit.log")" ]] \
+           && grep -q 'integre' <<< "${_es_out}"; then
+            printf 'PASS\tAn unauthenticated SONAR_ROLE_IDENTITY cannot inject forged lines into the audit log\n'
+        else
+            printf 'FAIL\tSONAR_ROLE_IDENTITY with a newline/tab injected extra lines into audit.log (%s -> %s)\n' "${_es_before}" "${_es_after}"; errors=$((errors+1))
+        fi
+        rm -rf "${_es_root}"
         local _rt_root _rt_out _rt_token
         _rt_root="$(mktemp -d)"
         SONAR_ROOT="${_rt_root}" "$self" --role-bootstrap >/dev/null 2>&1
