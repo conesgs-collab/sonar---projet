@@ -1,0 +1,41 @@
+# pe_audit_indicators.txt — indicateurs cherchés par tools/sonar_pe_audit.sh dans les fichiers
+# AJOUTES par un WinPE tiers (installateurs, scripts, raccourcis, binaires hors de \Windows).
+#
+# Ce sont des HEURISTIQUES : un indicateur ne prouve rien (un outil de réparation légitime peut
+# écrire dans le dossier Démarrage ou charger une ruche), et leur absence ne prouve pas l'innocuité
+# (code chiffré, téléchargé plus tard, obfusqué). Le rapport le dit, et montre toujours la preuve.
+#
+# Format (séparateur " :: ", UTF-8, LF) :
+#   GRAVITE :: TYPE :: ID :: MOTIF :: LIBELLE
+#   GRAVITE = HIGH | MEDIUM | INFO
+#   TYPE    = re  expression régulière étendue (ERE), insensible à la casse, cherchée dans les chaînes
+#                 ASCII et UTF-16LE du fichier
+#             kw  mot littéral (peut être non ASCII) cherché en UTF-8 ET en UTF-16LE (cas des binaires Windows)
+#
+# Escalade (dans le script) : un mot d'affiliation (PA*) présent avec un installateur embarqué (PI*) ou un
+# identifiant d'affiliation dans une URL (PU*) -> le constat « mécanisme d'affiliation probable » passe HIGH.
+
+# --- affiliation / promotion (mécanisme documenté de certaines éditions "联盟版" : installation de logiciels
+#     promotionnels sur la machine cible, liée à un identifiant de promoteur)
+MEDIUM :: kw :: PA01 :: 联盟 :: mot "联盟" (alliance / affiliation)
+MEDIUM :: kw :: PA02 :: 推广 :: mot "推广" (promotion)
+MEDIUM :: kw :: PA03 :: 总裁联盟 :: nom "总裁联盟" (programme d'affiliation)
+MEDIUM :: re :: PU01 :: [?&](union|unionid|channel|chid|aff|affid|affiliate|partner|promo|promoid|tuiguang|refid)=[A-Za-z0-9_-]+ :: identifiant d'affiliation / de canal dans une URL
+
+# --- page d'accueil / navigateur
+HIGH :: kw :: PH01 :: 锁定主页 :: verrouillage de page d'accueil ("锁定主页")
+HIGH :: re :: PH02 :: home.?page.{0,3}lock|lock.{0,3}home.?page :: verrouillage de page d'accueil
+MEDIUM :: re :: PH03 :: Default_Page_URL|Start Page|StartPage|Search Page|SearchAssistant :: écriture d'une page d'accueil / de recherche de navigateur
+MEDIUM :: re :: PH04 :: hao123\.com|2345\.com|hao\.360\.cn|hao\.qq\.com|daohang|123\.sogou :: portail de navigation typique des détournements de page d'accueil
+HIGH :: re :: PH05 :: cmd(\.exe)?\s+/c\s+start\s+https?:// :: ouvre une page web au démarrage
+
+# --- installation / persistance sur la machine du client
+MEDIUM :: re :: PI01 :: Nullsoft Install System|Inno Setup|InstallShield|WiX Toolset|7-Zip SFX|NSIS Error :: installateur embarqué (peut installer des logiciels sur la cible)
+MEDIUM :: re :: PI02 :: schtasks(\.exe)?.{0,30}/create|Register-ScheduledTask :: création de tâche planifiée
+MEDIUM :: re :: PI03 :: Start Menu.{0,3}Programs.{0,3}Start[Uu]p|Users.{0,20}Startup :: dépôt dans le dossier Démarrage
+MEDIUM :: re :: PI04 :: reg(\.exe)?\s+load\s+HK :: charge la ruche du Windows du client (écriture hors ligne possible)
+MEDIUM :: re :: PI05 :: CurrentVersion.{0,3}RunOnce|CurrentVersion.{0,3}Run\b :: écriture d'une clé de démarrage automatique
+MEDIUM :: re :: PI06 :: URLDownloadToFile|BITSAdmin.{0,20}/transfer|Invoke-WebRequest|DownloadFile\( :: téléchargement de fichier depuis un serveur
+
+# --- collecte de données (heuristique, à examiner)
+MEDIUM :: re :: PD01 :: (machine_?id|hwid|cpu_?id|disk_?serial|mac_?addr(ess)?)[^A-Za-z0-9]{0,3}= :: envoi possible d'identifiants matériels

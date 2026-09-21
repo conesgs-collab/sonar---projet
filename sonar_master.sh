@@ -2226,12 +2226,33 @@ sonar_field_menu() {
             echo "  c) RAPPORT CLIENT — PDF en langage simple, tire du dernier diagnostic"
         [[ -f "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" ]] && \
             echo "  b) BITLOCKER — ouvrir un volume chiffré en lecture seule (clé de récupération du propriétaire)"
+        [[ -f "${SONAR_FIELD_KEY}/Scripts/sonar_recover.sh" ]] && \
+            echo "  r) RÉCUPÉRATION DE DONNÉES — plan, image du disque, copie vérifiée (lecture seule)"
         echo "  q) Quitter"
         read -r -p "Choix : " choice
         [[ "$choice" == "q" ]] && break
         if [[ "$choice" == "d" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" ]]; then
             sonar_field_audit "FIELD_DIAG_RUN" "outil=sonar_diag"
             bash "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" --out "${SONAR_FIELD_LOG_DIR}/diag/DIAG_$(date +%Y%m%d-%H%M%S)" || true
+        elif [[ "$choice" == "r" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_recover.sh" ]]; then
+            local _rdiag _rsrc _rdst _ract
+            _rdiag="$(ls -d "${SONAR_FIELD_LOG_DIR}"/diag/DIAG_*/ 2>/dev/null | sort | tail -1)"
+            bash "${SONAR_FIELD_KEY}/Scripts/sonar_recover.sh" plan ${_rdiag:+--diag "${_rdiag%/}"} || true
+            read -r -p "Source (/dev/sdXN, image ou dossier monté en lecture seule ; Entrée = annuler) : " _rsrc
+            if [[ -n "$_rsrc" ]]; then
+                read -r -p "Destination (dossier sur un AUTRE disque que la source) : " _rdst
+                read -r -p "Action : 1) image du disque (ddrescue)  2) copie des fichiers : " _ract
+                if [[ -n "$_rdst" && ( "$_ract" == 1 || "$_ract" == 2 ) ]]; then
+                    sonar_field_audit "FIELD_RECOVER" "action=${_ract};src=${_rsrc};dest=${_rdst}"
+                    if [[ "$_ract" == 1 ]]; then
+                        SONAR_AUDIT_FILE="${SONAR_FIELD_LOG_DIR}/recover.log" bash "${SONAR_FIELD_KEY}/Scripts/sonar_recover.sh" image --source "$_rsrc" --dest "$_rdst" || true
+                    else
+                        SONAR_AUDIT_FILE="${SONAR_FIELD_LOG_DIR}/recover.log" bash "${SONAR_FIELD_KEY}/Scripts/sonar_recover.sh" copy --source "$_rsrc" --dest "$_rdst" || true
+                    fi
+                else
+                    echo "Annulé (destination ou action manquante)."
+                fi
+            fi
         elif [[ "$choice" == "b" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" ]]; then
             local _bd
             SONAR_AUDIT_FILE="${SONAR_FIELD_LOG_DIR}/bitlocker.log" bash "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" --list || true
@@ -2301,6 +2322,7 @@ FIELD_SCRIPT_EOF
     # Deverrouillage BitLocker cote Linux (lecture seule, cle de recuperation du proprietaire).
     if [[ -f "${d}/sonar_bitlocker.sh" ]]; then
         cp -f "${d}/sonar_bitlocker.sh" "${mp}/Scripts/sonar_bitlocker.sh"
+        [[ -f "${d}/sonar_recover.sh" ]] && { cp -f "${d}/sonar_recover.sh" "${mp}/Scripts/sonar_recover.sh"; chmod +x "${mp}/Scripts/sonar_recover.sh" 2>/dev/null || true; }
         chmod +x "${mp}/Scripts/sonar_bitlocker.sh" 2>/dev/null || true
     else
         log "[SONAR] tools/sonar_bitlocker.sh absent : deverrouillage BitLocker NON deploye sur la cle."
@@ -4796,6 +4818,18 @@ sonar_structural_self_audit() {
     else
         echo 'FAIL: deverrouillage BitLocker incomplet (tools/sonar_bitlocker.sh, lecture seule, tests/bitlocker/run_tests.sh)'; errors=$((errors+1))
     fi
+    if [[ -f "${_dg_dir}/sonar_recover.sh" ]] && bash -n "${_dg_dir}/sonar_recover.sh" 2>/dev/null \
+       && grep -q 'mount -o ro' "${_dg_dir}/sonar_recover.sh" && [[ -f "${SONAR_SCRIPT_DIR}/tests/recover/run_tests.sh" ]]; then
+        echo 'PASS: recuperation de donnees presente (sonar_recover.sh, montage lecture seule, bash -n, tests)'
+    else
+        echo 'FAIL: recuperation de donnees incomplete (tools/sonar_recover.sh, lecture seule, tests/recover/run_tests.sh)'; errors=$((errors+1))
+    fi
+    if [[ -f "${_dg_dir}/sonar_pe_audit.sh" && -s "${_dg_dir}/pe_audit_indicators.txt" ]] && bash -n "${_dg_dir}/sonar_pe_audit.sh" 2>/dev/null \
+       && [[ -f "${SONAR_SCRIPT_DIR}/tests/pe_audit/run_tests.sh" ]]; then
+        echo 'PASS: audit de WinPE tiers present (sonar_pe_audit.sh + indicateurs, bash -n, tests)'
+    else
+        echo 'FAIL: audit de WinPE tiers incomplet (tools/sonar_pe_audit.sh, pe_audit_indicators.txt, tests/pe_audit/run_tests.sh)'; errors=$((errors+1))
+    fi
     # Boite a outils WinPE : collecteur + build (busybox sh -n n'existe pas ici : sh -n suffit, syntaxe POSIX).
     if [[ -f "${_dg_dir}/winpe/sonar_diag_winpe.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_diag_winpe.sh" 2>/dev/null \
        && grep -q 'IncludeToolbox' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
@@ -4839,7 +4873,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.47.0-fetch-usable"
+SONAR_VERSION="3.48.0-data-recovery"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5286,6 +5320,17 @@ sonar_self_test_v2() {
         else
             printf 'WARN\tDiagnostic intelligent : tests/diag/run_tests.sh absent, moteur non teste\n'; warnings=$((warnings+1))
         fi
+        # Recuperation de donnees (disque de test CONSTRUIT : NTFS, secteurs defectueux simules) et audit de PE tiers.
+        local _tsuite _tout _trc
+        for _tsuite in recover pe_audit; do
+            if [[ -f "${SONAR_SCRIPT_DIR}/tests/${_tsuite}/run_tests.sh" ]]; then
+                _tout="$(bash "${SONAR_SCRIPT_DIR}/tests/${_tsuite}/run_tests.sh" 2>&1)"; _trc=$?
+                printf '%s\n' "${_tout}"
+                errors=$((errors + _trc))
+            else
+                printf 'WARN\ttests/%s/run_tests.sh absent\n' "${_tsuite}"; warnings=$((warnings+1))
+            fi
+        done
         # Deverrouillage BitLocker : garde-fous (+ volume reel si SONAR_BL_TEST_IMAGE est fourni).
         if [[ -f "${SONAR_SCRIPT_DIR}/tests/bitlocker/run_tests.sh" ]]; then
             local _bl_out _bl_rc
@@ -5591,6 +5636,11 @@ sonar_self_test_v2() {
             printf 'PASS\tSONAR Field deploys the BitLocker unlock (read-only) and offers it in its menu\n'
         else
             printf 'FAIL\tSONAR Field export is missing the BitLocker unlock (Scripts/sonar_bitlocker.sh, menu entry b)\n'; errors=$((errors+1))
+        fi
+        if [[ -x "${_fld_dir}/Scripts/sonar_recover.sh" ]] && grep -q 'RÉCUPÉRATION DE DONNÉES' <<<"${_fld_out}"; then
+            printf 'PASS\tSONAR Field deploys the data recovery tool and offers it in its menu\n'
+        else
+            printf 'FAIL\tSONAR Field export is missing the data recovery tool (Scripts/sonar_recover.sh, menu entry r)\n'; errors=$((errors+1))
         fi
         local _fps_root _fps_out _fps_token
         _fps_root="$(mktemp -d)"

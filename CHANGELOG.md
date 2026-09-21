@@ -6,6 +6,40 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.48.0-data-recovery] — 2026-09-21
+
+### Contexte
+« Peut-on construire notre propre système de récupération de données et l'intégrer ? » Réponse : pas un moteur
+(ddrescue/ntfs-3g/PhotoRec sont éprouvés, une erreur de notre part sur un disque mourant est irréversible) mais la
+**couche de pilotage** qui impose la bonne méthode et laisse une preuve. Première tranche : copie sûre.
+
+### Ajouté
+- `tools/sonar_recover.sh` : `plan` (méthode selon le diagnostic), `image` (ddrescue en 2 passes), `copy`
+  (lecture seule, SHA-256 calculé à la lecture puis relecture de la copie, erreurs consignées, manifeste,
+  résumé qui ne promet rien), `verify`. Garde-fous : source jamais écrite, destination ni sur le même disque
+  ni dans la source, place vérifiée avant, source montée en lecture-écriture refusée.
+- SONAR Field : option `r` ; `--field-export` déploie le script ; audit + `--self-test` câblés.
+- `tests/recover/run_tests.sh` : 44 vérifications sur un disque **construit** (NTFS partitionné) dont un
+  **disque défaillant simulé** par device-mapper. `docs/RECOVERY.md`.
+- `tools/sonar_pe_audit.sh` + `tools/pe_audit_indicators.txt` + `tests/pe_audit/run_tests.sh` (22 vérifications)
+  + `docs/PE_AUDIT.md` : audit **statique** d'un WinPE tiers (démarrage, registre hors ligne, tâches, hosts,
+  raccourcis, fichiers ajoutés contre une référence, indicateurs d'affiliation en UTF-8 et UTF-16). Écrit pour
+  examiner l'édition d'affiliation « 联盟版 » d'USM, **abandonnée** ensuite comme contraire à SONAR : rien n'a
+  été téléchargé ni exécuté, aucune vraie édition n'a été analysée.
+
+### Corrigé en route
+- L'audit de notre propre WinPE a d'abord produit **des faux positifs** : valeurs de registre WinPE normales
+  (`Shell`, `Userinit`, `CmdLine`) mal décodées (`strtonum` absent de mawk ; `hex(1)` non géré), mot chinois dans un
+  fichier de données ICU de Microsoft, notre propre menu signalé. Corrigé (décodage sans `strtonum`, exclusion des
+  ruches, des fichiers de données de `\Windows` et des binaires se déclarant Microsoft, programme fourni par le
+  support ramené à INFO). Avec la bonne référence (WinPE propre + composants acceptés) : « aucun indicateur ».
+- `sonar_recover.sh` : `losetup -P` crée les nœuds de partitions de façon asynchrone ; sans attente, une image
+  partitionnée passait parfois pour « sans partition » (échec intermittent constaté). Attente ajoutée.
+
+### Non vérifié
+- Un vrai disque physique défaillant ; ext4/exFAT (seul NTFS testé) ; la recherche de fichiers supprimés
+  (PhotoRec/TestDisk : étape suivante) ; le chapitre « récupération » du rapport client.
+
 ## [3.47.0-fetch-usable] — 2026-09-21
 
 ### Contexte
