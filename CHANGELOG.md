@@ -6,6 +6,23 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.49.1-export-guards] — 2026-09-21
+
+### Corrigé
+- **`sonar_export_field_files` : la copie de `sonar_recover.sh` était imbriquée dans le `if` de
+  `sonar_bitlocker.sh`.** Sans `tools/sonar_bitlocker.sh`, la récupération de données n'était pas déployée sur la
+  clé — et **aucun message ne le disait** (le `else` ne parlait que de BitLocker). Chaque outil a maintenant sa
+  propre garde et son propre message. Reproduit avant correctif (clé sans `sonar_recover.sh`), vérifié après dans les
+  4 combinaisons présent/absent. Diff de 8 lignes, sans refactor.
+- Constaté au passage : `sonar_pe_audit.sh` n'est **pas** déployé sur la clé, volontairement (outil du poste de
+  construction), pas un bug.
+
+### Ajouté
+- Test de non-régression : pour chacun de `sonar_bitlocker.sh`, `sonar_recover.sh`, `sonar_diag.sh`, on retire
+  l'outil de `tools/` et on vérifie que les deux autres sont quand même copiés (et que l'absent ne l'est pas).
+  **Vérifié qu'il échoue sur l'ancien code** (« sans tools/sonar_bitlocker.sh, sonar_recover.sh n'a PAS été copié »).
+  Ni l'audit ni l'ancien self-test ne pouvaient l'attraper : les deux fichiers sont toujours présents dans le dépôt.
+
 ## [3.49.0-recovery-carving] — 2026-09-21
 
 ### Ajouté

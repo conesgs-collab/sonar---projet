@@ -2322,10 +2322,16 @@ FIELD_SCRIPT_EOF
     # Deverrouillage BitLocker cote Linux (lecture seule, cle de recuperation du proprietaire).
     if [[ -f "${d}/sonar_bitlocker.sh" ]]; then
         cp -f "${d}/sonar_bitlocker.sh" "${mp}/Scripts/sonar_bitlocker.sh"
-        [[ -f "${d}/sonar_recover.sh" ]] && { cp -f "${d}/sonar_recover.sh" "${mp}/Scripts/sonar_recover.sh"; chmod +x "${mp}/Scripts/sonar_recover.sh" 2>/dev/null || true; }
         chmod +x "${mp}/Scripts/sonar_bitlocker.sh" 2>/dev/null || true
     else
         log "[SONAR] tools/sonar_bitlocker.sh absent : deverrouillage BitLocker NON deploye sur la cle."
+    fi
+    # Recuperation de donnees (garde INDEPENDANTE de celle de BitLocker).
+    if [[ -f "${d}/sonar_recover.sh" ]]; then
+        cp -f "${d}/sonar_recover.sh" "${mp}/Scripts/sonar_recover.sh"
+        chmod +x "${mp}/Scripts/sonar_recover.sh" 2>/dev/null || true
+    else
+        log "[SONAR] tools/sonar_recover.sh absent : recuperation de donnees NON deployee sur la cle."
     fi
 }
 
@@ -4891,7 +4897,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.49.0-recovery-carving"
+SONAR_VERSION="3.49.1-export-guards"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5654,6 +5660,26 @@ sonar_self_test_v2() {
             printf 'PASS\tSONAR Field deploys the BitLocker unlock (read-only) and offers it in its menu\n'
         else
             printf 'FAIL\tSONAR Field export is missing the BitLocker unlock (Scripts/sonar_bitlocker.sh, menu entry b)\n'; errors=$((errors+1))
+        fi
+        # Regression : chaque outil de tools/ a sa PROPRE garde a l'export. Un outil absent ne doit jamais en
+        # empecher un autre (bug corrige : sonar_recover.sh etait copie a l'interieur du if de sonar_bitlocker.sh).
+        local _gx_dir _gx_tool _gx_other _gx_bad=0
+        _gx_dir="$(mktemp -d)"
+        for _gx_tool in sonar_bitlocker.sh sonar_recover.sh sonar_diag.sh; do
+            rm -rf "${_gx_dir}/s" "${_gx_dir}/mp"; mkdir -p "${_gx_dir}/s" "${_gx_dir}/mp"
+            cp -r "${SONAR_SCRIPT_DIR}/tools" "${_gx_dir}/s/tools"; rm -f "${_gx_dir}/s/tools/${_gx_tool}"
+            ( SONAR_SCRIPT_DIR="${_gx_dir}/s"; sonar_export_field_files "${_gx_dir}/mp" ) >/dev/null 2>&1
+            for _gx_other in sonar_bitlocker.sh sonar_recover.sh sonar_diag.sh; do
+                [[ "$_gx_other" == "$_gx_tool" ]] && continue
+                [[ -f "${_gx_dir}/mp/Scripts/${_gx_other}" ]] || { _gx_bad=$((_gx_bad+1)); printf 'FAIL\tField export: sans tools/%s, %s n a PAS ete copie sur la cle\n' "$_gx_tool" "$_gx_other"; }
+            done
+            [[ ! -f "${_gx_dir}/mp/Scripts/${_gx_tool}" ]] || { _gx_bad=$((_gx_bad+1)); printf 'FAIL\tField export: %s copie alors que la source est absente\n' "$_gx_tool"; }
+        done
+        rm -rf "${_gx_dir}"
+        if [[ $_gx_bad -eq 0 ]]; then
+            printf 'PASS\tField export: chaque outil (bitlocker, recover, diag) est copie independamment des autres\n'
+        else
+            errors=$((errors + _gx_bad))
         fi
         if [[ -x "${_fld_dir}/Scripts/sonar_recover.sh" ]] && grep -q 'RÉCUPÉRATION DE DONNÉES' <<<"${_fld_out}"; then
             printf 'PASS\tSONAR Field deploys the data recovery tool and offers it in its menu\n'
