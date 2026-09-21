@@ -57,7 +57,7 @@ git config core.hooksPath hooks/
 
 # Profils de dépannage fermés et documentés (scénario + outils + pourquoi) —
 # c'est CECI, pas le catalogue 981, qui décide de ce qui va sur la clé
-./sonar_master.sh --profile                    # vue d'ensemble des 6 profils
+./sonar_master.sh --profile                    # vue d'ensemble des 8 profils (+ full)
 ./sonar_master.sh --profile boot-repair        # détail d'un profil précis
 
 # Voir toutes les commandes disponibles

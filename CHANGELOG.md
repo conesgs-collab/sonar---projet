@@ -6,6 +6,45 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.47.0-fetch-usable] — 2026-09-21
+
+### Contexte
+Relecture externe de `sonar_master.sh` : quatre défauts confirmés dans le code (le cinquième point du
+rapport — fichiers `tools/` non fournis au relecteur — n'appelle aucune action).
+
+### Corrigé
+- **`--fetch` ne rendait pas les outils utilisables** : il vérifiait le SHA-256 mais laissait des `.zip`,
+  un `.deb`, une archive source. Nouveau `sonar_fetch_postprocess`, appelé uniquement sur une archive
+  déjà vérifiée : zip d'outil → `Portable/<Outil>/` ; zip contenant une ISO (Memtest86+, chntpw) → l'ISO
+  dans `ISO/Fetched/` ; ClamAV `.deb` → extrait, élagué (459 → 91 Mo) et lanceurs `sonar-clamscan.sh` /
+  `sonar-freshclam.sh` ; `.tar.lz` (ddrescue) → `SOURCE_ONLY`, dit clairement. État dans la colonne `STATE`
+  de `MANIFEST_FETCH.tsv` ; récapitulatif des outils `MANUAL`/`SOURCE_ONLY` en fin de `--fetch`.
+  Extraction sûre (noms contrôlés avant, `..` et chemins absolus refusés, liens sortants supprimés),
+  idempotente, jamais fatale. `docs/DEPLOYMENT.md` corrigé.
+- **`--protect-catalog` interrompait le déploiement** : `sonar_protect_catalog_final` retourne 1 (gpg absent,
+  rôle insuffisant, passphrase absente) et, sous `set -e`, cela arrêtait `copy_payload_final` après copie des
+  fichiers, avant le filigrane et le démontage. L'appel est désormais gardé (`if !`), le déploiement continue
+  et un avertissement explicite dit que `MANIFEST.tsv` reste **en clair** (audit `CATALOG_PROTECTION_SKIPPED`).
+- **Test `--field-export` sans racine isolée** : il s'exécutait avec `SONAR_ROOT` = le dépôt (risque de créer
+  `Secure/`). Il utilise maintenant un dossier temporaire.
+- **README** : « 6 profils » → « 8 profils (+ full) ».
+
+### Vérifié
+- 176 PASS / 0 FAIL au `--self-test` (WSL), dont 10 nouveaux tests d'extraction (zip→ISO, zip d'outil,
+  idempotence, `.tar.lz`, `.exe`, `../` refusé, lien sortant supprimé, ClamAV `.deb` → lanceurs, refus sans
+  signatures, lancement avec signatures).
+- Sur le **vrai** `.deb` ClamAV 1.5.4 (SHA-256 conforme au manifeste) : extrait et élagué en 11 s ;
+  `sonar-clamscan.sh` refuse sans signatures (code 2) ; `clamscan` et `freshclam` réels répondent
+  « ClamAV 1.5.4 » depuis la copie portable.
+- Le test a aussi trouvé un bug de mon lanceur : `ls db/*.cvd db/*.cld` échoue dès qu'un des deux motifs
+  n'existe pas, donc il aurait refusé de tourner avec une base pourtant présente. Corrigé (boucle).
+
+### Non vérifié
+- Téléchargement réel des signatures par `freshclam` (~300 Mo) ; zip réels Memtest86+ / chntpw (couverts
+  par des fixtures) ; `ddrescue` reste à compiler ou à prendre dans SystemRescue.
+- Les colonnes NOTES du manifeste scellé décrivent encore les étapes manuelles : les modifier invaliderait
+  le scellé HMAC, donc laissé tel quel.
+
 ## [3.46.0-winpe-adk-components] — 2026-09-21
 
 ### Contexte
@@ -29,13 +68,19 @@ sur cet hôte Windows 10 pour une image WinPE 26100 (`0x80070057`), donc ni Powe
 - WinPE construit avec cette `boot.wim` : `manage-bde -unlock C: -RecoveryPassword …` → « The password
   successfully unlocked volume C: », fichier lu ; `powershell Get-Volume` → volumes listés.
 
-### NON vérifié — à faire avec l'utilisateur présent (fenêtres UAC)
-- **Le build complet de bout en bout n'a pas abouti** : deux essais se sont arrêtés sur une élévation UAC
-  refusée (personne devant l'écran) — d'abord à la récupération du VHD, puis dès `copype` à la reprise.
-  Le `boot.wim` servi a été extrait par un autre chemin (VBoxManage + WSL) pour tester.
-- Donc non testés : l'étape `get.ps1` (montage du VHD), le menu à 17 options par-dessus l'image servie, la
-  vérification finale de l'ISO, `-ServicedBootWim`. Aucun nouvel ISO n'a été copié sur la clé (elle garde
-  l'ISO 3.43.0).
+### Vérifié de bout en bout (2026-09-21, build complet accepté sous UAC, ISO 535 Mo)
+- `Build-SonarSE-WinPE.ps1 -ServicedBootWim …` : marque BCD, menu 17 options, boîte à outils, ISO et
+  vérification finale (qui contrôle menu, BusyBox, `manage-bde.exe`, `powershell.exe`) : tout passe.
+- L'ISO finale, bootée en VM UEFI avec le volume BitLocker de test : le menu à 17 options s'affiche ;
+  option 6 → « The password successfully unlocked volume C: » ; option 12 → rapport complet (UEFI détecté).
+- ISO copiée sur la clé (`E:\ISO\WinPE\`, hash identique).
+
+### Reste non vérifié
+- Le servicing en VM lancé *dans le même run* que le reste (deux essais ont échoué sur un UAC refusé
+  quand personne n'était devant l'écran) : ses deux moitiés sont prouvées séparément (servicing
+  automatique OK, extraction par WSL ; build complet sur la `boot.wim` servie), mais l'étape
+  `get.ps1` (montage du VHD) n'a pas tourné.
+- Boot sur du matériel réel via Ventoy ; options 13, 14, 15 sur un vrai disque client.
 - Un bug rencontré et corrigé : `rmdir` d'un dossier absent écrivait sur stderr et arrêtait le script.
 
 ## [3.45.0-bitlocker-unlock] — 2026-09-21

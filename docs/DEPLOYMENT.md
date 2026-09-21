@@ -76,7 +76,27 @@ ceux des profils `--profile X`."
    `SOURCE_DIR/.../FETCH/MANIFEST_FETCH.tsv` + l'audit. Répétez pour
    chaque profil voulu, ou une seule fois avec `--fetch full` pour tout
    récupérer d'un coup.
-3. **Rien d'autre à faire** : les fichiers récupérés atterrissent dans
+3. **Les archives sont rendues utilisables** (depuis 3.47.0). Une fois le SHA-256 vérifié, `--fetch`
+   décompresse ce qui doit l'être, sans jamais modifier l'archive (conservée dans `Fetched/` comme
+   preuve) et sans écraser une extraction déjà à jour. L'état de chaque outil est dans la colonne
+   `STATE` de `MANIFEST_FETCH.tsv` :
+
+   | STATE | Signification | Exemples |
+   |---|---|---|
+   | `READY` | fichier directement utilisable | `.iso`, `.exe` (Rufus) |
+   | `EXTRACTED` | décompressé dans `Portable/<Outil>/` | Process Explorer, Autoruns, CrystalDiskInfo, TestDisk |
+   | `ISO_EXTRACTED` | l'ISO contenue est dans `ISO/Fetched/` | Memtest86+, chntpw |
+   | `WRAPPED` | extrait + lanceurs `sonar-clamscan.sh` / `sonar-freshclam.sh` (LD_LIBRARY_PATH, dossier `db/`) | ClamAV |
+   | `SOURCE_ONLY` | **code source**, rien d'exécutable sans compilation — signalé, jamais présenté comme prêt | ddrescue (`.tar.lz`) |
+   | `MANUAL` | extraction impossible ici (`unzip`, `dpkg-deb`, `lzip` absents, ou archive refusée) | — |
+
+   `--fetch` termine par la liste des outils `MANUAL`/`SOURCE_ONLY`. ClamAV : le `.deb` est élagué
+   (459 Mo → ~90 Mo : en-têtes, `.a`, pages de man retirés) ; les **signatures ne sont pas incluses** —
+   lancez `sonar-freshclam.sh` (Internet, ~300 Mo) ou `SONAR_FETCH_CLAMAV_DB=1 ./sonar_master.sh --fetch malware`.
+   Sans signatures, `sonar-clamscan.sh` refuse de tourner et le dit.
+   Extraction sûre : noms d'entrée contrôlés avant (pas de chemin absolu ni de `..`), liens symboliques
+   sortants supprimés.
+4. Les fichiers récupérés atterrissent dans
    `SOURCE_DIR/ISO/Fetched/` ou `SOURCE_DIR/Portable/Fetched/` (selon le
    type), et l'Étape 10 (`copy_payload_final`) copie **tout**
    `SOURCE_DIR/ISO` et `SOURCE_DIR/Portable` récursivement sur la clé —

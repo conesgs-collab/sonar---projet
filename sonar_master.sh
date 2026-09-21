@@ -1883,7 +1883,13 @@ copy_payload_final() {
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
     sonar_export_field_files "${mp}"
     [[ -s "${SONAR_FIELD_PINS_FILE}" ]] && cp -f "${SONAR_FIELD_PINS_FILE}" "${mp}/MANIFEST/FIELD_PINS.tsv"
-    sonar_protect_catalog_final "${mp}"
+    # Une protection demandee mais impossible (gpg absent, role insuffisant, passphrase absente)
+    # ne doit PAS interrompre le deploiement (set -e : le "return 1" laisserait la cle montee,
+    # sans filigrane) : on continue, en le disant clairement.
+    if ! sonar_protect_catalog_final "${mp}"; then
+        log "[PROTECT] ATTENTION : protection du catalogue NON appliquee — le deploiement continue, MANIFEST.tsv reste EN CLAIR sur la cle."
+        sonar_audit "CATALOG_PROTECTION_SKIPPED" "mount=${mp}"
+    fi
     sonar_generate_build_watermark "${mp}"
     unmount_final "${mp}"
 }
@@ -4269,6 +4275,177 @@ sonar_fetch_sha256_matches() {
 SONAR_FETCH_REPORT_DIR="${SONAR_FETCH_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/FETCH}"
 SONAR_FETCH_REPORT="${SONAR_FETCH_REPORT:-${SONAR_FETCH_REPORT_DIR}/MANIFEST_FETCH.tsv}"
 
+# ---------------------------------------------------------------------------
+# Post-traitement de --fetch : rendre l'outil UTILISABLE, pas seulement telecharge.
+#
+# --fetch verifie le SHA-256 d'une ARCHIVE ; encore faut-il que le technicien n'ait
+# pas a la decompresser a la main. sonar_fetch_postprocess est appele UNIQUEMENT sur
+# une archive deja verifiee (SHA-256 conforme), et ne modifie jamais l'archive. Il
+# renseigne SONAR_FETCH_STATE, ecrit dans le rapport --fetch :
+#   READY            fichier directement utilisable (.iso, .exe...)
+#   EXTRACTED        archive decompressee dans Portable/<Outil>/
+#   ISO_EXTRACTED    l'ISO contenue dans l'archive est dans ISO/Fetched/ (Memtest86+, chntpw)
+#   WRAPPED          extrait + lanceurs poses (ClamAV : LD_LIBRARY_PATH, base de signatures)
+#   SOURCE_ONLY      archive de CODE SOURCE : rien d'executable sans compilation -> dit clairement
+#   MANUAL           extraction impossible ici (outil manquant) : la raison est affichee
+# Extraction sure : les noms d'entrees sont controles AVANT (pas de chemin absolu ni de
+# composant ".."), aucun lien symbolique ne peut sortir du dossier, jamais de proprietaire
+# ni de droits d'origine (--no-same-owner).
+# ---------------------------------------------------------------------------
+SONAR_FETCH_STATE=""
+SONAR_FETCH_ATTENTION=()
+
+# nom de dossier sur : lettres, chiffres, point, tiret, souligne
+sonar_fetch_safe_name() {
+    local n
+    n="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_' | sed 's/^[._]*//; s/_*$//')"
+    printf '%s' "${n:-outil}"
+}
+
+# refuse une liste de noms d'entrees (stdin) contenant un chemin absolu ou "..".
+sonar_fetch_names_safe() {
+    ! awk '/^\// || /(^|\/)\.\.(\/|$)/ || /\\/ {bad=1} END {exit !bad}'
+}
+
+# sonar_fetch_extract ARCHIVE DEST -> 0 ok ; 1 refuse/echec ; 2 outil manquant
+sonar_fetch_extract() {
+    local f="$1" d="$2" names lnk
+    mkdir -p "$d" || return 1
+    case "$f" in
+        *.zip)
+            command -v unzip >/dev/null 2>&1 || { echo "[SONAR] unzip absent : impossible de decompresser $(basename "$f")." >&2; return 2; }
+            names="$(unzip -Z1 "$f" 2>/dev/null)" || return 1
+            sonar_fetch_names_safe <<<"$names" || { echo "[SONAR][ERROR] $(basename "$f") : nom d'entree dangereux (chemin absolu ou '..') — extraction REFUSEE." >&2; return 1; }
+            unzip -q -o "$f" -d "$d" >/dev/null || return 1 ;;
+        *.tar.bz2|*.tar.gz|*.tgz|*.tar.xz|*.tar.lz|*.tar)
+            command -v tar >/dev/null 2>&1 || return 2
+            case "$f" in *.tar.lz) command -v lzip >/dev/null 2>&1 || { echo "[SONAR] lzip absent : impossible de decompresser $(basename "$f")." >&2; return 2; } ;; esac
+            names="$(tar -tf "$f" 2>/dev/null)" || return 1
+            sonar_fetch_names_safe <<<"$names" || { echo "[SONAR][ERROR] $(basename "$f") : nom d'entree dangereux — extraction REFUSEE." >&2; return 1; }
+            tar -xf "$f" -C "$d" --no-same-owner --no-same-permissions || return 1 ;;
+        *.deb)
+            if command -v dpkg-deb >/dev/null 2>&1; then
+                names="$(dpkg-deb -c "$f" 2>/dev/null | awk '{print $6}' | sed 's|^\./||')" || return 1
+                sonar_fetch_names_safe <<<"$names" || { echo "[SONAR][ERROR] $(basename "$f") : nom d'entree dangereux — extraction REFUSEE." >&2; return 1; }
+                dpkg-deb -x "$f" "$d" || return 1
+            elif command -v ar >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
+                ( cd "$d" && ar p "$f" data.tar.gz 2>/dev/null | tar -xz --no-same-owner ) || return 1
+            else
+                echo "[SONAR] dpkg-deb/ar absents : impossible d'extraire $(basename "$f")." >&2; return 2
+            fi ;;
+        *) return 1 ;;
+    esac
+    # aucun lien symbolique ne doit pointer hors du dossier d'extraction
+    while IFS= read -r lnk; do
+        [[ -n "$lnk" ]] || continue
+        case "$(readlink -m "$lnk" 2>/dev/null)" in
+            "$(cd "$d" && pwd -P)"/*) ;;
+            *) rm -f "$lnk"; echo "[SONAR] lien symbolique sortant supprime : ${lnk#"$d"/}" >&2 ;;
+        esac
+    done < <(find "$d" -type l 2>/dev/null)
+    return 0
+}
+
+# ClamAV (.deb officiel, prefixe /usr/local) : on garde bin/, lib/*.so*, etc/certs, on retire
+# en-tetes, bibliotheques statiques et pages de man (459 Mo -> quelques dizaines), puis on pose
+# des lanceurs qui fixent LD_LIBRARY_PATH et le dossier de signatures.
+sonar_fetch_wrap_clamav() {
+    local d="$1" root="$1/usr/local" bin
+    [[ -x "$root/bin/clamscan" && -x "$root/bin/freshclam" ]] || { echo "[SONAR][ERROR] ClamAV : clamscan/freshclam absents de l'extraction." >&2; return 1; }
+    rm -rf "$root/include" "$root/lib/pkgconfig" "$root/share/man" "$root/share/doc" "$root"/lib/*.a
+    mkdir -p "$d/db"
+    cat > "$d/sonar-clamscan.sh" <<'CLAM_EOF'
+#!/bin/sh
+# Lance clamscan depuis cette copie portable : bibliotheques et signatures locales.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$HERE/usr/local"
+have=0
+for f in "$HERE"/db/*.cvd "$HERE"/db/*.cld; do [ -e "$f" ] && have=1; done
+if [ "$have" -ne 1 ]; then
+    echo "Aucune base de signatures dans $HERE/db : lancez d'abord sonar-freshclam.sh (Internet requis)." >&2
+    exit 2
+fi
+LD_LIBRARY_PATH="$ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$ROOT/bin/clamscan" -d "$HERE/db" "$@"
+CLAM_EOF
+    cat > "$d/sonar-freshclam.sh" <<'CLAM_EOF'
+#!/bin/sh
+# Met a jour les signatures ClamAV dans ./db (Internet requis ; ~300 Mo la premiere fois).
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$HERE/usr/local"
+CONF="$(mktemp)"
+trap 'rm -f "$CONF"' EXIT
+printf 'DatabaseDirectory %s\nDatabaseMirror database.clamav.net\nCompressLocalDatabase no\n' "$HERE/db" > "$CONF"
+LD_LIBRARY_PATH="$ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$ROOT/bin/freshclam" --config-file="$CONF" "$@"
+CLAM_EOF
+    chmod +x "$d/sonar-clamscan.sh" "$d/sonar-freshclam.sh" 2>/dev/null || true
+    if [[ "${SONAR_FETCH_CLAMAV_DB:-0}" == "1" ]]; then
+        echo "[SONAR] ClamAV : telechargement des signatures (SONAR_FETCH_CLAMAV_DB=1)..."
+        sh "$d/sonar-freshclam.sh" >/dev/null 2>&1 && echo "[SONAR] ClamAV : signatures installees dans ${d}/db." \
+            || echo "[SONAR] ClamAV : freshclam a echoue (reseau ?) — relancez sonar-freshclam.sh avant usage." >&2
+    fi
+    return 0
+}
+
+# sonar_fetch_postprocess TOOL ARCHIVE SHA256  -> jamais fatal ; renseigne SONAR_FETCH_STATE
+sonar_fetch_postprocess() {
+    local tool="$1" f="$2" sha="$3" base safe dest tmp names isos others rc
+    base="$(basename "$f")"; safe="$(sonar_fetch_safe_name "$tool")"
+    SONAR_FETCH_STATE="READY"
+    case "$base" in
+        *.iso|*.exe|*.msi|*.img) return 0 ;;
+        *.tar.lz|*.tar.lzma)
+            # archive de code source (ddrescue) : meme decompressee, rien d'executable sans compilation
+            SONAR_FETCH_STATE="SOURCE_ONLY"
+            echo "[SONAR] ${tool} : archive de CODE SOURCE (${base}), pas un binaire — rien d'executable sans compilation (make + g++). Utilisez l'outil deja present dans l'ISO du profil (ex. SystemRescue : ddrescue) ou compilez." >&2
+            return 0 ;;
+        *.zip|*.tar.bz2|*.tar.gz|*.tgz|*.tar.xz|*.deb)
+            :
+            ;;
+        *) return 0 ;;
+    esac
+    # ZIP contenant une ISO (Memtest86+, chntpw) : c'est l'ISO qui va dans ISO/
+    if [[ "$base" == *.zip ]] && command -v unzip >/dev/null 2>&1; then
+        names="$(unzip -Z1 "$f" 2>/dev/null || true)"
+        isos="$(grep -Ei '\.iso$' <<<"$names" || true)"
+        others="$(grep -Evi '\.iso$|(^|/)$|\.(txt|md|sig|asc|sha256|sha1|md5|nfo)$' <<<"$names" || true)"
+        if [[ -n "$isos" && -z "$others" ]]; then
+            tmp="$(mktemp -d)"
+            if sonar_fetch_extract "$f" "$tmp"; then
+                mkdir -p "${ISO_SOURCE_DIR}/Fetched"
+                while IFS= read -r iso; do
+                    [[ -n "$iso" ]] || continue
+                    mv -f "$tmp/$iso" "${ISO_SOURCE_DIR}/Fetched/$(basename "$iso")"
+                    echo "[SONAR] ${tool} : ISO extraite -> ${ISO_SOURCE_DIR}/Fetched/$(basename "$iso")"
+                done <<<"$isos"
+                SONAR_FETCH_STATE="ISO_EXTRACTED"
+            else
+                SONAR_FETCH_STATE="MANUAL"
+            fi
+            rm -rf "$tmp"; return 0
+        fi
+    fi
+    dest="${PORTABLE_SOURCE_DIR}/${safe}"
+    if [[ -f "$dest/.sonar_fetch_sha256" && "$(cat "$dest/.sonar_fetch_sha256" 2>/dev/null)" == "$sha" ]]; then
+        SONAR_FETCH_STATE="EXTRACTED"; [[ -f "$dest/sonar-clamscan.sh" ]] && SONAR_FETCH_STATE="WRAPPED"
+        echo "[SONAR] ${tool} : deja extrait -> ${dest}"; return 0
+    fi
+    rm -rf "$dest"
+    rc=0; sonar_fetch_extract "$f" "$dest" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        rm -rf "$dest"; SONAR_FETCH_STATE="MANUAL"
+        [[ $rc -eq 1 ]] && echo "[SONAR][ERROR] ${tool} : extraction refusee ou echouee (${base})." >&2
+        return 0
+    fi
+    if [[ "$base" == *.deb && "$tool" == "ClamAV" ]]; then
+        if sonar_fetch_wrap_clamav "$dest"; then SONAR_FETCH_STATE="WRAPPED"; else rm -rf "$dest"; SONAR_FETCH_STATE="MANUAL"; return 0; fi
+    else
+        SONAR_FETCH_STATE="EXTRACTED"
+    fi
+    printf '%s' "$sha" > "$dest/.sonar_fetch_sha256"
+    echo "[SONAR] ${tool} : pret -> ${dest} (${SONAR_FETCH_STATE})"
+    return 0
+}
+
 # sonar_fetch_one_tool TOOL -> 0 téléchargé+vérifié, 1 échec (téléchargement
 # ou SHA-256), 3 pas d'entrée manifeste pour cet outil (fourni autrement,
 # ex. bundlé dans une autre ISO du même profil — pas une erreur).
@@ -4296,6 +4473,8 @@ sonar_fetch_one_tool() {
     # chaque execution, meme deja valide.
     if [[ -f "$dest_file" ]] && sonar_fetch_sha256_matches "${dest_file}" "${expected_sha256}"; then
         echo "[SONAR] OK: ${tool} deja present et verifie (SHA-256 conforme) -> ${dest_file}"
+        sonar_fetch_postprocess "$tool" "$dest_file" "$expected_sha256"
+        case "$SONAR_FETCH_STATE" in MANUAL|SOURCE_ONLY) SONAR_FETCH_ATTENTION+=("${tool}:${SONAR_FETCH_STATE}") ;; esac
         return 0
     fi
     echo "[SONAR] Téléchargement: ${tool} <- ${url}"
@@ -4319,11 +4498,14 @@ sonar_fetch_one_tool() {
         sonar_audit "FETCH_HASH_MISMATCH" "tool=${tool};expected=${expected_sha256};actual=${actual_sha256}"
         return 1
     fi
-    mkdir -p "${SONAR_FETCH_REPORT_DIR}"
-    [[ -s "${SONAR_FETCH_REPORT}" ]] || printf 'TOOL\tURL\tSHA256\tFETCHED_AT\tDEST\n' > "${SONAR_FETCH_REPORT}"
-    printf '%s\t%s\t%s\t%s\t%s\n' "$tool" "$url" "$expected_sha256" "$(sonar_iso_now)" "$dest_file" >> "${SONAR_FETCH_REPORT}"
-    sonar_audit "FETCH_VERIFIED" "tool=${tool};sha256=${expected_sha256};dest=${dest_file}"
     echo "[SONAR] OK: ${tool} vérifié (SHA-256 conforme) -> ${dest_file}"
+    # archive verifiee => on peut la rendre utilisable (jamais fatal)
+    sonar_fetch_postprocess "$tool" "$dest_file" "$expected_sha256"
+    case "$SONAR_FETCH_STATE" in MANUAL|SOURCE_ONLY) SONAR_FETCH_ATTENTION+=("${tool}:${SONAR_FETCH_STATE}") ;; esac
+    mkdir -p "${SONAR_FETCH_REPORT_DIR}"
+    [[ -s "${SONAR_FETCH_REPORT}" ]] || printf 'TOOL\tURL\tSHA256\tFETCHED_AT\tDEST\tSTATE\n' > "${SONAR_FETCH_REPORT}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$tool" "$url" "$expected_sha256" "$(sonar_iso_now)" "$dest_file" "$SONAR_FETCH_STATE" >> "${SONAR_FETCH_REPORT}"
+    sonar_audit "FETCH_VERIFIED" "tool=${tool};sha256=${expected_sha256};dest=${dest_file};state=${SONAR_FETCH_STATE}"
     return 0
 }
 
@@ -4354,6 +4536,9 @@ sonar_fetch_profile() {
         esac
     done <<< "$tools"
     echo "[SONAR] Profil '${profile}' : ${ok} outil(s) vérifié(s), ${fail} échec(s), ${skip} fourni(s) autrement."
+    if [[ ${#SONAR_FETCH_ATTENTION[@]} -gt 0 ]]; then
+        echo "[SONAR] ATTENTION — non directement utilisable(s) : ${SONAR_FETCH_ATTENTION[*]} (MANUAL = extraction impossible ici, SOURCE_ONLY = code source à compiler)."
+    fi
     sonar_audit "FETCH_PROFILE_DONE" "profile=${profile};ok=${ok};fail=${fail};skip=${skip}"
     [[ "$fail" -eq 0 ]]
 }
@@ -4654,7 +4839,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.46.0-winpe-adk-components"
+SONAR_VERSION="3.47.0-fetch-usable"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5027,6 +5212,13 @@ sonar_self_test_v2() {
         else
             printf 'WARN\tVault helper round-trip skipped (gpg absent from this environment)\n'; warnings=$((warnings+1))
         fi
+        # Regression : un echec de protection du catalogue (gpg absent...) ne doit pas interrompre le
+        # deploiement sous "set -e" (cle laissee montee, sans filigrane) : l'appel est dans un "if !".
+        if grep -q 'if ! sonar_protect_catalog_final "${mp}"; then' "$self"; then
+            printf 'PASS\tCatalog protection failure does not abort the deployment (call guarded)\n'
+        else
+            printf 'FAIL\tsonar_protect_catalog_final call in copy_payload_final is not guarded against set -e\n'; errors=$((errors+1))
+        fi
         grep -q '^sonar_protect_catalog_final() {' "$self" && printf 'PASS\tCatalog protection function present\n' || { printf 'FAIL\tCatalog protection function missing\n'; errors=$((errors+1)); }
         local _pc_mp _pc_root _pc_token
         _pc_mp="$(mktemp -d)"
@@ -5260,6 +5452,66 @@ sonar_self_test_v2() {
         else
             printf 'FAIL\tsonar_fetch_one_tool curl call is missing --connect-timeout/--max-time\n'; errors=$((errors+1))
         fi
+        # --fetch : post-traitement des archives (rendre les outils utilisables). Fixtures locales,
+        # aucun reseau ; sonar_fetch_postprocess n'est appele que sur une archive deja verifiee.
+        # Les checks a base de zip/dpkg-deb sont ignores (WARN) si l'outil de fabrication manque.
+        local _pp_dir _pp_out
+        _pp_dir="$(mktemp -d)"
+        (
+            ISO_SOURCE_DIR="${_pp_dir}/ISO"; PORTABLE_SOURCE_DIR="${_pp_dir}/Portable"; mkdir -p "${ISO_SOURCE_DIR}" "${PORTABLE_SOURCE_DIR}"
+            _pp_ok=0
+            _t() { if eval "$2"; then printf 'PASS\t%s\n' "$1"; else printf 'FAIL\t%s\n' "$1"; _pp_ok=$((_pp_ok+1)); fi; }
+            _w="${_pp_dir}/work"; mkdir -p "${_w}/src"
+            # -- ISO dans un zip (Memtest86+, chntpw)
+            if command -v zip >/dev/null 2>&1; then
+                printf 'ISO9660-FAKE' > "${_w}/src/mt.iso"; ( cd "${_w}/src" && zip -q "${_w}/mt.zip" mt.iso )
+                sonar_fetch_postprocess "Memtest86+" "${_w}/mt.zip" "sha-mt" >/dev/null 2>&1
+                _t "Fetch postprocess : un zip contenant une ISO -> ISO/Fetched (ISO_EXTRACTED)" '[[ "${SONAR_FETCH_STATE}" == ISO_EXTRACTED && -s "${ISO_SOURCE_DIR}/Fetched/mt.iso" ]]'
+                mkdir -p "${_w}/tool"; printf 'exe' > "${_w}/tool/Autoruns.exe"; printf 'x' > "${_w}/tool/readme.txt"; ( cd "${_w}/tool" && zip -q "${_w}/Autoruns.zip" Autoruns.exe readme.txt )
+                sonar_fetch_postprocess "Process Explorer" "${_w}/Autoruns.zip" "sha-ar" >/dev/null 2>&1
+                _t "Fetch postprocess : un zip d'outil -> Portable/<Outil>/ (EXTRACTED)" '[[ "${SONAR_FETCH_STATE}" == EXTRACTED && -s "${PORTABLE_SOURCE_DIR}/Process_Explorer/Autoruns.exe" ]]'
+                _o="$(sonar_fetch_postprocess "Process Explorer" "${_w}/Autoruns.zip" "sha-ar" 2>&1)"
+                _t "Fetch postprocess : idempotent (meme SHA-256 -> pas de re-extraction)" 'grep -q "deja extrait" <<<"${_o}"'
+            else
+                printf 'WARN\tFetch postprocess : zip absent, cas .zip non teste ici\n'
+            fi
+            # -- code source : jamais presente comme utilisable
+            : > "${_w}/ddrescue-1.30.tar.lz"
+            sonar_fetch_postprocess "ddrescue" "${_w}/ddrescue-1.30.tar.lz" "sha-dd" >/dev/null 2>&1
+            _t "Fetch postprocess : archive .tar.lz -> SOURCE_ONLY (dit que ce n'est pas un binaire)" '[[ "${SONAR_FETCH_STATE}" == SOURCE_ONLY && ! -e "${PORTABLE_SOURCE_DIR}/ddrescue" ]]'
+            # -- fichiers directement utilisables
+            printf 'x' > "${_w}/rufus.exe"; sonar_fetch_postprocess "Rufus" "${_w}/rufus.exe" "sha-r" >/dev/null 2>&1
+            _t "Fetch postprocess : un .exe / .iso est deja READY" '[[ "${SONAR_FETCH_STATE}" == READY ]]'
+            # -- extraction sure : entree ".." refusee, rien n'ecrit hors du dossier
+            printf 'evil' > "${_w}/src/evil.txt"
+            tar -cf "${_w}/slip.tar.gz" --transform 's|^|../|' -C "${_w}/src" evil.txt 2>/dev/null
+            sonar_fetch_postprocess "Piege" "${_w}/slip.tar.gz" "sha-s" >/dev/null 2>&1
+            _t "Fetch postprocess : entree '../' dans une archive -> REFUSEE, rien ecrit dehors" '[[ "${SONAR_FETCH_STATE}" == MANUAL && ! -e "${PORTABLE_SOURCE_DIR}/../evil.txt" && ! -e "${_pp_dir}/evil.txt" && ! -d "${PORTABLE_SOURCE_DIR}/Piege" ]]'
+            ln -s /etc/passwd "${_w}/src/lien"; tar -czf "${_w}/link.tar.gz" -C "${_w}/src" lien evil.txt
+            sonar_fetch_postprocess "Lien" "${_w}/link.tar.gz" "sha-l" >/dev/null 2>&1
+            _t "Fetch postprocess : un lien symbolique sortant est supprime a l'extraction" '[[ ! -L "${PORTABLE_SOURCE_DIR}/Lien/lien" && -s "${PORTABLE_SOURCE_DIR}/Lien/evil.txt" ]]'
+            # -- ClamAV (.deb) : extrait, elague, lanceurs poses, refuse de tourner sans signatures
+            if command -v dpkg-deb >/dev/null 2>&1; then
+                mkdir -p "${_w}/deb/usr/local/bin" "${_w}/deb/usr/local/lib" "${_w}/deb/usr/local/include" "${_w}/deb/DEBIAN"
+                printf '#!/bin/sh\necho "ClamAV fake $*"\n' > "${_w}/deb/usr/local/bin/clamscan"; cp "${_w}/deb/usr/local/bin/clamscan" "${_w}/deb/usr/local/bin/freshclam"
+                chmod +x "${_w}/deb/usr/local/bin/"*; printf 'h' > "${_w}/deb/usr/local/include/x.h"; printf 'a' > "${_w}/deb/usr/local/lib/libx.a"; printf 'so' > "${_w}/deb/usr/local/lib/libx.so"
+                printf 'Package: clamav\nVersion: 1\nArchitecture: amd64\nMaintainer: t <t@t>\nDescription: fake\n' > "${_w}/deb/DEBIAN/control"
+                chmod 755 "${_w}/deb" "${_w}/deb/DEBIAN"   # umask 077 du script : dpkg-deb exige >= 0755
+                dpkg-deb -b "${_w}/deb" "${_w}/clamav-1.5.4.linux.x86_64.deb" >/dev/null 2>&1
+                sonar_fetch_postprocess "ClamAV" "${_w}/clamav-1.5.4.linux.x86_64.deb" "sha-c" >/dev/null 2>&1
+                _t "Fetch postprocess : ClamAV .deb -> WRAPPED, lanceurs poses, en-tetes/.a retires" '[[ "${SONAR_FETCH_STATE}" == WRAPPED && -x "${PORTABLE_SOURCE_DIR}/ClamAV/sonar-clamscan.sh" && -x "${PORTABLE_SOURCE_DIR}/ClamAV/sonar-freshclam.sh" && ! -e "${PORTABLE_SOURCE_DIR}/ClamAV/usr/local/include" && ! -e "${PORTABLE_SOURCE_DIR}/ClamAV/usr/local/lib/libx.a" && -e "${PORTABLE_SOURCE_DIR}/ClamAV/usr/local/lib/libx.so" ]]'
+                _t "Fetch postprocess : sonar-clamscan.sh refuse de tourner sans signatures (code 2, message clair)" '_o="$(sh "${PORTABLE_SOURCE_DIR}/ClamAV/sonar-clamscan.sh" x 2>&1)"; [[ $? -eq 2 ]] && grep -q "sonar-freshclam.sh" <<<"${_o}"'
+                : > "${PORTABLE_SOURCE_DIR}/ClamAV/db/main.cvd"
+                _t "Fetch postprocess : avec une base de signatures, clamscan est lance depuis la copie portable" '_o="$(sh "${PORTABLE_SOURCE_DIR}/ClamAV/sonar-clamscan.sh" --version 2>&1)"; grep -q "ClamAV fake" <<<"${_o}"'
+            else
+                printf 'WARN\tFetch postprocess : dpkg-deb absent, cas ClamAV .deb non teste ici\n'
+            fi
+            exit "${_pp_ok}"
+        ) > "${_pp_dir}/out.txt" 2>&1
+        _pp_rc=$?
+        cat "${_pp_dir}/out.txt"
+        errors=$((errors + _pp_rc))
+        rm -rf "${_pp_dir}"
         SONAR_ROOT="${_fm_dir}" "$self" --role-bootstrap >/dev/null 2>&1
         local _fm_token
         # "Vault" n'est PAS un nom de role valide (known="Viewer Technician
@@ -5393,7 +5645,8 @@ sonar_self_test_v2() {
         # sonar_export_field_files) — teste le vrai chemin de dispatch CLI,
         # y compris la validation d'arguments et la copie du fichier PINs.
         local _fe_out _fe_dir
-        _fe_out="$("$self" --field-export 2>&1)"
+        local _fe_iso; _fe_iso="$(mktemp -d)"
+        _fe_out="$(SONAR_ROOT="${_fe_iso}" "$self" --field-export 2>&1)"; rm -rf "${_fe_iso}"
         if [[ $? -ne 0 || -n "$(grep -i 'nécessite un point de montage' <<<"${_fe_out}")" ]]; then
             printf 'PASS\t--field-export rejects a missing mount-point argument\n'
         else
