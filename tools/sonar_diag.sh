@@ -641,22 +641,22 @@ verify_client_report() {
 main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --symptom)  SYMPTOM="${2:-}"; ASK=false; shift 2 ;;
+            --symptom)  SYMPTOM="${2:-}"; ASK=false; shift $(( $# > 1 ? 2 : 1 )) ;;
             --no-ask)   ASK=false; shift ;;
-            --out)      OUT_DIR="${2:-}"; shift 2 ;;
-            --analyze)  ANALYZE_ONLY="${2:-}"; shift 2 ;;
-            --rules)    RULES="${2:-}"; shift 2 ;;
+            --out)      OUT_DIR="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --analyze)  ANALYZE_ONLY="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --rules)    RULES="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
             --ai)       USE_AI=true; shift ;;
             --tsv)      MODE_TSV=true; shift ;;
             --quiet)    QUIET=true; shift ;;
             --client-report) CLIENT_MODE=true; if [[ -n "${2:-}" && "${2:0:1}" != "-" ]]; then CLIENT_SRC="$2"; shift; fi; shift ;;
-            --client-name)   CLIENT_NAME="${2:-}"; shift 2 ;;
-            --sign-key)      SIGN_KEY="${2:-}"; shift 2 ;;
-            --watermark)     WATERMARK="${2:-}"; shift 2 ;;
-            --format)        CLIENT_FORMAT="${2:-}"; shift 2 ;;
-            --sign-keygen)   KEYGEN_DIR="${2:-}"; shift 2 ;;
-            --verify-client-report) VERIFY_PDF="${2:-}"; shift 2 ;;
-            --pubkey)        PUBKEY="${2:-}"; shift 2 ;;
+            --client-name)   CLIENT_NAME="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --sign-key)      SIGN_KEY="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --watermark)     WATERMARK="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --format)        CLIENT_FORMAT="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --sign-keygen)   KEYGEN_DIR="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --verify-client-report) VERIFY_PDF="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --pubkey)        PUBKEY="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
             --version)  echo "sonar_diag ${SONAR_DIAG_VERSION}"; exit 0 ;;
             -h|--help)  usage; exit 0 ;;
             *) echo "Option inconnue : $1 (voir --help)" >&2; exit 2 ;;

@@ -2218,12 +2218,22 @@ sonar_field_menu() {
             echo "  d) DIAGNOSTIC INTELLIGENT — analyse la machine (lecture seule) et dit quoi faire"
         [[ -f "${SONAR_FIELD_KEY}/Scripts/client_report.awk" ]] && \
             echo "  c) RAPPORT CLIENT — PDF en langage simple, tire du dernier diagnostic"
+        [[ -f "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" ]] && \
+            echo "  b) BITLOCKER — ouvrir un volume chiffré en lecture seule (clé de récupération du propriétaire)"
         echo "  q) Quitter"
         read -r -p "Choix : " choice
         [[ "$choice" == "q" ]] && break
         if [[ "$choice" == "d" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" ]]; then
             sonar_field_audit "FIELD_DIAG_RUN" "outil=sonar_diag"
             bash "${SONAR_FIELD_KEY}/Scripts/sonar_diag.sh" --out "${SONAR_FIELD_LOG_DIR}/diag/DIAG_$(date +%Y%m%d-%H%M%S)" || true
+        elif [[ "$choice" == "b" && -f "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" ]]; then
+            local _bd
+            SONAR_AUDIT_FILE="${SONAR_FIELD_LOG_DIR}/bitlocker.log" bash "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" --list || true
+            read -r -p "Périphérique à ouvrir (ex. /dev/sdb3, Entrée = annuler) : " _bd
+            if [[ -n "$_bd" ]]; then
+                sonar_field_audit "FIELD_BITLOCKER_UNLOCK" "dev=${_bd}"
+                SONAR_AUDIT_FILE="${SONAR_FIELD_LOG_DIR}/bitlocker.log" bash "${SONAR_FIELD_KEY}/Scripts/sonar_bitlocker.sh" --unlock "$_bd" || true
+            fi
         elif [[ "$choice" == "c" && -f "${SONAR_FIELD_KEY}/Scripts/client_report.awk" ]]; then
             local _cdir _cname
             _cdir="$(ls -d "${SONAR_FIELD_LOG_DIR}"/diag/DIAG_*/ 2>/dev/null | sort | tail -1)"
@@ -2281,6 +2291,13 @@ FIELD_SCRIPT_EOF
         cp -f "${d}/text2pdf.awk" "${mp}/Scripts/text2pdf.awk"
     else
         log "[SONAR] tools/client_templates.txt, client_report.awk ou text2pdf.awk absent : rapport client NON deploye sur la cle."
+    fi
+    # Deverrouillage BitLocker cote Linux (lecture seule, cle de recuperation du proprietaire).
+    if [[ -f "${d}/sonar_bitlocker.sh" ]]; then
+        cp -f "${d}/sonar_bitlocker.sh" "${mp}/Scripts/sonar_bitlocker.sh"
+        chmod +x "${mp}/Scripts/sonar_bitlocker.sh" 2>/dev/null || true
+    else
+        log "[SONAR] tools/sonar_bitlocker.sh absent : deverrouillage BitLocker NON deploye sur la cle."
     fi
 }
 
@@ -4588,6 +4605,12 @@ sonar_structural_self_audit() {
     else
         echo 'FAIL: rapport client incomplet (tools/client_templates.txt, client_report.awk, text2pdf.awk ou --client-report)'; errors=$((errors+1))
     fi
+    if [[ -f "${_dg_dir}/sonar_bitlocker.sh" ]] && bash -n "${_dg_dir}/sonar_bitlocker.sh" 2>/dev/null \
+       && grep -q 'bitlkOpen --readonly' "${_dg_dir}/sonar_bitlocker.sh" && [[ -f "${SONAR_SCRIPT_DIR}/tests/bitlocker/run_tests.sh" ]]; then
+        echo 'PASS: deverrouillage BitLocker present (sonar_bitlocker.sh, lecture seule, bash -n, tests)'
+    else
+        echo 'FAIL: deverrouillage BitLocker incomplet (tools/sonar_bitlocker.sh, lecture seule, tests/bitlocker/run_tests.sh)'; errors=$((errors+1))
+    fi
     # Boite a outils WinPE : collecteur + build (busybox sh -n n'existe pas ici : sh -n suffit, syntaxe POSIX).
     if [[ -f "${_dg_dir}/winpe/sonar_diag_winpe.sh" ]] && sh -n "${_dg_dir}/winpe/sonar_diag_winpe.sh" 2>/dev/null \
        && grep -q 'IncludeToolbox' "${_dg_dir}/Build-SonarSE-WinPE.ps1" 2>/dev/null \
@@ -4630,7 +4653,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.44.0-client-report"
+SONAR_VERSION="3.45.0-bitlocker-unlock"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5070,6 +5093,15 @@ sonar_self_test_v2() {
         else
             printf 'WARN\tDiagnostic intelligent : tests/diag/run_tests.sh absent, moteur non teste\n'; warnings=$((warnings+1))
         fi
+        # Deverrouillage BitLocker : garde-fous (+ volume reel si SONAR_BL_TEST_IMAGE est fourni).
+        if [[ -f "${SONAR_SCRIPT_DIR}/tests/bitlocker/run_tests.sh" ]]; then
+            local _bl_out _bl_rc
+            _bl_out="$(bash "${SONAR_SCRIPT_DIR}/tests/bitlocker/run_tests.sh" 2>&1)"; _bl_rc=$?
+            printf '%s\n' "${_bl_out}"
+            errors=$((errors + _bl_rc))
+        else
+            printf 'WARN\tBitLocker : tests/bitlocker/run_tests.sh absent, deverrouillage non teste\n'; warnings=$((warnings+1))
+        fi
         grep -q '^sonar_policy_check_stale() {' "$self" && printf 'PASS\tStale policy.tsv migration check present\n' || { printf 'FAIL\tStale policy.tsv migration check missing\n'; errors=$((errors+1)); }
         local _pol_root _pol_file _pol_bak_count
         _pol_root="$(mktemp -d)"
@@ -5301,6 +5333,11 @@ sonar_self_test_v2() {
             printf 'PASS\tSONAR Field deploys the client report (awk programs + templates) and offers it in its menu\n'
         else
             printf 'FAIL\tSONAR Field export is missing the client report (Scripts/client_report.awk, Scripts/text2pdf.awk, MANIFEST/CLIENT_TEMPLATES.txt, menu entry c)\n'; errors=$((errors+1))
+        fi
+        if [[ -x "${_fld_dir}/Scripts/sonar_bitlocker.sh" ]] && grep -q 'BITLOCKER' <<<"${_fld_out}"; then
+            printf 'PASS\tSONAR Field deploys the BitLocker unlock (read-only) and offers it in its menu\n'
+        else
+            printf 'FAIL\tSONAR Field export is missing the BitLocker unlock (Scripts/sonar_bitlocker.sh, menu entry b)\n'; errors=$((errors+1))
         fi
         local _fps_root _fps_out _fps_token
         _fps_root="$(mktemp -d)"

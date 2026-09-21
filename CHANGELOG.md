@@ -6,6 +6,38 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.45.0-bitlocker-unlock] — 2026-09-21
+
+### Contexte
+« Débloquer le déverrouillage BitLocker ». Le WinPE ne peut pas : `manage-bde` échoue en
+`0x80040154 Class not registered` (fournisseur WMI absent, ajout impossible sans `Dism /Add-Package` —
+testé en VM en copiant les fichiers de `WinPE-SecureStartup.cab`). Le déverrouillage est donc fait côté Linux.
+
+### Ajouté
+- `tools/sonar_bitlocker.sh` : `--list`, `--unlock`, `--lock`, `--lock-all`. Ouvre un volume BitLocker
+  en **lecture seule** avec la clé de récupération (ou le mot de passe) fournie par le propriétaire :
+  `cryptsetup bitlkOpen --readonly` + `mount -o ro`, repli `dislocker`. La clé est lue sans écho ou sur
+  stdin, jamais en argument de commande, jamais journalisée. Refuse un périphérique sans signature
+  `-FVE-FS-`, une clé mal formée, un volume déjà ouvert. Accord du propriétaire demandé en interactif.
+- SONAR Field : option `b) BITLOCKER` ; `--field-export` déploie le script ; audit + tests câblés.
+- `tests/bitlocker/run_tests.sh` : garde-fous toujours ; volume réel si `SONAR_BL_TEST_IMAGE` est fourni.
+- `docs/BITLOCKER.md`.
+
+### Corrigé
+- **Boucle infinie** : dans `sonar_diag.sh` (et dans le nouvel outil), une option qui attend une valeur
+  et se trouve en dernier argument (`--symptom` seul) faisait `shift 2` sans effet et bouclait à 100 % CPU.
+  Corrigé par `shift $(( $# > 1 ? 2 : 1 ))` ; test de non-régression. Le même motif existe dans
+  `sonar_master.sh` (27 occurrences) : non corrigé ici.
+- Règle `F003` : renvoie vers l'option b de SONAR Field au lieu de « WinPE option 6 » (impossible).
+
+### Vérifié (volume BitLocker réel créé sous Windows 10, XTS-AES 128)
+Mauvaise clé refusée ; format invalide refusé ; bonne clé (48 chiffres collés) → ouvert, fichier lu ;
+écriture → « Read-only file system » ; volume déjà ouvert refusé ; `--lock` referme ; journal sans la clé.
+
+### Non vérifié
+- Exécution sur SystemRescue même : `cryptsetup` (avec `bitlkOpen`) et `dislocker` y sont bien présents (vérifié dans `systemrescue-13.02` de la clé), mais l'outil n'a été exécuté que sous Ubuntu/WSL.
+- BitLocker To Go, protecteurs TPM, NTFS sale/hibernation sur un volume déchiffré.
+
 ## [3.44.0-client-report] — 2026-09-20
 
 ### Contexte
