@@ -372,9 +372,12 @@ if ($IncludeAdkComponents -and -not $serviced) {
         # VM : 4 Go, UEFI (efisys_noprompt : aucune touche a presser), disque de travail VHD dynamique 10 Go
         $vm = "sonar-winpe-svc-$PID"
         $vhd = Join-Path $svcDir "scratch.vhd"
-        # VBoxManage (createmedium, startvm...) ecrit sa progression sur stderr — meme piege que oscdimg
-        # plus bas (voir son commentaire) : $ErrorActionPreference = "Stop" (global, en tete de script)
-        # transforme la moindre ligne de stderr en erreur terminale, meme apres un succes (code 0).
+        # VBoxManage (createmedium, startvm, unregistervm...) ecrit sa progression sur stderr — meme piege
+        # que oscdimg plus bas (voir son commentaire) : $ErrorActionPreference = "Stop" (global, en tete de
+        # script) transforme la moindre ligne de stderr en erreur terminale, meme apres un succes (code 0).
+        # Reste sur "Continue" pour TOUT le cycle de vie de cette VM (creation -> demarrage -> desinscription,
+        # les deux chemins succes/timeout ci-dessous) : un scope trop etroit a deja laisse passer ce bug sur
+        # un unregistervm hors du premier bloc corrige.
         $prevEapVbm = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         & $vbm createvm --name $vm --ostype Windows11_64 --register --basefolder $svcDir | Out-Null
@@ -386,7 +389,6 @@ if ($IncludeAdkComponents -and -not $serviced) {
         & $vbm storageattach $vm --storagectl SATA --port 2 --device 0 --type hdd --medium $vhd | Out-Null
         Write-Host "VM de servicing '$vm' demarree (sans fenetre) — patience, l'image est reecrite en emulation."
         & $vbm startvm $vm --type headless | Out-Null
-        $ErrorActionPreference = $prevEapVbm
         $deadline = (Get-Date).AddMinutes($ServicingTimeoutMinutes)
         do {
             Start-Sleep -Seconds 15
@@ -396,6 +398,7 @@ if ($IncludeAdkComponents -and -not $serviced) {
             & $vbm controlvm $vm poweroff | Out-Null
             Start-Sleep -Seconds 5
             & $vbm unregistervm $vm --delete | Out-Null
+            $ErrorActionPreference = $prevEapVbm
             throw "Servicing WinPE : delai de $ServicingTimeoutMinutes min depasse — VM arretee. Relancez avec un delai plus long (-ServicingTimeoutMinutes) ou -IncludeAdkComponents:`$false."
         }
 
@@ -419,6 +422,7 @@ if ($IncludeAdkComponents -and -not $serviced) {
         ) | Set-Content -Path $getScript -Encoding UTF8
         Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$getScript`"" -Verb RunAs -Wait
         & $vbm unregistervm $vm --delete | Out-Null
+        $ErrorActionPreference = $prevEapVbm
         if (-not (Test-Path $outWim)) {
             if (Test-Path (Join-Path $svcDir "svc.log")) { Get-Content (Join-Path $svcDir "svc.log") -Tail 40 | Write-Host }
             throw "Le servicing dans la VM n'a pas abouti (pas de SERVICING_OK) — journaux : $svcDir\svc.log, get_log.txt. Relancez avec -IncludeAdkComponents:`$false pour l'image sans composants."
