@@ -5096,9 +5096,26 @@ sonar_diagnostic_report() {
 # sur un comportement partiel et pourrait passer par accident. Utilise par
 # les ~12 sous-tests de sonar_self_test_v2 qui isolent une fonction unique
 # plutot que de sourcer tout le script (evite d'executer main_final).
+#
+# Angle mort trouve le 2026-09-22 (extraction trop LARGE, pas tronquee) :
+# quand FUNCNAME est declaree sur une seule ligne ("fn() { ...; }"), le
+# motif de fin de plage sed "/^}/" exige une ligne qui COMMENCE par "}" —
+# cette ligne-la n'en est pas une (elle commence par "fn() {"), donc la
+# plage sed ne se referme jamais ici et continue jusqu'a la PROCHAINE
+# accolade fermante en debut de ligne, avalant potentiellement toute la
+# fonction suivante. Reste syntaxiquement valide (bash -n ne le detecte
+# pas), donc un sous-test source alors la mauvaise fonction (ou les deux)
+# sans avertissement. Verifie empiriquement sur sonar_build_secret_exists()
+# (une ligne) : extraction de 29 lignes au lieu d'1, jusqu'a l'accolade de
+# sonar_ensure_build_secret() qui suit. Detecte et gere ce cas a part.
 sonar_selftest_extract_fn() {
-    local self="$1" fn="$2" body
-    body="$(sed -n "/^${fn}() {/,/^}/p" "$self")"
+    local self="$1" fn="$2" body header
+    header="$(grep -m1 "^${fn}() {" "$self")"
+    if [[ "$header" == *"}"* ]]; then
+        body="$header"
+    else
+        body="$(sed -n "/^${fn}() {/,/^}/p" "$self")"
+    fi
     if [[ -z "$body" ]]; then
         echo "sonar_selftest_extract_fn: extraction vide pour '${fn}'" >&2
         return 1
@@ -5184,15 +5201,15 @@ sonar_self_test_v2() {
         # avant le correctif du bug BASH_SOURCE[0] (v3.36.0) — retire le
         # 2>/dev/null seulement ou l'echec silencieux n'est PAS le
         # comportement attendu (item [13], audit externe).
-        _st_err="$("$self" --module-status 2>&1 >/dev/null)"; _st_rc=$?
+        if _st_err="$("$self" --module-status 2>&1 >/dev/null)"; then _st_rc=0; else _st_rc=$?; fi
         if [[ $_st_rc -eq 0 ]]; then printf 'PASS\tModule status smoke test\n'; else printf 'FAIL\tModule status smoke test%s\n' "${_st_err:+ (stderr: ${_st_err})}"; errors=$((errors+1)); fi
-        _st_err="$("$self" --recovery-execute collect 2>&1 >/dev/null)"; _st_rc=$?
+        if _st_err="$("$self" --recovery-execute collect 2>&1 >/dev/null)"; then _st_rc=0; else _st_rc=$?; fi
         if [[ $_st_rc -eq 0 ]]; then printf 'PASS\tRecovery collect smoke test\n'; else printf 'FAIL\tRecovery collect smoke test%s\n' "${_st_err:+ (stderr: ${_st_err})}"; errors=$((errors+1)); fi
         grep -q '^sonar_smart_advisor() {' "$self" && printf 'PASS\tSmart Advisor module present\n' || { printf 'FAIL\tSmart Advisor module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_verify_hashchain() {' "$self" && printf 'PASS\tHashchain verification present\n' || { printf 'FAIL\tHashchain verification missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_catalog_seal() {' "$self" && printf 'PASS\tCatalog seal module present\n' || { printf 'FAIL\tCatalog seal module missing\n'; errors=$((errors+1)); }
         grep -q '^sonar_post_deploy_verify_final() {' "$self" && printf 'PASS\tPost-deploy verification present\n' || { printf 'FAIL\tPost-deploy verification missing\n'; errors=$((errors+1)); }
-        _st_err="$("$self" --verify-hashchain 2>&1 >/dev/null)"; _st_rc=$?
+        if _st_err="$("$self" --verify-hashchain 2>&1 >/dev/null)"; then _st_rc=0; else _st_rc=$?; fi
         if [[ $_st_rc -eq 0 ]]; then printf 'PASS\tHashchain verify smoke test\n'; else printf 'WARN\tHashchain verify smoke test (aucun historique encore%s)\n' "${_st_err:+ ; stderr: ${_st_err}}"; warnings=$((warnings+1)); fi
         # Non-regression du flock ajoute 2026-09-17 : peuple un historique
         # reel (plusieurs entrees, pas juste le cas WARN "vide" ci-dessus)
