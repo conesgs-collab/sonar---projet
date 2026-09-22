@@ -1007,7 +1007,7 @@ if ($AddRepairMenu) {
         "goto tools_launch"
         ":tools_no64"
         "echo."
-        "echo Cet outil est compile en 32 bits : WinPE (64 bits) ne peut pas l'executer — il n'existe"
+        "echo Cet outil est compile en 32 bits : WinPE (64 bits) ne peut pas l'executer - il n'existe"
         "echo aucune version 64 bits chez son editeur. Ce n'est pas un plantage, WinPE ne peut PAS le"
         "echo lancer, meme correctement installe."
         "echo Utilisez-le depuis Windows une fois demarre normalement (meme chemin sur cette cle :"
