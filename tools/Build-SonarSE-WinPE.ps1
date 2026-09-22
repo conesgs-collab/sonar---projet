@@ -397,7 +397,11 @@ if ($IncludeAdkComponents -and -not $serviced) {
         if ($state -eq "running") {
             & $vbm controlvm $vm poweroff | Out-Null
             Start-Sleep -Seconds 5
-            & $vbm unregistervm $vm --delete | Out-Null
+            for ($i = 0; $i -lt 5; $i++) {
+                & $vbm unregistervm $vm --delete 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 0) { break }
+                Start-Sleep -Seconds 3
+            }
             $ErrorActionPreference = $prevEapVbm
             throw "Servicing WinPE : delai de $ServicingTimeoutMinutes min depasse — VM arretee. Relancez avec un delai plus long (-ServicingTimeoutMinutes) ou -IncludeAdkComponents:`$false."
         }
@@ -409,7 +413,14 @@ if ($IncludeAdkComponents -and -not $serviced) {
         @(
             "`$ErrorActionPreference = 'Stop'"
             "Start-Transcript -Path '$getLog' | Out-Null"
-            "Mount-DiskImage -ImagePath '$vhd' | Out-Null"
+            # VirtualBox peut garder le VHD verrouille quelques secondes apres que la VM soit retombee de
+            # "running" (le process VBoxHeadless n'a pas encore rendu la main) — 'Mount-DiskImage' echoue
+            # alors avec 'le fichier est utilise par un autre processus'. Observe en pratique malgre l'etat
+            # deja "poweroff" cote showvminfo : quelques tentatives espacees absorbent la race.
+            "for (`$i = 0; `$i -lt 8; `$i++) {"
+            "  try { Mount-DiskImage -ImagePath '$vhd' | Out-Null; break }"
+            "  catch { if (`$i -eq 7) { throw }; Start-Sleep -Seconds 3 }"
+            "}"
             "try {"
             "  Start-Sleep -Seconds 3"
             "  `$v = Get-Volume | Where-Object { `$_.FileSystemLabel -eq 'SVC' } | Select-Object -First 1"
@@ -421,7 +432,16 @@ if ($IncludeAdkComponents -and -not $serviced) {
             "} finally { Dismount-DiskImage -ImagePath '$vhd' | Out-Null; Stop-Transcript | Out-Null }"
         ) | Set-Content -Path $getScript -Encoding UTF8
         Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$getScript`"" -Verb RunAs -Wait
-        & $vbm unregistervm $vm --delete | Out-Null
+        # La VM vient de s'eteindre elle-meme (wpeutil shutdown, guest-initie) : VirtualBox peut garder une
+        # session verrouillee quelques instants apres la sortie du process VBoxHeadless — "Cannot unregister
+        # the machine ... while it is locked" observe en pratique malgre l'etat "running" deja retombe.
+        # Quelques tentatives espacees suffisent (pas de deadline dediee : ce n'est qu'un nettoyage, le WIM
+        # servi est deja recupere a ce stade).
+        for ($i = 0; $i -lt 5; $i++) {
+            & $vbm unregistervm $vm --delete 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 3
+        }
         $ErrorActionPreference = $prevEapVbm
         if (-not (Test-Path $outWim)) {
             if (Test-Path (Join-Path $svcDir "svc.log")) { Get-Content (Join-Path $svcDir "svc.log") -Tail 40 | Write-Host }
@@ -682,6 +702,7 @@ if ($AddRepairMenu) {
         "echo Verification de l'integrite de l'image (ScanHealth)..."
         "Dism /Image:%lettre%:\ /Cleanup-Image /ScanHealth"
         "echo."
+        "set rep="
         "set /p rep=Lancer la reparation RestoreHealth ? (o/n) : "
         "if /i `"%rep%`"==`"o`" Dism /Image:%lettre%:\ /Cleanup-Image /RestoreHealth"
         "echo."
@@ -807,6 +828,7 @@ if ($AddRepairMenu) {
         "if exist `"%AV%\db\*.cld`" set AVHAVE=1"
         "if `"%AVHAVE%`"==`"0`" (echo Aucune base de signatures dans %AV%\db. & echo Necessite Internet : %AV%\sonar-freshclam.cmd. & pause & goto menu)"
         "echo Ne modifie ni ne supprime rien : signale seulement ce qu'il trouve."
+        "set cible="
         "set /p cible=Lecteur ou dossier a analyser (ex: C:\Users, Entree = C:\) : "
         "if `"%cible%`"==`"`" set cible=C:\"
         "set OUT=X:\sonar_av"
@@ -909,12 +931,14 @@ if ($AddRepairMenu) {
         "diskpart /s X:\sonar_dp1.txt"
         "echo."
         "echo Reperez le volume ESP : FAT32, info Systeme, ~100 a 500 Mo."
+        "set espvol="
         "set /p espvol=Numero du volume ESP (Entree = annuler) : "
         "if `"%espvol%`"==`"`" goto menu"
         ">X:\sonar_dp2.txt echo select volume %espvol%"
         ">>X:\sonar_dp2.txt echo assign letter=S"
         "diskpart /s X:\sonar_dp2.txt"
         "if not exist S:\ (echo Attribution de la lettre S: impossible - abandon. & pause & goto menu)"
+        "set go="
         "set /p go=Reconstruire l'ESP S: depuis %lettre%:\Windows ? (o/n) : "
         "if /i `"%go%`"==`"o`" bcdboot %lettre%:\Windows /s S: /f UEFI"
         ">X:\sonar_dp3.txt echo select volume %espvol%"
@@ -932,6 +956,7 @@ if ($AddRepairMenu) {
         "echo Le pilote n'est charge que pour cette session ; rien n'est modifie sur le disque."
         "call :findkey"
         "if defined KEY echo Dossier conseille : %KEY%\Drivers"
+        "set inf="
         "set /p inf=Chemin d'un .inf ou d'un dossier de pilotes : "
         "if `"%inf%`"==`"`" goto menu"
         "if /i `"%inf:~-4%`"==`".inf`" (drvload `"%inf%`") else (for /r `"%inf%`" %%f in (*.inf) do drvload `"%%f`")"
@@ -1039,6 +1064,7 @@ if ($AddRepairMenu) {
         "if `"%clettre%`"==`"`" goto clone_menu"
         "echo."
         "echo ATTENTION : le contenu actuel de %clettre%:\ sera REMPLACE par le contenu de %cimg%."
+        "set confirm="
         "set /p confirm=Taper OUI en majuscules pour confirmer : "
         "if not `"%confirm%`"==`"OUI`" (echo Annule. & pause & goto clone_menu)"
         "Dism /Apply-Image /ImageFile:`"%cimg%`" /Index:1 /ApplyDir:%clettre%:\"

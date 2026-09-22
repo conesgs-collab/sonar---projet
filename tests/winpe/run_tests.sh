@@ -42,6 +42,15 @@ check "WinPE build : resolution native forcee (highestmode), dans la meme boucle
 check "WinPE build : analyse antivirus (option 19) prise sur la cle, refuse sans base de signatures, lecture seule" 'grep -q "if \`\"%choix%\`\"==\`\"19\`\" goto av_scan" "$PS1" && grep -q "\":av_scan\"" "$PS1" && grep -q "sonar-clamscan.cmd" "$PS1" && grep -q "AVHAVE" "$PS1" && grep -q "Ne modifie ni ne supprime rien" "$PS1"'
 check "WinPE build : outils portables (option 15) en liste NUMEROTEE, plus de chemin complet a taper" 'grep -q "Numero de l.outil a lancer" "$PS1" && grep -q ":tools_show" "$PS1" && grep -q ":tools_pick" "$PS1" && ! grep -q "Chemin complet de l.outil a lancer" "$PS1"'
 check "WinPE build : image systeme DISM (option 20) capture ET restaure, confirmation avant ecrasement" 'grep -q "if \`\"%choix%\`\"==\`\"20\`\" goto clone_menu" "$PS1" && grep -q "Dism /Capture-Image" "$PS1" && grep -q "Dism /Apply-Image" "$PS1" && grep -q "sera REMPLACE" "$PS1" && grep -q "Clonezilla" "$PS1"'
+# cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
+# CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
+# doit etre precede d'un "set var=" pour qu'un Entree vide soit bien vu comme vide, sinon une confirmation ou un
+# choix precedents peuvent se rejouer silencieusement (decouvert sur tchoix/cchoix/clettre/cimg cette session,
+# puis retrouve preexistant sur cible/espvol/inf/rep/go/confirm en auditant tout le fichier pour le meme piege).
+for _v in tchoix cchoix clettre cimg cible espvol inf rep go confirm; do
+    check "WinPE build : set /p ${_v} est precede d'un 'set ${_v}=' (Entree vide ne doit pas rejouer l'ancienne valeur)" \
+        "grep -B1 \"set /p ${_v}=\" \"\$PS1\" | grep -q \"\\\"set ${_v}=\\\"\""
+done
 # l'assistant lui-meme (etapes proposees, refus par defaut, cle BitLocker jamais journalisee) : suite dediee
 _ao="$(bash "${DIR}/run_assistant_tests.sh" 2>&1)"; _arc=$?
 printf '%s\n' "$_ao"
