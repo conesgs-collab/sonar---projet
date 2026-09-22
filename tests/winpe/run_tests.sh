@@ -41,6 +41,10 @@ check "WinPE build : le menu manuel reste (option 18 relance l'assistant, texte 
 check "WinPE build : resolution native forcee (highestmode), dans la meme boucle BCD que bootuxdisabled (donc sur les DEUX magasins BIOS et UEFI)" '_l1="$(grep -n "bootuxdisabled yes" "$PS1" | head -1 | cut -d: -f1)"; _l2="$(grep -n "highestmode yes" "$PS1" | head -1 | cut -d: -f1)"; [[ -n "$_l1" && -n "$_l2" && $((_l2 - _l1)) -ge 1 && $((_l2 - _l1)) -le 12 ]] && grep -q "foreach (\$bcd in \$bcdPaths)" "$PS1"'
 check "WinPE build : analyse antivirus (option 19) prise sur la cle, refuse sans base de signatures, lecture seule" 'grep -q "if \`\"%choix%\`\"==\`\"19\`\" goto av_scan" "$PS1" && grep -q "\":av_scan\"" "$PS1" && grep -q "sonar-clamscan.cmd" "$PS1" && grep -q "AVHAVE" "$PS1" && grep -q "Ne modifie ni ne supprime rien" "$PS1"'
 check "WinPE build : outils portables (option 15) en liste NUMEROTEE, plus de chemin complet a taper" 'grep -q "Numero de l.outil a lancer" "$PS1" && grep -q ":tools_show" "$PS1" && grep -q ":tools_pick" "$PS1" && ! grep -q "Chemin complet de l.outil a lancer" "$PS1"'
+# CrystalDiskInfo/Mark et autres outils avec ressources externes (CdiResource\...) plantent a l'ouverture si
+# lances sans etre positionnes dans LEUR propre dossier (start herite sinon de X:\Windows\System32) - trouve
+# sur materiel reel (fenetre visible puis fermeture immediate), 2026-09-22.
+check "WinPE build : outils portables (option 15) lances depuis LEUR propre dossier (start /D), pas X:\\Windows\\System32" 'grep -q "start \`\"\`\" /D \`\"%TDIR%\`\" \`\"%TPATH%\`\"" "$PS1" && grep -q "set \`\"TDIR=%%~dpd\`\"" "$PS1"'
 check "WinPE build : image systeme DISM (option 20) capture ET restaure, confirmation avant ecrasement" 'grep -q "if \`\"%choix%\`\"==\`\"20\`\" goto clone_menu" "$PS1" && grep -q "Dism /Capture-Image" "$PS1" && grep -q "Dism /Apply-Image" "$PS1" && grep -q "sera REMPLACE" "$PS1" && grep -q "Clonezilla" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
