@@ -6,6 +6,54 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.54.0-field-accreditation-levels] — 2026-09-22
+
+### Contexte
+« je n'ai pas vu les niveaux d'accréditations sur la clé ». Vérification : le système de niveaux existe dans
+`sonar_field.sh` depuis longtemps (PIN → niveau + liste de profils autorisés, `--field-pin-set`, testé en self-test),
+mais **n'avait jamais été réellement configuré** sur la clé physique — seul un reliquat de test traînait dans
+`Secure/Vault/field_pins.tsv` (niveau "Technicien", PIN inconnu de quiconque puisque seul le hash était stocké,
+jamais copié sur `E:\`). De plus, même une fois un PIN accepté, **rien n'affichait le niveau à l'écran** : ni à la
+connexion, ni dans le menu — seul le journal d'audit et le filtrage des profils reflétaient silencieusement le
+niveau. Le technicien n'avait donc aucun moyen de voir de visu à quel niveau il était connecté.
+
+### Ajouté
+- Deux niveaux réels configurés et déployés sur la clé (`--field-pin-set`, rôle Admin) :
+  - **Technicien** : boot-repair, data-recovery, malware, disk-clone, hardware-diagnostic, peripherals-network,
+    general-os — le travail de réparation courant.
+  - **Admin** : `ALL` — tous les profils, y compris **password-reset**, volontairement isolé sur ce niveau (sensible
+    légalement : nécessite l'accord écrit du propriétaire de l'appareil, voir `docs/` et le message affiché par l'outil).
+  - PIN à 6 chiffres générés aléatoirement pour chaque niveau (communiqués à l'opérateur hors de ce fichier — seul le
+    SHA-256 est stocké, ni en clair sur la clé, ni dans le dépôt Git).
+- **`sonar_field.sh` affiche maintenant le niveau** : une ligne de confirmation immédiatement après un PIN accepté
+  (« Accès accordé — niveau : X (profils autorisés : ...) »), et dans le bandeau du menu à chaque écran
+  (« SONAR Field 0.1.0 — niveau : X — que dois-je depanner ? »). Avant ce correctif, le niveau existait en interne
+  (filtrage des profils, journal d'audit) mais n'était jamais visible à l'écran pour le technicien.
+- Ancien reliquat de test dans `Secure/Vault/field_pins.tsv` remplacé par la vraie configuration (même mécanisme
+  `--field-pin-set NIVEAU met à jour sa ligne` que d'habitude — pas de nettoyage manuel nécessaire).
+
+### Vérifié
+- `--self-audit`/`--self-test` : 0 FAIL (WSL) ; les 4 contrôles dédiés (accepte un PIN valide, accumule un second
+  niveau sans écraser le premier, niveau restreint ne voit que ses profils, niveau ALL les voit tous) passent.
+- **Sur la clé physique réelle** (`E:\`, via `--field-export`) : le niveau **Technicien** montre exactement 7 profils
+  (boot-repair à general-os, **sans** password-reset) ; le niveau **Admin** montre les 9 (avec password-reset et
+  full) ; la ligne « Accès accordé — niveau : ... » et le bandeau du menu affichent bien le niveau à chaque fois.
+  Sauvegardes prises avant modification : `MANIFEST/PROFILES.tsv.bak-20260922`,
+  `MANIFEST/PROFILES_SCENARIOS.tsv.bak-20260922`, `Scripts/sonar_field.sh.bak-20260922` (ces deux premiers fichiers
+  n'ont en réalité pas changé — seul `sonar_field.sh` et `MANIFEST/FIELD_PINS.tsv` ont été mis à jour).
+
+### Non vérifié
+- Testé sous WSL (SONAR Field est un script bash, pensé pour tourner sous SystemRescue/Linux au démarrage de la
+  clé) — pas encore lancé depuis un vrai boot SystemRescue sur matériel réel.
+- Les PIN générés n'ont pas été notés nulle part de façon durable par SONAR lui-même (volontairement — seul le
+  hash est stocké) : à l'opérateur de les conserver en lieu sûr ; perdus, il faudra en redéfinir de nouveaux via
+  `--field-pin-set` (aucune donnée n'est perdue côté clé, juste l'accès à reconfigurer).
+
+### Comment tester
+`bash sonar_master.sh --self-test` (WSL). Sur la clé : booter SONAR Field (SystemRescue), entrer un PIN, vérifier
+que le niveau s'affiche et que le menu ne montre que les profils autorisés pour ce niveau.
+
+
 ## [3.53.0-winpe-antivirus] — 2026-09-22
 
 ### Contexte

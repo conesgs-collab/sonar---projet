@@ -2135,6 +2135,7 @@ sonar_field_pin_gate() {
     if [[ ! -s "$pins_file" ]]; then
         echo "[SONAR Field][ATTENTION] Aucun PIN configuré sur cette clé (--field-pin-set non utilisé au build) — accès libre, non identifié nominativement, tous profils visibles." >&2
         SONAR_FIELD_ALLOWED_PROFILES="ALL"
+        SONAR_FIELD_NIVEAU="non identifié"
         return 0
     fi
     local attempt=1 pin hash line niveau expected profils
@@ -2147,6 +2148,8 @@ sonar_field_pin_gate() {
             read -r -p "Identifiant (nom/matricule, pour le journal) : " SONAR_FIELD_IDENTITY
             SONAR_FIELD_IDENTITY="${SONAR_FIELD_IDENTITY:-technicien}(${niveau})"
             SONAR_FIELD_ALLOWED_PROFILES="$profils"
+            SONAR_FIELD_NIVEAU="$niveau"
+            echo "Accès accordé — niveau : ${niveau}  (profils autorisés : ${profils})"
             sonar_field_audit "FIELD_ACCESS_GRANTED" "niveau=${niveau};profils=${profils}"
             return 0
         fi
@@ -2220,7 +2223,7 @@ sonar_field_menu() {
     while true; do
         echo
         echo "============================================================"
-        echo " SONAR Field ${SONAR_FIELD_VERSION} — que dois-je depanner ?"
+        echo " SONAR Field ${SONAR_FIELD_VERSION} — niveau : ${SONAR_FIELD_NIVEAU:-non identifié} — que dois-je depanner ?"
         echo "============================================================"
         i=1
         local -a names=()
@@ -4978,7 +4981,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.53.0-winpe-antivirus"
+SONAR_VERSION="3.54.0-field-accreditation-levels"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
