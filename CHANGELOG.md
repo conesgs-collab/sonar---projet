@@ -35,23 +35,32 @@ distincts affichent avant le bureau du client, et aucun des deux ne s'adaptait �
   `tests/winpe/run_tests.sh` (`highestmode` présent dans la même boucle BCD que `bootuxdisabled`, donc sur les deux
   magasins) — 48 PASS au total pour cette suite ; `--self-audit`/`--self-test` : 0 FAIL (WSL).
 
+### Vérifié (VM VirtualBox, ISO reconstruite)
+- `highestmode yes` confirmé présent dans les deux magasins BCD de l'ISO construite (extraits, lus hors ligne avec
+  `bcdedit /store ... /enum ALL`, à côté de `bootuxdisabled Yes` et `description SONAR - SE`).
+- **Effet visuel confirmé en VM** : capture d'écran à 3840×2160 (au lieu de 1024×768 sur toutes les captures précédentes
+  de cette session) — la fenêtre WinPE (bannière SONAR, assistant) s'affiche nette, à sa taille normale de console dans un
+  vrai bureau haute résolution, au lieu d'être agrandie/pixelisée pour remplir un petit écran bas de gamme.
+
 ### Non vérifié
-- **Aucun boot réel depuis ce changement.** L'historique de ce même fichier (`ventoy.json`/`theme.txt`) contient trois
-  échecs confirmés sur le HP EliteBook 840 G3 avant que la vraie cause soit trouvée — `auto` n'a encore jamais été testé
-  sur cette machine. Repli disponible en cas de souci : remettre `"gfxmode": "800x600,1024x768"` dans `E:\ventoy\ventoy.json`
-  (sauvegarde `ventoy.json.bak-20260920` présente sur la clé, état d'avant ce changement).
-- `highestmode yes` sur `{default}` est la pratique standard documentée pour WinPE/Windows Setup, mais son effet réel sur
-  ce matériel (native ou juste "plus haute que 1024×768") n'a pas été observé.
+- **Pas encore de boot réel sur le HP EliteBook 840 G3** avec ce changement (VM seulement pour l'instant). L'historique de
+  ce même fichier (`ventoy.json`/`theme.txt`) contient trois échecs confirmés sur cette machine avant que la vraie cause
+  soit trouvée — `auto` n'y a encore jamais été testé. Repli en cas de souci : remettre `"gfxmode": "800x600,1024x768"`
+  dans `E:\ventoy\ventoy.json` (sauvegardes `ventoy.json.bak-20260920` et `.bak-20260922` présentes sur la clé).
+- Le menu Ventoy lui-même (GRUB, avant le choix de l'ISO) n'est testable qu'en bootant la vraie clé USB — la VM de test
+  boote l'ISO WinPE directement dans le lecteur optique virtuel, sans passer par Ventoy. `gfxmode=auto` reste donc non
+  vérifié en pratique, seulement raisonné (voir "Contexte").
 - Le fond d'écran Ventoy reste un canevas 4:3 800×600 : à une résolution GRUB plus large, il sera agrandi (donc plus lisible
   qu'avant) mais pas repensé en 16:9 — amélioration possible si le rendu réel reste insatisfaisant après ce correctif.
 - Appliqué sur la clé physique (`E:\ventoy\ventoy.json`) ; ISO WinPE reconstruite avec `highestmode` et redéployée sur
   `E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso` (l'ISO précédente, validée le 2026-09-21 hors résolution, gardée en copie de
-  secours — voir commande de rollback dans "Comment tester").
+  secours : `E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso.bak-v7-20260922`).
 
 ### Comment tester
 Démarrer la clé sur la machine réelle et comparer au ressenti précédent : le menu Ventoy et l'assistant SONAR doivent
-remplir l'écran net, texte lisible à taille normale. En cas de régression (écran noir, blocage), reconstruire l'ISO
-précédente ou remettre `"gfxmode": "800x600,1024x768"` dans `E:\ventoy\ventoy.json` (ou l'un de ses fichiers `.bak-*`).
+remplir l'écran net, texte lisible à taille normale. En cas de régression (écran noir, blocage), remettre
+`E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso.bak-v7-20260922` en place, et/ou `"gfxmode": "800x600,1024x768"` dans
+`E:\ventoy\ventoy.json` (ou l'un de ses fichiers `.bak-*`).
 
 
 ## [3.51.0-winpe-assistant] — 2026-09-21
