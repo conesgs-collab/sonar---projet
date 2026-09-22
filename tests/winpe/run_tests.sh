@@ -48,6 +48,9 @@ check "WinPE build : outils portables (option 15) lances depuis LEUR propre doss
 # WinPE-WMI (paquet) ne demarre pas tout seul le service winmgmt au boot - trouve sur materiel reel : CrystalDiskInfo
 # etc. echouaient silencieusement ("Disk Not Found") meme avec un vrai disque, faute de service WMI actif.
 check "WinPE build : service WMI demarre explicitement au boot (net start winmgmt), pas seulement le paquet installe" 'grep -q "net start winmgmt" "$PS1"'
+# WinPE amd64 n'a pas de WOW64 : un .exe 32 bits sans alternative 64 bits (h2testw, bleachbit, Rapr) ne
+# se lance jamais depuis le menu ("rien ne se passe" sans erreur) - avertir au lieu de laisser deviner.
+check "WinPE build : outils 32 bits sans alternative 64 bits (h2testw/bleachbit/Rapr) avertissent au lieu d'echouer silencieusement" 'grep -q ":tools_no64" "$PS1" && grep -q "h2testw.exe" "$PS1" && grep -q "bleachbit.exe" "$PS1" && grep -q "Rapr.exe" "$PS1" && grep -q "ne peut pas l.executer" "$PS1"'
 check "WinPE build : image systeme DISM (option 20) capture ET restaure, confirmation avant ecrasement" 'grep -q "if \`\"%choix%\`\"==\`\"20\`\" goto clone_menu" "$PS1" && grep -q "Dism /Capture-Image" "$PS1" && grep -q "Dism /Apply-Image" "$PS1" && grep -q "sera REMPLACE" "$PS1" && grep -q "Clonezilla" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
