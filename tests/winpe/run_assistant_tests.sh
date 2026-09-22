@@ -73,9 +73,10 @@ sed 's/^win.partitions=1/win.partitions=2/' "$T/f_boot.facts" > "$T/f_two.facts"
 printf 'part.v3.fstype=NTFS\npart.v3.letter=E\npart.v3.is_esp=no\npart.v3.bitlocker=no\npart.v3.has_windows=yes\n' >> "$T/f_two.facts"
 
 # run FACTS "reponses" -> $T/out.txt ; CALLS enregistre ; KEY=$T/key
-run() {   # run facts answers [key]
-    local facts="$1" answers="$2" key="${3-$T/key}"
+run() {   # run facts answers [key] [postsetup-fn : called after the key dir is (re)created, before exec]
+    local facts="$1" answers="$2" key="${3-$T/key}" postsetup="${4-}"
     rm -rf "$T/out" "$T/key"; mkdir -p "$T/out" "$T/key/Field-Logs" "$T/key/Drivers"; : > "$T/calls.txt"
+    [ -n "$postsetup" ] && "$postsetup"
     printf '%b' "$answers" | env CALLS="$T/calls.txt" PATH="$STUBS:$PATH" SONAR_KEY="$key" SONAR_SB="$T" SONAR_ENGINE="$ENGINE" SONAR_RULES="$RULES" \
         SONAR_OUT="$T/out" SONAR_ASSIST_FACTS="$facts" TEMP="$T" sh "$A" > "$T/out.txt" 2>&1
     RC=$?
@@ -132,9 +133,24 @@ check "Assistant : cle saisie SANS tirets acceptee et remise en forme"          
 run "$T/f_boot.facts" '1\nn\nn\nn\n' ""
 check "Assistant : sans cle SONAR, la sauvegarde n'est pas proposee et le motif est dit" 'grep -q "Aucune cle SONAR-SE detectee : pas de destination" "$T/out.txt" && ! calls | grep -q "^robocopy"'
 
-# ---- H. symptomes que WinPE ne traite pas : renvoi vers SystemRescue, aucune action
+# ---- H. symptome virus SANS ClamAV sur la cle : renvoi vers SystemRescue, aucune action
 run "$T/f_boot.facts" '5\n'
-check "Assistant : symptome virus -> renvoi vers SystemRescue (ClamAV), aucune action WinPE"  'grep -q "SystemRescue" "$T/out.txt" && grep -q "ClamAV" "$T/out.txt"'
+check "Assistant : symptome virus sans ClamAV sur la cle -> renvoi vers SystemRescue"  'grep -q "SystemRescue" "$T/out.txt" && grep -q "ClamAV" "$T/out.txt"'
+
+# ---- H2. symptome virus AVEC ClamAV (Windows) sur la cle : propose le scan WinPE, lecture seule
+setup_clamav_stub() {
+    mkdir -p "$T/key/Portable/ClamAV-Windows/db"
+    printf '#!/bin/sh\nprintf "clamscan.exe %%s\\n" "$*" >> "$CALLS"\nexit 1\n' > "$T/key/Portable/ClamAV-Windows/clamscan.exe"
+    chmod +x "$T/key/Portable/ClamAV-Windows/clamscan.exe"
+    : > "$T/key/Portable/ClamAV-Windows/db/fake.cvd"
+}
+# reponses : 5=symptome virus, n=BOOT_UEFI refuse (aussi propose sur ces faits, non teste ici), puis CLAMAV_SCAN
+run "$T/f_boot.facts" '5\nn\no\n' "$T/key" setup_clamav_stub
+check "Assistant : ClamAV present + signatures -> analyse proposee, lecture seule annoncee"  'grep -q "LECTURE SEULE" "$T/out.txt" && [[ -x "$T/key/Portable/ClamAV-Windows/clamscan.exe" ]]'
+check "Assistant : accord -> clamscan.exe lance sur le bon Windows (-r -d .../db C:\\\\)"      'calls | grep -q "^clamscan.exe -r -d .*ClamAV-Windows/db C:\\\\$"'
+check "Assistant : detection (code 1) -> avertissement explicite dans la sortie"              'grep -q "ATTENTION" "$T/out.txt"'
+run "$T/f_boot.facts" '5\nn\nn\n' "$T/key" setup_clamav_stub
+check "Assistant : ClamAV present mais refus -> clamscan.exe NON lance"                        '! calls | grep -q "^clamscan.exe"'
 
 # ---- I. mode d'emploi rappele et lecture seule annoncee
 check "Assistant : annonce clairement lecture seule = automatique, modification = accord"  'grep -q "LECTURE SEULE se fait tout seul" "$T/out.txt" && grep -q "non par defaut" "$T/out.txt"'

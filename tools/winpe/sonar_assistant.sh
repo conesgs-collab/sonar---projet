@@ -256,7 +256,30 @@ fi
 
 # --- Ce que WinPE ne fait pas
 case "$SYMPTOM" in
-    virus)    step "Analyse antivirale"; say "  Le WinPE n'a pas d'antivirus hors ligne. Demarrez SystemRescue depuis la cle (profil malware : ClamAV, disque en lecture seule)." ;;
+    virus)
+        step "Analyse antivirale"
+        _av="${KEY:+$KEY/Portable/ClamAV-Windows}"
+        if [ -z "$WINL" ]; then
+            say "  Aucun Windows identifie sur ce disque : demarrez SystemRescue depuis la cle (profil malware : ClamAV, disque en lecture seule)."
+        elif [ -z "$_av" ] || [ ! -f "$_av/clamscan.exe" ]; then
+            say "  ClamAV n'est pas sur cette cle (Portable\\ClamAV-Windows absent) : demarrez SystemRescue depuis la cle (profil malware, meme moteur ClamAV)."
+        else
+            _avhave=0
+            for _f in "$_av"/db/*.cvd "$_av"/db/*.cld; do [ -e "$_f" ] && _avhave=1; done
+            if [ "$_avhave" -ne 1 ]; then
+                say "  ClamAV est sur la cle mais sans base de signatures (Internet requis : $_av/sonar-freshclam.cmd). En attendant, SystemRescue (profil malware) reste disponible."
+            else
+                say "  Action : analyse antivirus (ClamAV) de $WINL:\\ en LECTURE SEULE - signale sans rien modifier ni supprimer."
+                if decide "CLAMAV_SCAN" "  Lancer l'analyse maintenant (peut durer plusieurs minutes) ?" d; then
+                    _avout="$OUT/CLAMAV_$STAMP.txt"
+                    "$_av/clamscan.exe" -r -d "$_av/db" "$WINL:\\" > "$_avout" 2>&1; _avrc=$?
+                    log "CLAMAV_SCAN rc=$_avrc report=$_avout"
+                    if [ "$_avrc" -eq 1 ]; then say "  ATTENTION : au moins un element detecte - voir $_avout"
+                    else say "  Rien detecte. Rapport : $_avout"; fi
+                fi
+            fi
+        fi
+        ;;
     password) step "Mot de passe Windows"; say "  Demarrez SystemRescue (profil password-reset). Un accord ecrit du proprietaire de l'appareil est necessaire." ;;
 esac
 

@@ -4219,6 +4219,7 @@ SystemRescue	https://fastly-cdn.system-rescue.org/releases/13.02/systemrescue-13
 TestDisk	https://www.cgsecurity.org/testdisk-7.2.linux26-x86_64.tar.bz2	19669b6d36314d6e531efdf836c768574e8a556d1e9db3c8f3c4e93a5092cb1c		none	Couvre aussi PhotoRec (meme archive). Aucun .sha256/.sig publie par cgsecurity.org ; SHA-256 calcule localement apres telechargement HTTPS depuis le domaine officiel.
 ddrescue	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz	2264622d309d6c87a1cfc19148292b8859a688e9bc02d4702f5cd4f288745542	https://ftp.gnu.org/gnu/ddrescue/ddrescue-1.30.tar.lz.sig	gpg	Signature GPG verifiee cette session (cle Antonio Diaz, via gnu-keyring.gpg officiel de gnu.org).
 ClamAV	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb	28d6efc5b4423e7830c3559339552eb53870a9eac51ac4efb37d60530d329886	https://www.clamav.net/downloads/production/clamav-1.5.4.linux.x86_64.deb.sig	gpg	Signature GPG verifiee cette session (cle Cisco Talos). Extraire avec 'ar x clamav*.deb && tar xf data.tar.*' (pas besoin de dpkg, fonctionne sur SystemRescue/Arch) : binaire reel en usr/local/bin/clamscan (pas usr/bin). Necessite ensuite export LD_LIBRARY_PATH=<extrait>/usr/local/lib (sinon 'error while loading shared libraries: libclamav.so.12'), puis 'freshclam --datadir=<dossier>' (reseau requis, paquet sans base de signatures embarquee) et 'clamscan --database=<meme dossier> -r <cible>' (sinon 0 signature chargee, scan silencieusement vide). Verifie de bout en bout sur materiel reel 2026-09-15, 3/3 fichiers EICAR detectes apres ces etapes — voir CHANGELOG.
+ClamAV-Windows	https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.5.4/clamav-1.5.4.win.x64.zip	0d9e0228b2674137ea1a2853566c98a0278ad52ab2582c3d6dbd75373848c395	https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.5.4/clamav-1.5.4.win.x64.zip.sig	gpg	Meme version/cle que la ligne ClamAV (Linux) ci-dessus, build Windows officiel (memes releases GitHub Cisco-Talos/clamav). Signature GPG verifiee cette session (cle Cisco Talos, via src/manual/cisco-talos.gpg du depot Cisco-Talos/clamav-documentation) : gpg: Good signature, fingerprint 5BADCA2665EF59DCF8A23D8B707F0DB480836771. L'archive officielle (225 Mo) contient aussi clamd/clambc/clamsubmit, des .pdb de debogage (467 Mo) et des en-tetes/.lib de developpement (293 Mo) : sonar_fetch_wrap_clamav_win() ne garde que clamscan.exe/sigtool.exe/freshclam.exe, les DLL requises (bundlees, y compris vcruntime/msvcp — aucune dependance sur un Redistribuable VC++ installe separement), certs/ et conf_examples/ (~100 Mo). Verifie sous WinPE 26100 (VM VirtualBox) cette session : clamscan.exe se lance sans erreur de DLL manquante, charge une base de signatures personnalisee (sigtool/.hdb) et detecte correctement un fichier correspondant — memes garanties que le test EICAR du build Linux (voir CHANGELOG), sans utiliser le texte EICAR lui-meme (bloque par l'antivirus de la machine hote a chaque ecriture sur disque).
 Clonezilla	https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable/3.3.3-15/clonezilla-live-3.3.3-15-amd64.iso/download	482518ea32af3b82ed15d09e2e7714806775deb62aeed81491e534f6cc6bbc47		none	SHA-256 verifie via CHECKSUMS.TXT signe GPG (cle DRBL) sur clonezilla.org (hors SourceForge). L'ISO vient de SourceForge : miroirs parfois instables, --fetch reprend un telechargement interrompu (curl -C -).
 chntpw	http://pogostick.net/~pnh/ntpasswd/cd140201.zip	c88d86aee55b31827ab4782d05bd44922276955909c43c69f0fb15377cc64374		none	ATTENTION assurance plus faible que les autres lignes : source officielle en HTTP seul (pas de TLS), MD5 uniquement publie par le fournisseur (pas de SHA-256/GPG amont). MD5 recoupe (f274127bf8be9a7ed48b563fd951ae9e) lors de la constitution de ce manifeste ; SHA-256 calcule localement.
 Memtest86+	https://www.memtest.org/download/v8.10/mt86plus_8.10_x86_64.iso.zip	93530005d6ac6a85aa2a49c68604a43c25794ecccf796c4f8849a73a8001be9a		none	SHA-256 publie sur memtest.org (sha256sum.txt du meme domaine officiel, pas de GPG pour cette release) et recalcule localement apres telechargement HTTPS cette session : correspond exactement. Fichier est un .zip contenant l'ISO bootable (mt86plus_8.10_x86_64.iso) — extraire puis deposer l'ISO extraite dans ISO/ (pas Portable/, malgre le routage par extension de --fetch qui le place initialement dans Portable/Fetched/ a cause du .zip).
@@ -4445,6 +4446,65 @@ CLAM_EOF
     return 0
 }
 
+# ClamAV pour Windows/WinPE (.zip officiel Cisco-Talos, meme version/cle que sonar_fetch_wrap_clamav) :
+# l'archive complete (225 Mo) contient aussi clamd/clambc/clamsubmit (non utilises ici), des .pdb de
+# debogage (467 Mo) et des en-tetes/.lib de developpement (293 Mo). On aplatit le sous-dossier versionne
+# (ex. clamav-1.5.4.win.x64/) vers la racine — chemin de lanceur stable d'une version a l'autre — puis on
+# elague pour ne garder que ce qui sert a un scan hors ligne : clamscan.exe/sigtool.exe/freshclam.exe, les
+# DLL requises (deja bundlees avec le zip, y compris vcruntime/msvcp — aucun Redistribuable VC++ a
+# installer separement), certs/ (TLS pour freshclam) et conf_examples/. Verifie sous WinPE 26100 (VM) :
+# clamscan.exe se lance sans erreur de DLL manquante, charge une base de signatures et detecte
+# correctement (voir CHANGELOG).
+sonar_fetch_wrap_clamav_win() {
+    local d="$1" sub
+    sub="$(find "$d" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n1)"
+    if [[ -n "$sub" && -f "$sub/clamscan.exe" ]]; then
+        ( shopt -s dotglob 2>/dev/null; mv -f "$sub"/* "$d"/ ) 2>/dev/null
+        rmdir "$sub" 2>/dev/null
+    fi
+    [[ -f "$d/clamscan.exe" ]] || { echo "[SONAR][ERROR] ClamAV (Windows) : clamscan.exe absent de l'extraction." >&2; return 1; }
+    rm -f "$d"/*.pdb "$d"/clamd.exe "$d"/clamdscan.exe "$d"/clamdtop.exe "$d"/clambc.exe "$d"/clamsubmit.exe "$d"/clamconf.exe "$d"/*.lib
+    rm -rf "$d/include"
+    mkdir -p "$d/db"
+    cat > "$d/sonar-clamscan.cmd" <<'CLAMWIN_EOF'
+@echo off
+rem Lance clamscan.exe depuis cette copie portable (DLL et base de signatures locales, %~dp0). Refuse de
+rem tourner sans base de signatures : un scan "0 signature" serait silencieusement vide, plus dangereux
+rem qu'un refus clair (meme logique que sonar-clamscan.sh sous Linux).
+setlocal enabledelayedexpansion
+set "HERE=%~dp0"
+set HAVE=0
+if exist "%HERE%db\*.cvd" set HAVE=1
+if exist "%HERE%db\*.cld" set HAVE=1
+if "%HAVE%"=="0" (
+    echo Aucune base de signatures dans %HERE%db : lancez d'abord sonar-freshclam.cmd ^(Internet requis^).
+    exit /b 2
+)
+"%HERE%clamscan.exe" -d "%HERE%db" %*
+exit /b %errorlevel%
+CLAMWIN_EOF
+    cat > "$d/sonar-freshclam.cmd" <<'CLAMWIN_EOF'
+@echo off
+rem Met a jour les signatures ClamAV dans %~dp0db (Internet requis ; ~300 Mo la premiere fois).
+setlocal enabledelayedexpansion
+set "HERE=%~dp0"
+set "CONF=%TEMP%\sonar_freshclam_%RANDOM%.conf"
+> "%CONF%" echo DatabaseDirectory %HERE%db
+>> "%CONF%" echo DatabaseMirror database.clamav.net
+>> "%CONF%" echo CompressLocalDatabase no
+"%HERE%freshclam.exe" --config-file="%CONF%" %*
+set "RC=%errorlevel%"
+del "%CONF%" >nul 2>&1
+exit /b %RC%
+CLAMWIN_EOF
+    if [[ "${SONAR_FETCH_CLAMAV_DB:-0}" == "1" ]]; then
+        # freshclam.exe est un binaire Windows : ne peut pas etre execute depuis cet hote de build
+        # (Linux/WSL). Signatures a recuperer plus tard, depuis Windows ou WinPE, via sonar-freshclam.cmd.
+        echo "[SONAR] ClamAV (Windows) : freshclam.exe ne peut pas etre lance depuis cet hote (binaire Windows) — executez sonar-freshclam.cmd depuis Windows ou WinPE pour installer les signatures." >&2
+    fi
+    return 0
+}
+
 # sonar_fetch_postprocess TOOL ARCHIVE SHA256  -> jamais fatal ; renseigne SONAR_FETCH_STATE
 sonar_fetch_postprocess() {
     local tool="$1" f="$2" sha="$3" base safe dest tmp names isos others rc
@@ -4485,7 +4545,7 @@ sonar_fetch_postprocess() {
     fi
     dest="${PORTABLE_SOURCE_DIR}/${safe}"
     if [[ -f "$dest/.sonar_fetch_sha256" && "$(cat "$dest/.sonar_fetch_sha256" 2>/dev/null)" == "$sha" ]]; then
-        SONAR_FETCH_STATE="EXTRACTED"; [[ -f "$dest/sonar-clamscan.sh" ]] && SONAR_FETCH_STATE="WRAPPED"
+        SONAR_FETCH_STATE="EXTRACTED"; [[ -f "$dest/sonar-clamscan.sh" || -f "$dest/sonar-clamscan.cmd" ]] && SONAR_FETCH_STATE="WRAPPED"
         echo "[SONAR] ${tool} : deja extrait -> ${dest}"; return 0
     fi
     rm -rf "$dest"
@@ -4497,6 +4557,8 @@ sonar_fetch_postprocess() {
     fi
     if [[ "$base" == *.deb && "$tool" == "ClamAV" ]]; then
         if sonar_fetch_wrap_clamav "$dest"; then SONAR_FETCH_STATE="WRAPPED"; else rm -rf "$dest"; SONAR_FETCH_STATE="MANUAL"; return 0; fi
+    elif [[ "$base" == *.zip && "$tool" == "ClamAV-Windows" ]]; then
+        if sonar_fetch_wrap_clamav_win "$dest"; then SONAR_FETCH_STATE="WRAPPED"; else rm -rf "$dest"; SONAR_FETCH_STATE="MANUAL"; return 0; fi
     else
         SONAR_FETCH_STATE="EXTRACTED"
     fi
@@ -4916,7 +4978,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.52.0-native-resolution"
+SONAR_VERSION="3.53.0-winpe-antivirus"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5624,6 +5686,22 @@ sonar_self_test_v2() {
                 _t "Fetch postprocess : avec une base de signatures, clamscan est lance depuis la copie portable" '_o="$(sh "${PORTABLE_SOURCE_DIR}/ClamAV/sonar-clamscan.sh" --version 2>&1)"; grep -q "ClamAV fake" <<<"${_o}"'
             else
                 printf 'WARN\tFetch postprocess : dpkg-deb absent, cas ClamAV .deb non teste ici\n'
+            fi
+            # -- ClamAV (Windows, .zip) : sous-dossier versionne aplati, elague, lanceurs .cmd poses, DLL gardees
+            if command -v zip >/dev/null 2>&1; then
+                mkdir -p "${_w}/winzip/clamav-1.5.4.win.x64/certs" "${_w}/winzip/clamav-1.5.4.win.x64/conf_examples"
+                printf 'fake exe' > "${_w}/winzip/clamav-1.5.4.win.x64/clamscan.exe"
+                printf 'fake exe' > "${_w}/winzip/clamav-1.5.4.win.x64/sigtool.exe"
+                printf 'fake exe' > "${_w}/winzip/clamav-1.5.4.win.x64/freshclam.exe"
+                printf 'fake exe' > "${_w}/winzip/clamav-1.5.4.win.x64/clamd.exe"
+                printf 'dll' > "${_w}/winzip/clamav-1.5.4.win.x64/libclamav.dll"
+                printf 'pdb' > "${_w}/winzip/clamav-1.5.4.win.x64/libclamav.pdb"
+                ( cd "${_w}/winzip" && zip -qr "${_w}/clamav-1.5.4.win.x64.zip" clamav-1.5.4.win.x64 )
+                sonar_fetch_postprocess "ClamAV-Windows" "${_w}/clamav-1.5.4.win.x64.zip" "sha-w" >/dev/null 2>&1
+                _t "Fetch postprocess : ClamAV .zip Windows -> WRAPPED, sous-dossier aplati, .pdb/clamd.exe retires" '[[ "${SONAR_FETCH_STATE}" == WRAPPED && -f "${PORTABLE_SOURCE_DIR}/ClamAV-Windows/clamscan.exe" && -f "${PORTABLE_SOURCE_DIR}/ClamAV-Windows/libclamav.dll" && ! -e "${PORTABLE_SOURCE_DIR}/ClamAV-Windows/libclamav.pdb" && ! -e "${PORTABLE_SOURCE_DIR}/ClamAV-Windows/clamd.exe" && ! -d "${PORTABLE_SOURCE_DIR}/ClamAV-Windows/clamav-1.5.4.win.x64" ]]'
+                _t "Fetch postprocess : sonar-clamscan.cmd refuse (dans son texte) de tourner sans base de signatures" 'grep -q "sonar-freshclam.cmd" "${PORTABLE_SOURCE_DIR}/ClamAV-Windows/sonar-clamscan.cmd"'
+            else
+                printf 'WARN\tFetch postprocess : zip absent, cas ClamAV-Windows .zip non teste ici\n'
             fi
             exit "${_pp_ok}"
         ) > "${_pp_dir}/out.txt" 2>&1

@@ -39,6 +39,7 @@ check "WinPE build : titre de fenetre SONAR et banniere SONAR (plus de marque ge
 check "WinPE build : l'assistant et sa banniere sont embarques, et l'ISO finale est verifiee pour eux" 'grep -q "\"sonar_assistant.sh\"  = " "$PS1" && grep -q "sonar.sonar_assistant.sh" "$PS1"'
 check "WinPE build : le menu manuel reste (option 18 relance l'assistant, texte verifie par le build conserve)" 'grep -q "goto assistant" "$PS1" && grep -q "SONAR-SE WinPE - Menu de reparation" "$PS1"'
 check "WinPE build : resolution native forcee (highestmode), dans la meme boucle BCD que bootuxdisabled (donc sur les DEUX magasins BIOS et UEFI)" '_l1="$(grep -n "bootuxdisabled yes" "$PS1" | head -1 | cut -d: -f1)"; _l2="$(grep -n "highestmode yes" "$PS1" | head -1 | cut -d: -f1)"; [[ -n "$_l1" && -n "$_l2" && $((_l2 - _l1)) -ge 1 && $((_l2 - _l1)) -le 12 ]] && grep -q "foreach (\$bcd in \$bcdPaths)" "$PS1"'
+check "WinPE build : analyse antivirus (option 19) prise sur la cle, refuse sans base de signatures, lecture seule" 'grep -q "if \`\"%choix%\`\"==\`\"19\`\" goto av_scan" "$PS1" && grep -q "\":av_scan\"" "$PS1" && grep -q "sonar-clamscan.cmd" "$PS1" && grep -q "AVHAVE" "$PS1" && grep -q "Ne modifie ni ne supprime rien" "$PS1"'
 # l'assistant lui-meme (etapes proposees, refus par defaut, cle BitLocker jamais journalisee) : suite dediee
 _ao="$(bash "${DIR}/run_assistant_tests.sh" 2>&1)"; _arc=$?
 printf '%s\n' "$_ao"

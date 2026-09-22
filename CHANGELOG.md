@@ -6,6 +6,35 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.53.0-winpe-antivirus] — 2026-09-22
+
+### Contexte
+« notre winpe n'a pas d'outils antivirus integré ». Vrai : ClamAV était déjà dans SONAR-SE (profil `malware`, voir manifeste `--fetch`), mais seulement en build **Linux** (`.deb`, tourne sous SystemRescue) — un technicien qui répare depuis WinPE devait redémarrer sur SystemRescue rien que pour un scan antivirus. Analyse plus large du reste de la boîte à outils WinPE à cette occasion (menu 17 outils + dossier `Portable\` de la clé) : le reste est déjà couvert — CrystalDiskInfo/Mark, Autoruns, Process Explorer, Prime95, HWiNFO/Dism++/BleachBit/Snappy Driver Installer/DriverStoreExplorer/BatteryInfoView/IsMyLcdOK/Memtest86+/chntpw sont déjà dans le manifeste `--fetch` (certains pas encore téléchargés sur cette clé — pas un manque de SONAR, juste un `--fetch malware`/etc. pas encore relancé) ; TestDisk/PhotoRec présents sur la clé sont le build **Linux** (`testdisk_static`/`photorec_static`, ELF) — cohérent avec l'architecture (récupération = territoire Linux/`sonar_recover.sh`, qui dépend de `ddrescue` de toute façon) et sans effet indésirable (extension sans `.exe`, invisibles du lanceur WinPE option 15). Seul vrai manque identifié et corrigé ici : l'antivirus côté WinPE.
+
+### Ajouté
+- **ClamAV pour Windows** (`ClamAV-Windows` dans le manifeste `--fetch`, même version 1.5.4 et même clé de signature Cisco Talos que la ligne `ClamAV` Linux existante) : `sonar_fetch_wrap_clamav_win()` aplatit le sous-dossier versionné du zip officiel, retire `clamd/clambc/clamsubmit` (mode démon, débogage, soumission cloud — non voulus ici), les `.pdb` de débogage et les en-têtes/`.lib` de développement (897 Mo → ~100 Mo : `clamscan.exe`/`sigtool.exe`/`freshclam.exe`, les DLL requises — **déjà fournies avec le zip, y compris vcruntime/msvcp : aucun Redistribuable VC++ à installer séparément** —, `certs/`, `conf_examples/`), puis pose `sonar-clamscan.cmd`/`sonar-freshclam.cmd` (même logique que la paire `.sh` Linux : **refuse de tourner sans base de signatures**, message clair plutôt qu'un scan silencieusement vide).
+- **Menu WinPE, option 19** : « Analyse antivirus (ClamAV, lecture seule) » — lit `%KEY%\Portable\ClamAV-Windows\`, annonce qu'elle ne modifie/supprime rien, demande la cible (`C:\` par défaut), enregistre le rapport dans `Field-Logs\clamav\`.
+- **Assistant guidé** : le cas « virus / comportement suspect » propose maintenant directement l'analyse ClamAV **dans WinPE** (étape `decide()`, oui par défaut car lecture seule) si la clé la fournit et qu'une base de signatures est présente ; sinon message clair (pas de clé/pas de ClamAV/pas de signatures) et renvoi vers SystemRescue comme avant.
+- Tests : self-test (`sonar_master.sh`) — fetch/postprocess sur un `.zip` factice (aplatissement, élagage `.pdb`/`clamd.exe`, `.cmd` posés) ; suite assistant (`tests/winpe/run_assistant_tests.sh`, 30 vérifications) — ClamAV absent → renvoi SystemRescue, ClamAV présent + signatures → analyse proposée et lancée sur le bon accord, refus → rien lancé, détection → avertissement affiché ; contrôle statique ajouté à `tests/winpe/run_tests.sh` (option 19, refus sans signatures, lecture seule annoncée) — 53 PASS au total pour la suite WinPE.
+
+### Vérifié (VM VirtualBox, WinPE 26100 réel)
+- `clamscan.exe` (build Windows officiel, signature GPG Cisco Talos vérifiée cette session, même clé que la ligne Linux) **se lance sous WinPE sans erreur de DLL manquante** — risque principal identifié à l'avance, maintenant écarté.
+- Charge une base de signatures personnalisée (`sigtool`/`.hdb`) et **détecte correctement** un fichier qui y correspond (`Known viruses: N`, `FOUND`, code retour 1) sur un fichier propre : mécanisme de détection par hash prouvé de bout en bout, **sans utiliser le texte EICAR** (systématiquement supprimé par l'antivirus de la machine hôte à chaque écriture sur disque, y compris avec une exclusion Windows Defender ciblée — signal fort que la détection fonctionne, mais rendant ce test précis impraticable sur cet hôte).
+- Déployé sur la clé physique : `E:\Portable\ClamAV-Windows\` (~103 Mo, dossier `db\` vide).
+
+### Non vérifié
+- **`db\` est vide sur la clé** : `database.clamav.net` n'est pas joignable depuis cette session (403, y compris via un chemin qui atteint bien github.com) — les signatures (~300 Mo) doivent être récupérées **une fois, avec un vrai accès Internet** (au bureau, pas forcément sur le terrain) via `E:\Portable\ClamAV-Windows\sonar-freshclam.cmd`, avant que l'option 19/l'étape « virus » de l'assistant ne servent à quelque chose (sinon message clair, refus propre — pas un scan vide silencieux).
+- Pas de test EICAR réel (voir ci-dessus) ni de test sur un fichier réellement infecté : la détection est prouvée par un hash personnalisé, pas par un cas réel de la base ClamAV.
+- Pas encore de boot réel sur le HP EliteBook 840 G3 avec cette version (VM seulement).
+- Les autres outils déjà catalogués mais pas encore sur cette clé (HWiNFO, Dism++, BleachBit, Snappy Driver Installer, DriverStoreExplorer, BatteryInfoView, IsMyLcdOK, Memtest86+, chntpw) restent à récupérer avec `--fetch` si l'opérateur les veut — hors périmètre de cette entrée, qui ne traite que l'antivirus explicitement demandé.
+
+### Comment tester
+`bash tests/winpe/run_tests.sh` (Linux/WSL, inclut la suite assistant) ; sous Windows :
+`powershell -File tests\winpe\test_menu_diag_sources.ps1 -BusyBox <busybox.exe>`. Sur la clé réelle : lancer
+`E:\Portable\ClamAV-Windows\sonar-freshclam.cmd` (Internet requis) puis, depuis le WinPE de la clé, menu option 19
+ou symptôme « virus » de l'assistant.
+
+
 ## [3.52.0-native-resolution] — 2026-09-22
 
 ### Contexte
