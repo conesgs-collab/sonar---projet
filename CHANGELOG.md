@@ -41,10 +41,13 @@ confirme le chargement (`ClamAV 1.5.4/28130/...`, 28130 = version de `daily.cvd`
 l'assistant sont donc opérationnelles sur la clé dès maintenant — plus besoin de `sonar-freshclam.cmd` pour un
 premier usage (utile plus tard pour les mises à jour).
 
+### Vérifié sur matériel réel (HP EliteBook 840 G3), 2026-09-22
+Clé rebootée avec l'ISO reconstruite et les signatures déployées : option 19 présente, analyse antivirus lancée
+et confirmée fonctionnelle par l'opérateur (« je confirme »). Confirmation générale, pas de détail par écran.
+
 ### Non vérifié
 - Pas de test EICAR réel (voir plus haut) ni de test sur un fichier réellement infecté : la détection est prouvée par un hash personnalisé, pas par un cas réel de la base ClamAV.
 - Les signatures se périment (ClamAV les considère obsolètes après ~7 jours sans mise à jour et peut refuser de charger `main.cvd`/`daily.cvd`) : penser à relancer `sonar-freshclam.cmd` (ou refaire ce téléchargement manuel) périodiquement.
-- Pas encore de boot réel sur le HP EliteBook 840 G3 avec cette ISO reconstruite (VM seulement pour le menu/l'option 19 ; vu sur vrai matériel que l'ancienne ISO, sans l'option, démarrait bien).
 - Les autres outils déjà catalogués mais pas encore sur cette clé (HWiNFO, Dism++, BleachBit, Snappy Driver Installer, DriverStoreExplorer, BatteryInfoView, IsMyLcdOK, Memtest86+, chntpw) restent à récupérer avec `--fetch` si l'opérateur les veut — hors périmètre de cette entrée, qui ne traite que l'antivirus explicitement demandé.
 
 ### Comment tester
