@@ -6,6 +6,71 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.55.0-winpe-tools-clone-drweb] — 2026-09-22
+
+### Contexte
+Message relayé par l'utilisateur (analyse d'une autre session ayant lu le dépôt) : « tout ces outils doivent etre
+listé afin de permettre à l'utilisateur de pouvoir les utiliser selon, leur numeros comme dans le winpe. Aussi, on
+n'a pas d'outils de clonage dans winpe et pas d'antivirus comme malwarebyte et un antivirus hors ligne pour les
+analyses à defaut d'internet. Les outils doivent etre reels dans leur usage, pas tres limité ». Trois demandes :
+liste numérotée pour l'option 15 (au lieu de taper un chemin complet), un vrai clonage/imagerie disque dans WinPE,
+et reconsidérer l'antivirus au-delà de ClamAV.
+
+### Ajouté
+- **Option 15 (outils portables) reprise en liste numérotée** : `dir /s /b` du dossier `Portable\` de la clé,
+  numérotation automatique, l'utilisateur tape un numéro (plus de chemin complet à taper à la main — pénible en
+  AZERTY avec les deux-points et antislashs). Implémenté sans `enabledelayedexpansion` (convention du fichier) via
+  deux sous-routines `call` (`:tools_show`, `:tools_pick`).
+- **Option 20 (nouvelle) : Image systeme (DISM /WIM)** — capture une partition (fichier `.wim`, natif WinPE, aucun
+  téléchargement) ou restaure un `.wim` sur une partition, avec confirmation explicite (« Taper OUI en majuscules »)
+  avant d'écraser une partition. Clairement annoncé comme de la copie de FICHIERS (comme `install.wim`), pas un
+  clonage secteur par secteur — pour un disque physiquement en train de mourir ou des partitions non-NTFS, le menu
+  renvoie explicitement vers SystemRescue/Clonezilla (profil `disk-clone` déjà existant côté SONAR Field).
+- **Dr.Web LiveDisk** ajouté au catalogue `--fetch` et au profil `malware` : deuxième moteur antivirus (signatures
+  différentes de ClamAV), ISO de démarrage autonome, gratuit, sans compte — complète ClamAV pour l'usage hors ligne.
+  Comodo Rescue Disk, AVG Rescue CD et Trend Micro Rescue Disk vérifiés et écartés (liens officiels morts ou produit
+  discontinué) ; ESET SysRescue Live et F-Secure Rescue CD écartés sans re-vérification (déjà documentés morts).
+  Malwarebytes délibérément PAS ajouté : logiciel propriétaire non redistribuable, compte en ligne obligatoire,
+  incompatible avec l'automatisation `--fetch` du reste de la clé — ClamAV (WinPE + SystemRescue) et Dr.Web LiveDisk
+  (secours hors ligne) couvrent le besoin sans cette dépendance.
+
+### Corrigé
+- **Bug de conception découvert pendant la vérification, dans le code ajouté ci-dessus** (pas préexistant) : en
+  cmd.exe, `set /p variable=` sur un Entrée vide NE réinitialise PAS la variable si elle avait déjà une valeur —
+  donc après un premier choix, un Entrée « retour » relançait silencieusement le dernier choix au lieu de revenir
+  au menu. Corrigé en vidant `tchoix`/`cchoix`/`clettre`/`cimg` juste avant chaque `set /p` concerné (option 15 et
+  le nouveau menu de clonage, option 20).
+- **Erreur de syntaxe cmd.exe découverte pendant la vérification** (option 20, capture ET restauration) :
+  `(echo ECHEC (code %errorlevel%). )` contient des parenthèses non échappées imbriquées dans un bloc
+  `if (...) else (...)` — cmd.exe compte les parenthèses pour délimiter le bloc, donc la parenthèse interne
+  fermait le bloc prématurément et faisait planter TOUT le script (` . was unexpected at this time.`, fenêtre
+  fermée, retour au menu impossible). Corrigé en échappant `^(code %errorlevel%^)`.
+- **Bug latent (préexistant, hors scope de cette session) découvert en cours de route et corrigé par prudence** :
+  le nouveau bloc de servicing WinPE (`-IncludeAdkComponents`, ajouté par une session précédente, activé par
+  défaut) traitait la sortie de progression normale de `VBoxManage` (écrite sur stderr) comme une erreur fatale —
+  même piège déjà documenté pour `oscdimg` plus bas dans le même fichier. Corrigé par le même remède
+  (`$ErrorActionPreference = "Continue"` localement autour des appels VBoxManage concernés).
+
+### Vérifié
+- `tests/winpe/run_tests.sh` : 2 nouveaux contrôles statiques (liste numérotée sans chemin à taper ; option 20
+  présente avec capture, restauration, confirmation avant écrasement, renvoi vers Clonezilla) — 55 PASS, 0 FAIL.
+- Self-audit/self-test `sonar_master.sh` : `ERRORS=0`.
+- **Sur WinPE réel (VM)**, avec une clé de test et un second disque factice pour forcer la clé sur D: (WinPE
+  attribue les lettres par ordre de port SATA, pas par contenu) :
+  - Option 15 : liste correcte de 5 outils numérotés, sélection par numéro fonctionne, lancement correct (confirmé
+    via l'échec attendu de Windows sur un faux .exe de test), et **Entrée vide revient bien au menu principal**
+    (comportement qui a permis de découvrir puis de confirmer la correction du bug `set /p` ci-dessus).
+  - Option 20 : capture réussie d'une partition de test (`Dism /Capture-Image`, « The operation completed
+    successfully »), message « Capture terminee : ... » affiché, retour propre au menu principal (comportement qui
+    a permis de découvrir puis de confirmer la correction du bug de parenthèses ci-dessus).
+- **Non vérifié** : la restauration (`Dism /Apply-Image`, option 20 → 2) n'a pas été testée en conditions réelles
+  (seule la capture l'a été) ; Dr.Web LiveDisk n'a pas été testé en démarrage réel (téléchargement et vérification
+  MD5 seulement, voir entrée `--fetch`).
+
+### Comment tester
+- `dir /s /b <cle>\Portable\*.exe` doit lister au moins un outil pour voir la liste numérotée (option 15).
+- Option 20 → 1 pour capturer une partition non-système en `.wim`, vérifier le fichier produit et le retour au menu.
+
 ## [3.54.0-field-accreditation-levels] — 2026-09-22
 
 ### Contexte
