@@ -453,6 +453,14 @@ if ($BrandBootManager) {
         $bcdLines += "if !errorlevel! neq 0 exit /b 1"
         $bcdLines += "bcdedit /store `"$bcd`" /set {default} bootuxdisabled yes"
         $bcdLines += "if !errorlevel! neq 0 exit /b 1"
+        # highestmode : element BCD standard (documente par Microsoft) qui force le chargeur a
+        # utiliser la resolution la PLUS HAUTE que le firmware annonce, au lieu du mode bas/generique
+        # que WinPE choisit par defaut pour rester compatible avec de vieux ecrans. Sans lui, WinPE
+        # affiche souvent un mode bas (proche de 1024x768) meme sur un ecran natif bien plus grand —
+        # correspond au symptome signale ("texte petit, affichage d'un type tres ancien"). Non encore
+        # reconfirme par un boot reel.
+        $bcdLines += "bcdedit /store `"$bcd`" /set {default} highestmode yes"
+        $bcdLines += "if !errorlevel! neq 0 exit /b 1"
     }
     $bcdLines += "exit /b 0"
     $bcdLines | Set-Content -Path $bcdScript -Encoding ASCII

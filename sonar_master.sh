@@ -1854,7 +1854,11 @@ if os.path.isfile(theme_txt):
     # ventoy.json.
     cfg["theme"] = {
         "file": "/ventoy/theme/theme.txt",
-        "gfxmode": "800x600,1024x768",
+        # "auto" d'abord (GRUB choisit via GOP/EDID du firmware -> résolution native de l'écran
+        # au lieu d'un 4:3 basse résolution étiré) ; 1024x768 puis 800x600 restent en repli, dans
+        # l'ordre PROUVE fonctionnel sur le HP EliteBook 840 G3 (voir CHANGELOG, 3.40.1/3.41.0) si
+        # "auto" échoue sur un firmware donné. Non reconfirmé par un boot reel depuis ce changement.
+        "gfxmode": "auto,1024x768,800x600",
         "boot_menu_language": "fr",
         "ventoy_left": "2%",
         "ventoy_top": "96%",
@@ -4912,7 +4916,7 @@ sonar_structural_self_audit() {
 # Destructive disk actions remain exclusively in the existing deploy workflow.
 # ============================================================================
 
-SONAR_VERSION="3.51.0-winpe-assistant"
+SONAR_VERSION="3.52.0-native-resolution"
 SONAR_REPORT_DIR="${SONAR_REPORT_DIR:-${SONAR_ROOT}/SONAR_REPORTS}"
 SONAR_BUILD_DIR="${SONAR_BUILD_DIR:-${SONAR_ROOT}/SONAR_BUILD}"
 SONAR_PROFILE="${SONAR_PROFILE:-FULL}"
@@ -5463,6 +5467,14 @@ sonar_self_test_v2() {
             printf 'PASS\tventoy.json theme.file points to theme.txt, not to the raw PNG\n'
         else
             printf 'FAIL\tventoy.json theme.file does not point to theme.txt as expected\n'; errors=$((errors+1))
+        fi
+        # 2026-09-22 : gfxmode essaie "auto" (resolution native via GOP/EDID) avant les repli
+        # 1024x768/800x600 PROUVES fonctionnels sur materiel reel (voir CHANGELOG) — l'un des deux
+        # doit rester joignable si "auto" echoue sur un firmware donne.
+        if [[ -s "${_vt_json}" ]] && grep -q '"gfxmode": "auto,1024x768,800x600"' "${_vt_json}"; then
+            printf 'PASS\tventoy.json gfxmode tries auto (native resolution) before the proven fallbacks\n'
+        else
+            printf 'FAIL\tventoy.json gfxmode missing "auto" or the proven fallback chain\n'; errors=$((errors+1))
         fi
         rm -rf "${_vt_src}" "${_vt_mp}"
         grep -q '^sonar_generate_build_watermark() {' "$self" && printf 'PASS\tBuild watermark module present\n' || { printf 'FAIL\tBuild watermark module missing\n'; errors=$((errors+1)); }

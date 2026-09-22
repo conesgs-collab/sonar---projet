@@ -6,6 +6,54 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.52.0-native-resolution] — 2026-09-22
+
+### Contexte
+Retour terrain après le test réel du 2026-09-21 (WinPE branding/assistant, voir 3.51.0) : « texte un peu petit, l'affichage
+n'est pas en adéquation avec ce que j'ai sur la machine, on aurait dit un affichage d'un type très ancien ». Deux endroits
+distincts affichent avant le bureau du client, et aucun des deux ne s'adaptait à l'écran réel :
+1. Le menu de démarrage Ventoy (GRUB, avant même de choisir une ISO) : `gfxmode` figé à `"800x600,1024x768"` — un choix
+   volontairement conservateur (voir 3.40.1/3.41.0), jamais revu depuis que la vraie cause du crash historique
+   (`ventoy.json` pointant sur l'image PNG au lieu d'un script `theme.txt`, voir 3.35.0) a été identifiée et corrigée : la
+   résolution de l'image n'a **jamais** été la cause du crash (trois tailles radicalement différentes, même échec).
+2. La session WinPE elle-même (bannière SONAR, assistant) : **aucun réglage de résolution nulle part**. WinPE retombe sur
+   un mode bas par défaut (généralement proche de 1024×768) plutôt que la résolution native de l'écran, même en UEFI —
+   comportement documenté de Windows Boot Manager/winload en l'absence de l'élément BCD `highestmode`.
+
+### Corrigé
+- **`gfxmode` Ventoy** (`generate_ventoy_json_final()`, `sonar_master.sh`) : `"auto,1024x768,800x600"` au lieu de
+  `"800x600,1024x768"`. `auto` laisse GRUB choisir via GOP/EDID du firmware (résolution native de l'écran) ; les deux
+  résolutions **prouvées fonctionnelles sur le HP EliteBook 840 G3** restent en repli si `auto` échoue sur un firmware
+  donné. Le fond d'écran (`Branding/default_background.png`, canevas 800×600) n'a pas été régénéré : sur un écran plus
+  large, GRUB l'agrandira — net progrès par rapport à un menu 4:3 non adapté, mais pas encore optimal (voir "Non vérifié").
+- **`highestmode` WinPE** (`Build-SonarSE-WinPE.ps1`, bloc `-BrandBootManager`) : ajouté à `{default}` dans les **deux**
+  magasins BCD (BIOS et UEFI), à côté de `bootuxdisabled` déjà présent. Élément BCD standard, documenté Microsoft : force
+  le chargeur à utiliser la résolution la plus haute annoncée par le firmware au lieu du mode bas générique choisi par
+  défaut. Aucun patch binaire — reste dans le domaine officiellement supporté de `bcdedit`, même prudence que pour le
+  renommage du gestionnaire de démarrage (3.40.0).
+- Tests : 2 nouveaux contrôles `--self-test` (gfxmode contient `auto` + repli prouvé) et 1 nouveau contrôle statique dans
+  `tests/winpe/run_tests.sh` (`highestmode` présent dans la même boucle BCD que `bootuxdisabled`, donc sur les deux
+  magasins) — 48 PASS au total pour cette suite ; `--self-audit`/`--self-test` : 0 FAIL (WSL).
+
+### Non vérifié
+- **Aucun boot réel depuis ce changement.** L'historique de ce même fichier (`ventoy.json`/`theme.txt`) contient trois
+  échecs confirmés sur le HP EliteBook 840 G3 avant que la vraie cause soit trouvée — `auto` n'a encore jamais été testé
+  sur cette machine. Repli disponible en cas de souci : remettre `"gfxmode": "800x600,1024x768"` dans `E:\ventoy\ventoy.json`
+  (sauvegarde `ventoy.json.bak-20260920` présente sur la clé, état d'avant ce changement).
+- `highestmode yes` sur `{default}` est la pratique standard documentée pour WinPE/Windows Setup, mais son effet réel sur
+  ce matériel (native ou juste "plus haute que 1024×768") n'a pas été observé.
+- Le fond d'écran Ventoy reste un canevas 4:3 800×600 : à une résolution GRUB plus large, il sera agrandi (donc plus lisible
+  qu'avant) mais pas repensé en 16:9 — amélioration possible si le rendu réel reste insatisfaisant après ce correctif.
+- Appliqué sur la clé physique (`E:\ventoy\ventoy.json`) ; ISO WinPE reconstruite avec `highestmode` et redéployée sur
+  `E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso` (l'ISO précédente, validée le 2026-09-21 hors résolution, gardée en copie de
+  secours — voir commande de rollback dans "Comment tester").
+
+### Comment tester
+Démarrer la clé sur la machine réelle et comparer au ressenti précédent : le menu Ventoy et l'assistant SONAR doivent
+remplir l'écran net, texte lisible à taille normale. En cas de régression (écran noir, blocage), reconstruire l'ISO
+précédente ou remettre `"gfxmode": "800x600,1024x768"` dans `E:\ventoy\ventoy.json` (ou l'un de ses fichiers `.bak-*`).
+
+
 ## [3.51.0-winpe-assistant] — 2026-09-21
 
 ### Contexte
