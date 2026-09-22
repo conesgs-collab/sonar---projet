@@ -23,26 +23,34 @@ n'a qu'à donner son accord ou non, clavier AZERTY français par défaut.
 - **Règle d'accord** : une étape qui **modifie** quelque chose est refusée **par défaut** (o/N) — sans réponse claire,
   rien n'est fait. Toute décision (oui/non, code retour, origine des règles/du moteur) est journalisée sur la clé
   (`Field-Logs\assistant\ASSIST_*.log`) ; **la clé de récupération BitLocker n'apparaît ni à l'écran, ni dans le journal, ni dans le rapport**.
-- **Marque SONAR** : bannière ASCII « SONAR SE » (`sonar_banner.txt`), titre de fenêtre `SONAR - SE`, et fond d'écran
-  généré depuis `Branding\default_background.png` (`winpe.jpg`, non bloquant si absent).
-- **Clavier AZERTY français par défaut** : `wpeutil SetKeyboardLayout 040c:0000040c` dès le démarrage.
+- **Marque SONAR** : bannière ASCII « SONAR SE » (`sonar_banner.txt`) et titre de fenêtre `SONAR - SE` (vus dans la VM de test).
+- **Clavier AZERTY français par défaut**, **vérifié sous WinPE 26100 (VM)** : `wpeutil SetKeyboardLayout 040c:0000040c` ne
+  change PAS le clavier de la fenêtre déjà ouverte, et une console ouverte *immédiatement* après restait en QWERTY. L'accueil
+  patiente donc 6 s puis se **relance dans une nouvelle console** (variable `SONAR_RELAUNCH` : pas de boucle, `wpeinit` une
+  seule fois ; si la fenêtre SONAR est fermée, une invite de secours s'ouvre au lieu de quitter le shell WinPE).
 - Menu manuel : option **18** (relancer l'assistant) ; le menu de 17 outils reste intégralement disponible.
 - Vérification finale de l'ISO : présence de `sonar_assistant.sh` et de la ligne clavier dans `startnet.cmd`.
 - Tests : `tests/winpe/run_assistant_tests.sh` (26 vérifications, outils Windows remplacés par des *stubs* qui enregistrent
   l'appel : on vérifie ce qui serait lancé, dans quel ordre, et surtout ce qui ne l'est **pas** quand le technicien refuse) ;
   `tests/winpe/test_menu_diag_sources.ps1` passe de 6 à 10 vérifications **sur un vrai `cmd.exe` avec le vrai BusyBox** (écran
-  d'accueil, Entrée → assistant, retour au menu) ; 5 contrôles statiques ajoutés à `tests/winpe/run_tests.sh` (45 PASS au total).
+  d'accueil, Entrée → assistant, retour au menu) ; 4 contrôles statiques ajoutés à `tests/winpe/run_tests.sh` (47 PASS au total).
+
+### Vérifié sur un vrai WinPE (VM VirtualBox, ISO reconstruite)
+- Démarrage sur la bannière SONAR, fenêtre « SONAR - SE », **AZERTY** (touches q, w, ; → a, z, m ; Maj+1 → 1), Entrée →
+  assistant → symptôme → inventaire et diagnostic (score, constats) → retour au menu manuel. Sans disque ni clé dans la VM.
 
 ### Non vérifié
-- **Aucun démarrage réel de cette version** : l'ISO n'est pas encore reconstruite avec ces changements (l'ISO déployée sur
-  la clé est la précédente, à menu de 17 outils). La reconstruction nécessite l'UAC (présence physique).
+- **Fond d'écran** : `winpe.jpg` (image SONAR) a été copié dans l'image et le registre WinPE le référence déjà, mais **rien ne
+  s'affiche** (fond bleu uni) sur ce WinPE 26100 : il n'y a pas de shell pour le peindre. Abandonné, non livré.
 - **Logo Windows au démarrage** : l'animation de démarrage vient de `bootres.dll`, un fichier signé Microsoft ; le modifier
   casserait Secure Boot. Rien n'a été patché. Dans la VM de test aucun logo n'apparaît ; sur du **vrai matériel / via Ventoy**,
   ce qui s'affiche avant le bureau n'a pas été observé (photo ou description bienvenue).
-- L'assistant n'a pas tourné sur un **vrai WinPE avec une vraie clé** : les appels `manage-bde`, `bcdboot`, `diskpart`,
-  `robocopy`, `sfc`, `chkdsk` sont testés par *stubs* ; le comportement de `read -s` (saisie masquée de la clé BitLocker) dans la
-  console WinPE n'est pas vérifié (repli sur `read` visible prévu).
-- Disposition AZERTY : commande documentée de WinPE, effet réel non vu (l'automate VirtualBox tape en QWERTY US).
+- Les étapes de l'assistant **avec un vrai disque Windows et une vraie clé** (`manage-bde`, `bcdboot`, `diskpart`, `robocopy`,
+  `sfc`, `chkdsk`) sont testées par *stubs* seulement ; le comportement de `read -s` (saisie masquée de la clé BitLocker) dans
+  la console WinPE n'est pas vérifié (repli sur `read` visible prévu).
+- Le délai de 6 s avant la relance est celui qui a suffi dans la VM ; sur un autre matériel, un WinPE plus lent pourrait
+  demander plus (symptôme : accueil en QWERTY ; solution : augmenter `ping -n 6`).
+- La fenêtre d'origine (`startnet.cmd`) reste visible derrière la fenêtre SONAR.
 
 ### Comment tester
 `bash tests/winpe/run_tests.sh` (Linux/WSL) ; sous Windows :

@@ -66,7 +66,7 @@ win.partitions=1
 esp.count=1
 "@ | Set-Content "$root\assist.facts" -Encoding ASCII
 $env:PATH = "$root\bin;$env:PATH"
-
+$env:SONAR_RELAUNCH = "1"   # comme dans la console relancee du WinPE : saute wpeinit/clavier/relance
 function New-Key($name, $rules, $engine) {
     $k = "$root\key_$name"; New-Item -ItemType Directory -Force "$k\MANIFEST", "$k\Scripts", "$k\Field-Logs" | Out-Null
     Set-Content "$k\MANIFEST\PROFILES.tsv" "PROFILE`tSCENARIO" -Encoding ASCII
@@ -123,6 +123,7 @@ try {
     if ($r.Console -match 'Menu de reparation') { Pass "assistant : rend la main au menu manuel a la fin" } else { Fail "assistant : pas de retour au menu manuel" }
 } finally {
     cmd /c "subst Z: /d" 2>$null | Out-Null; cmd /c "subst X: /d" 2>$null | Out-Null
+    Remove-Item Env:SONAR_RELAUNCH -ErrorAction SilentlyContinue
     cmd /c "rmdir /s /q `"$root`"" 2>$null | Out-Null
 }
 exit $fails

@@ -516,32 +516,25 @@ if ($AddRepairMenu) {
         }
         Write-Host "Boite a outils preparee : $toolboxDir"
     }
-
-    # Fond d'ecran SONAR (remplace le fond bleu uni de WinPE) : Branding\default_background.png -> winpe.jpg.
-    # Non bloquant : sans image ou sans System.Drawing, le WinPE garde son fond d'origine.
-    $wallpaperJpg = $null
-    $wallSrc = Join-Path $PSScriptRoot "..\Branding\default_background.png"
-    if (Test-Path $wallSrc) {
-        try {
-            Add-Type -AssemblyName System.Drawing
-            $wallpaperJpg = Join-Path $WorkDir "winpe.jpg"
-            $img = [System.Drawing.Image]::FromFile((Resolve-Path $wallSrc).Path)
-            try { $img.Save($wallpaperJpg, [System.Drawing.Imaging.ImageFormat]::Jpeg) } finally { $img.Dispose() }
-            Write-Host "Fond d'ecran SONAR prepare : $wallpaperJpg"
-        } catch {
-            Write-Warning "Fond d'ecran SONAR non genere ($($_.Exception.Message)) : le fond WinPE d'origine est conserve."
-            $wallpaperJpg = $null
-        }
-    }
-
     # Menu batch pur (pas de PowerShell) : reprend exactement les commandes
     # documentees dans docs/WINPE.md (bootrec, bcdedit, diskpart, DISM),
     # juste presentees sans que le technicien ait a en memoriser la syntaxe.
     $menuLines = @(
         "@echo off"
+        "if defined SONAR_RELAUNCH goto sonar_start"
         "wpeinit"
-        "rem Clavier AZERTY francais par defaut (langue 040c, disposition 0000040c)"
+        "rem Clavier AZERTY francais par defaut (langue 040c, disposition 0000040c). Constate sous WinPE 26100 : wpeutil ne"
+        "rem change PAS le clavier de la fenetre deja ouverte ; il s'applique aux fenetres OUVERTES ENSUITE, mais pas"
+        "rem instantanement (une console ouverte dans la foulee restait en QWERTY). On patiente donc quelques secondes puis on"
+        "rem relance l'accueil dans une NOUVELLE console. SONAR_RELAUNCH evite de reboucler et de refaire wpeinit."
         "wpeutil SetKeyboardLayout 040c:0000040c"
+        "ping -n 6 127.0.0.1 >nul"
+        "set SONAR_RELAUNCH=1"
+        "start `"SONAR - SE`" /wait cmd /c `"%~f0`""
+        "rem la fenetre SONAR a ete fermee : invite de secours plutot que de quitter le shell WinPE (qui redemarrerait)"
+        "cmd"
+        "exit /b 0"
+        ":sonar_start"
         "title SONAR - SE"
         "set SB=%SystemRoot%\System32\sonar"
         ":start"
@@ -951,7 +944,6 @@ if ($AddRepairMenu) {
         "copy /y `"$startnetPath`" `"$menuMountDir\Windows\System32\startnet.cmd`""
         "if !errorlevel! neq 0 goto :fail_mounted"
         "::TOOLBOX::"
-        "::WALLPAPER::"
         "echo [%date% %time%] Demontage et commit"
         "Dism /Unmount-Image /MountDir:`"$menuMountDir`" /Commit"
         "if !errorlevel! neq 0 goto :fail_mounted"
@@ -973,19 +965,7 @@ if ($AddRepairMenu) {
             "if not exist `"$menuMountDir\Windows\System32\sonar\busybox.exe`" goto :fail_mounted"
         )
     }
-    # Fond d'ecran SONAR : propriete de TrustedInstaller si un winpe.jpg existe deja -> takeown/icacls avant de le remplacer.
-    # Un echec ici n'annule pas le build (le fond d'origine reste).
-    $wallScriptLines = @("echo [%date% %time%] Fond d'ecran SONAR non demande - ignore")
-    if ($wallpaperJpg) {
-        $wpTarget = "$menuMountDir\Windows\System32\winpe.jpg"
-        $wallScriptLines = @(
-            "echo [%date% %time%] Fond d'ecran SONAR"
-            "if exist `"$wpTarget`" takeown /f `"$wpTarget`" >nul & icacls `"$wpTarget`" /grant Administrators:F >nul"
-            "copy /y `"$wallpaperJpg`" `"$wpTarget`" >nul"
-            "if !errorlevel! neq 0 echo [%date% %time%] AVERTISSEMENT : fond d'ecran SONAR non copie - fond d'origine conserve"
-        )
-    }
-    $menuScriptLines = @($menuScriptLines | ForEach-Object { if ($_ -eq "::TOOLBOX::") { $toolboxScriptLines } elseif ($_ -eq "::WALLPAPER::") { $wallScriptLines } else { $_ } })
+    $menuScriptLines = @($menuScriptLines | ForEach-Object { if ($_ -eq "::TOOLBOX::") { $toolboxScriptLines } else { $_ } })
     $menuScriptLines | Set-Content -Path $menuScript -Encoding ASCII
 
     $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$menuScript`"" -Verb RunAs -Wait -PassThru

@@ -208,6 +208,19 @@ Effets côté menu : option 6 (BitLocker) affiche `manage-bde -status` puis dév
 de récupération ; option 17 : PowerShell ; le menu lance `wpeinit` (il manquait : sans lui, WMI et
 le réseau ne s'initialisent pas).
 
+### Assistant guidé (accueil SONAR) et clavier AZERTY
+
+Au démarrage, une bannière SONAR propose : **Entrée** = assistant guidé, **M** = menu manuel (les 17 outils, inchangés ;
+l'option 18 relance l'assistant). L'assistant (`tools/winpe/sonar_assistant.sh`) pose une question (le symptôme), fait
+l'inventaire et le diagnostic tout seul (lecture seule), puis propose une à une les étapes utiles (BitLocker, sauvegarde vers
+la clé, réparation UEFI, contrôle des fichiers système…) : le technicien répond oui ou non. Une étape qui modifie quelque
+chose est **non par défaut** ; chaque décision est journalisée sur la clé (`Field-Logs\assistant\`), jamais la clé BitLocker.
+
+Clavier : `wpeutil SetKeyboardLayout 040c:0000040c` ne s'applique qu'aux fenêtres ouvertes **après** lui (constaté sous WinPE
+26100). L'accueil patiente 6 s puis se relance dans une nouvelle console. Si un matériel lent affichait l'accueil en QWERTY,
+augmenter `ping -n 6` dans `startnet.cmd` (`Build-SonarSE-WinPE.ps1`). Le logo Windows de démarrage n'est pas modifiable sans
+casser Secure Boot (`bootres.dll` signé) ; le fond d'écran WinPE n'est pas affiché par ce WinPE (essayé, abandonné).
+
 ## Pourquoi cette distinction (construire pour vous ≠ redistribuer)
 
 SONAR-SE **n'embarque et ne télécharge jamais** de WinPE pré-construit
