@@ -45,15 +45,31 @@ et reconsidérer l'antivirus au-delà de ClamAV.
   `if (...) else (...)` — cmd.exe compte les parenthèses pour délimiter le bloc, donc la parenthèse interne
   fermait le bloc prématurément et faisait planter TOUT le script (` . was unexpected at this time.`, fenêtre
   fermée, retour au menu impossible). Corrigé en échappant `^(code %errorlevel%^)`.
+- **Même piège `set /p`, retrouvé PRÉEXISTANT ailleurs dans le fichier** en réponse à « penses-tu qu'il y a
+  d'autres bugs ? » (audit systématique du fichier, pas une supposition) : `cible`/`espvol`/`inf` (retour menu sur
+  Entrée vide, comme ci-dessus) et, plus grave, **`rep`/`go`/`confirm`** — des confirmations « (o/n) » ou « Taper
+  OUI » dont une valeur précédente pouvait rester active sur Entrée vide et **rejouer silencieusement une
+  réparation, voire l'écrasement d'une partition (option 20 → restauration) sans confirmation réelle**. Les 9
+  variables (les 4 ci-dessus + ces 6-là, moins `clettre` compté une fois) sont désormais vidées avant leur
+  `set /p` ; un contrôle statique générique dans `tests/winpe/run_tests.sh` boucle sur toutes pour empêcher une
+  régression future.
 - **Bug latent (préexistant, hors scope de cette session) découvert en cours de route et corrigé par prudence** :
-  le nouveau bloc de servicing WinPE (`-IncludeAdkComponents`, ajouté par une session précédente, activé par
-  défaut) traitait la sortie de progression normale de `VBoxManage` (écrite sur stderr) comme une erreur fatale —
-  même piège déjà documenté pour `oscdimg` plus bas dans le même fichier. Corrigé par le même remède
-  (`$ErrorActionPreference = "Continue"` localement autour des appels VBoxManage concernés).
+  le bloc de servicing WinPE (`-IncludeAdkComponents`, ajouté par une session précédente, activé par défaut)
+  traitait la sortie de progression normale de `VBoxManage` (écrite sur stderr) comme une erreur fatale — même
+  piège déjà documenté pour `oscdimg` plus bas dans le même fichier. Le correctif initial ne couvrait que le début
+  du cycle de vie de la VM ; un `unregistervm` plus loin dans la même fonction est retombé dans le même piège lors
+  du re-test du build complet — corrigé en étendant `$ErrorActionPreference = "Continue"` à tout le cycle de vie
+  de la VM (création → démarrage → désinscription, les deux chemins succès/timeout).
+- **Deux races VirtualBox découvertes en re-testant le build complet** (`-IncludeAdkComponents`) : `unregistervm`
+  peut échouer (« machine ... locked ») et `Mount-DiskImage` (récupération élevée du `boot.wim` servi) peut
+  échouer (« fichier utilisé par un autre processus ») quelques secondes après l'arrêt de la VM de servicing, même
+  quand `showvminfo` rapporte déjà un état non-running. Corrigé par de courtes boucles de nouvelle tentative
+  (5 essais, 3 s d'écart) aux deux endroits.
 
 ### Vérifié
-- `tests/winpe/run_tests.sh` : 2 nouveaux contrôles statiques (liste numérotée sans chemin à taper ; option 20
-  présente avec capture, restauration, confirmation avant écrasement, renvoi vers Clonezilla) — 55 PASS, 0 FAIL.
+- `tests/winpe/run_tests.sh` : contrôles statiques (liste numérotée sans chemin à taper ; option 20 présente avec
+  capture, restauration, confirmation avant écrasement, renvoi vers Clonezilla ; boucle générique sur les 9
+  variables `set /p` protégées) — 65 PASS, 0 FAIL.
 - Self-audit/self-test `sonar_master.sh` : `ERRORS=0`.
 - **Sur WinPE réel (VM)**, avec une clé de test et un second disque factice pour forcer la clé sur D: (WinPE
   attribue les lettres par ordre de port SATA, pas par contenu) :
@@ -63,9 +79,20 @@ et reconsidérer l'antivirus au-delà de ClamAV.
   - Option 20 : capture réussie d'une partition de test (`Dism /Capture-Image`, « The operation completed
     successfully »), message « Capture terminee : ... » affiché, retour propre au menu principal (comportement qui
     a permis de découvrir puis de confirmer la correction du bug de parenthèses ci-dessus).
+  - Reconstruction COMPLÈTE (avec `-IncludeAdkComponents`, donc PowerShell/WMI/BitLocker inclus, pas juste l'image
+    minimale) : 535,5 Mo, SHA-256 `454A0652...`. Option 17 (PowerShell) confirmée fonctionnelle (`PS
+    X:\Windows\System32>` atteint) après reconstruction complète ; menu 1-20 complet, retour propre.
+- **Preuve terrain indépendante** (vidéo filmée par l'utilisateur sur le HP EliteBook 840 G3, hors labo) : l'option
+  12 (DIAGNOSTIC INTELLIGENT) a détecté un vrai problème sur cette machine — score 82/100, partition EFI système
+  absente (confiance 85 %), cause et correctif corrects (recréer l'ESP via diskpart + bcdboot), avertissement
+  explicite de ne PAS réinstaller Windows. Première preuve non synthétique que le moteur de diagnostic donne un
+  résultat exploitable en conditions réelles.
+- **Déployé sur la clé physique** : `E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso` remplacé (ancien conservé en
+  `.bak-v10-20260922`), checksum SHA-256 vérifié après copie.
 - **Non vérifié** : la restauration (`Dism /Apply-Image`, option 20 → 2) n'a pas été testée en conditions réelles
   (seule la capture l'a été) ; Dr.Web LiveDisk n'a pas été testé en démarrage réel (téléchargement et vérification
-  MD5 seulement, voir entrée `--fetch`).
+  MD5 seulement, voir entrée `--fetch`) ; le nouveau menu (options 15/20) n'a pas encore été rebouclé sur le
+  **vrai matériel** (HP EliteBook), seulement en VM.
 
 ### Comment tester
 - `dir /s /b <cle>\Portable\*.exe` doit lister au moins un outil pour voir la liste numérotée (option 15).
