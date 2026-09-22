@@ -22,10 +22,17 @@ son propre historique en commentaire.
 - Charge une base de signatures personnalisée (`sigtool`/`.hdb`) et **détecte correctement** un fichier qui y correspond (`Known viruses: N`, `FOUND`, code retour 1) sur un fichier propre : mécanisme de détection par hash prouvé de bout en bout, **sans utiliser le texte EICAR** (systématiquement supprimé par l'antivirus de la machine hôte à chaque écriture sur disque, y compris avec une exclusion Windows Defender ciblée — signal fort que la détection fonctionne, mais rendant ce test précis impraticable sur cet hôte).
 - Déployé sur la clé physique : `E:\Portable\ClamAV-Windows\` (~103 Mo, dossier `db\` vide).
 
+### Corrigé (après retour terrain — ISO pas reconstruite la première fois)
+Premier déploiement incomplet : le paquet ClamAV avait été copié dans `Portable\`, mais **l'ISO WinPE elle-même
+n'avait pas été reconstruite** — la clé démarrait donc encore sur l'ancien menu (1 à 18, sans l'option 19).
+Reconstruite (`SHA-256 DCBC5010A194BF4ABFD88E5B42395748CA20A7F7494A5118C463EC11903E0D62`) et **confirmé** que l'option
+19 et `:av_scan` sont bien dans `startnet.cmd` de cette ISO (montage DISM en lecture seule). Déployée sur
+`E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso` ; ancienne ISO gardée en secours : `...amd64.iso.bak-v8-20260922`.
+
 ### Non vérifié
 - **`db\` est vide sur la clé** : `database.clamav.net` n'est pas joignable depuis cette session (403, y compris via un chemin qui atteint bien github.com) — les signatures (~300 Mo) doivent être récupérées **une fois, avec un vrai accès Internet** (au bureau, pas forcément sur le terrain) via `E:\Portable\ClamAV-Windows\sonar-freshclam.cmd`, avant que l'option 19/l'étape « virus » de l'assistant ne servent à quelque chose (sinon message clair, refus propre — pas un scan vide silencieux).
 - Pas de test EICAR réel (voir ci-dessus) ni de test sur un fichier réellement infecté : la détection est prouvée par un hash personnalisé, pas par un cas réel de la base ClamAV.
-- Pas encore de boot réel sur le HP EliteBook 840 G3 avec cette version (VM seulement).
+- Pas encore de boot réel sur le HP EliteBook 840 G3 avec cette ISO reconstruite (VM seulement pour le menu/l'option 19 ; vu sur vrai matériel que l'ancienne ISO, sans l'option, démarrait bien).
 - Les autres outils déjà catalogués mais pas encore sur cette clé (HWiNFO, Dism++, BleachBit, Snappy Driver Installer, DriverStoreExplorer, BatteryInfoView, IsMyLcdOK, Memtest86+, chntpw) restent à récupérer avec `--fetch` si l'opérateur les veut — hors périmètre de cette entrée, qui ne traite que l'antivirus explicitement demandé.
 
 ### Comment tester
