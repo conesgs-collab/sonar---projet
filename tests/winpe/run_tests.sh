@@ -45,6 +45,9 @@ check "WinPE build : outils portables (option 15) en liste NUMEROTEE, plus de ch
 # lances sans etre positionnes dans LEUR propre dossier (start herite sinon de X:\Windows\System32) - trouve
 # sur materiel reel (fenetre visible puis fermeture immediate), 2026-09-22.
 check "WinPE build : outils portables (option 15) lances depuis LEUR propre dossier (start /D), pas X:\\Windows\\System32" 'grep -q "start \`\"\`\" /D \`\"%TDIR%\`\" \`\"%TPATH%\`\"" "$PS1" && grep -q "set \`\"TDIR=%%~dpd\`\"" "$PS1"'
+# WinPE-WMI (paquet) ne demarre pas tout seul le service winmgmt au boot - trouve sur materiel reel : CrystalDiskInfo
+# etc. echouaient silencieusement ("Disk Not Found") meme avec un vrai disque, faute de service WMI actif.
+check "WinPE build : service WMI demarre explicitement au boot (net start winmgmt), pas seulement le paquet installe" 'grep -q "net start winmgmt" "$PS1"'
 check "WinPE build : image systeme DISM (option 20) capture ET restaure, confirmation avant ecrasement" 'grep -q "if \`\"%choix%\`\"==\`\"20\`\" goto clone_menu" "$PS1" && grep -q "Dism /Capture-Image" "$PS1" && grep -q "Dism /Apply-Image" "$PS1" && grep -q "sera REMPLACE" "$PS1" && grep -q "Clonezilla" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
