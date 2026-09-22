@@ -29,9 +29,21 @@ Reconstruite (`SHA-256 DCBC5010A194BF4ABFD88E5B42395748CA20A7F7494A5118C463EC119
 19 et `:av_scan` sont bien dans `startnet.cmd` de cette ISO (montage DISM en lecture seule). Déployée sur
 `E:\ISO\WinPE\SONAR-SE-WinPE-amd64.iso` ; ancienne ISO gardée en secours : `...amd64.iso.bak-v8-20260922`.
 
+### Corrigé — signatures déployées
+`database.clamav.net` est derrière une protection anti-bot Cloudflare qui bloque en boucle toute requête automatisée
+(confirmé avec `curl`, `Invoke-WebRequest` et un navigateur piloté par automatisation — même la page d'accueil finit
+par passer, mais le fichier `.cvd` lui-même redéclenche un défi qui ne se résout jamais) : aucun outil disponible
+dans cette session ne peut récupérer ces fichiers. Récupérés par l'opérateur via son propre navigateur (contournement
+légitime : navigation humaine normale, pas d'automatisation), puis déposés par Claude dans `Downloads` →
+`E:\Portable\ClamAV-Windows\db\` : `main.cvd` (89 Mo, 16 déc 2025), `daily.cvd` (22 Mo, **21 sept 2026** — à jour),
+`bytecode.cvd` (275 Ko). En-têtes `ClamAV-VDB:` vérifiés (pas des pages d'erreur), et `clamscan.exe -d db --version`
+confirme le chargement (`ClamAV 1.5.4/28130/...`, 28130 = version de `daily.cvd`). L'option 19/l'étape « virus » de
+l'assistant sont donc opérationnelles sur la clé dès maintenant — plus besoin de `sonar-freshclam.cmd` pour un
+premier usage (utile plus tard pour les mises à jour).
+
 ### Non vérifié
-- **`db\` est vide sur la clé** : `database.clamav.net` n'est pas joignable depuis cette session (403, y compris via un chemin qui atteint bien github.com) — les signatures (~300 Mo) doivent être récupérées **une fois, avec un vrai accès Internet** (au bureau, pas forcément sur le terrain) via `E:\Portable\ClamAV-Windows\sonar-freshclam.cmd`, avant que l'option 19/l'étape « virus » de l'assistant ne servent à quelque chose (sinon message clair, refus propre — pas un scan vide silencieux).
-- Pas de test EICAR réel (voir ci-dessus) ni de test sur un fichier réellement infecté : la détection est prouvée par un hash personnalisé, pas par un cas réel de la base ClamAV.
+- Pas de test EICAR réel (voir plus haut) ni de test sur un fichier réellement infecté : la détection est prouvée par un hash personnalisé, pas par un cas réel de la base ClamAV.
+- Les signatures se périment (ClamAV les considère obsolètes après ~7 jours sans mise à jour et peut refuser de charger `main.cvd`/`daily.cvd`) : penser à relancer `sonar-freshclam.cmd` (ou refaire ce téléchargement manuel) périodiquement.
 - Pas encore de boot réel sur le HP EliteBook 840 G3 avec cette ISO reconstruite (VM seulement pour le menu/l'option 19 ; vu sur vrai matériel que l'ancienne ISO, sans l'option, démarrait bien).
 - Les autres outils déjà catalogués mais pas encore sur cette clé (HWiNFO, Dism++, BleachBit, Snappy Driver Installer, DriverStoreExplorer, BatteryInfoView, IsMyLcdOK, Memtest86+, chntpw) restent à récupérer avec `--fetch` si l'opérateur les veut — hors périmètre de cette entrée, qui ne traite que l'antivirus explicitement demandé.
 
