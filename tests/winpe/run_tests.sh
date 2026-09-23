@@ -77,7 +77,13 @@ check "WinPE build : la grille PIN hache le PIN sans retour a la ligne (Get-File
 check "WinPE build : la grille PIN refuse l'acces (pas d'ouverture silencieuse) si PowerShell est absent pour hacher le PIN" \
     'grep -q "WindowsPowerShell\\\\v1.0\\\\powershell.exe.*grille PIN configuree sur cette cle mais PowerShell absent.*wpeutil reboot" "$PS1"'
 check "WinPE build : la grille PIN recherche la ligne correspondante EN POWERSHELL (pas via for/f + if de cmd.exe, dont la comparaison s'est averee peu fiable en VM)" \
-    'grep -q "Get-Content -LiteralPath .%KEY%.MANIFEST.FIELD_PINS.tsv" "$PS1" && grep -q "f = ._.Split(\[char\]9)" "$PS1" && grep -q "f\[1\] -eq .h" "$PS1"'
+    'grep -q "Get-Content -LiteralPath .%KEY%.MANIFEST.FIELD_PINS.tsv" "$PS1" && grep -q "f = .._.Split(\[char\]9)" "$PS1" && grep -q "f\[1\] -eq ..h" "$PS1"'
+# Meme classe de bug que $t (option 22, corrige plus tot cette session) retrouvee dans CE MEME fichier :
+# $h/$f/$_ non echappes dans cette ligne PowerShell se sont fait interpoler (donc effacer) au moment de
+# CONSTRUIRE startnet.cmd, laissant "if (.Length -ge 3 -and [1] -eq )" cote a cote sans aucun $ - trouve
+# en VM (PIN correct rejete malgre un hash prouve identique par ailleurs), 2026-09-23.
+check "WinPE build : les variables PowerShell \$h/\$f/\$_ de la grille PIN sont echappees dans la source (pas interpolees a la construction du .ps1)" \
+    'grep -q "\`\$h=(Get-FileHash" "$PS1" && grep -q "\`\$f = \`\$_.Split" "$PS1" && grep -q "\`\$f.Length -ge 3 -and \`\$f\[1\] -eq \`\$h" "$PS1"'
 check "WinPE build : la grille PIN refuse l'acces si aucune ligne ne correspond (fichiers de sortie PowerShell absents => NIVEAU jamais defini => pin_bad)" \
     'grep -q "if exist X:.sonar_niveau.txt set /p NIVEAU=<X:.sonar_niveau.txt" "$PS1" && grep -q "\"set NIVEAU=\"" "$PS1"'
 check "WinPE build : la grille PIN nettoie ses fichiers temporaires de correspondance AVANT chaque nouvelle tentative (pas de resultat perime d'un essai precedent)" \

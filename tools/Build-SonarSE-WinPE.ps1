@@ -960,7 +960,7 @@ if ($AddRepairMenu) {
         "rem contourne plutot que traque plus loin). PowerShell ecrit deux fichiers texte simples (niveau,"
         "rem profils) UNIQUEMENT si une ligne correspond - aucun des deux n'existe sinon, ce qui suffit a"
         "rem garder le comportement ferme (echec de hachage/lecture => rien a lire => acces refuse)."
-        "powershell -NoProfile -Command `"$h=(Get-FileHash -Algorithm SHA256 -LiteralPath 'X:\sonar_pin.tmp').Hash.ToLower(); Get-Content -LiteralPath '%KEY%\MANIFEST\FIELD_PINS.tsv' | ForEach-Object { $f = $_.Split([char]9); if ($f.Length -ge 3 -and $f[1] -eq $h) { $f[0] | Out-File X:\sonar_niveau.txt -Encoding ascii -NoNewline; $f[2] | Out-File X:\sonar_profils.txt -Encoding ascii -NoNewline } }`" 2>nul"
+        "powershell -NoProfile -Command `"`$h=(Get-FileHash -Algorithm SHA256 -LiteralPath 'X:\sonar_pin.tmp').Hash.ToLower(); Get-Content -LiteralPath '%KEY%\MANIFEST\FIELD_PINS.tsv' | ForEach-Object { `$f = `$_.Split([char]9); if (`$f.Length -ge 3 -and `$f[1] -eq `$h) { `$f[0] | Out-File X:\sonar_niveau.txt -Encoding ascii -NoNewline; `$f[2] | Out-File X:\sonar_profils.txt -Encoding ascii -NoNewline } }`" 2>nul"
         "del /q X:\sonar_pin.tmp >nul 2>nul"
         "set NIVEAU="
         "set PROFILS="
