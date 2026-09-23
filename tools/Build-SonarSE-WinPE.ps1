@@ -763,7 +763,7 @@ if ($AddRepairMenu) {
         "rem PowerShell present - ce module n'est pas un composant ADK disponible (verifie sur materiel"
         "rem reel, 2026-09-23 : 'Get-Tpm : The term Get-Tpm is not recognized'). Win32_Tpm (WMI) est"
         "rem alimente par le pilote TBS de base, deja present dans WinPE - fonctionne sans ce module."
-        "powershell -NoProfile -Command `"$t = Get-CimInstance -Namespace root\cimv2\Security\MicrosoftTpm -ClassName Win32_Tpm -ErrorAction SilentlyContinue; if ($t) { $t | Format-List IsEnabled_InitialValue,IsActivated_InitialValue,IsOwned_InitialValue,SpecVersion } else { Write-Host 'Aucun TPM detecte (absent, desactive dans le BIOS/UEFI, ou pilote non charge).' }`""
+        "powershell -NoProfile -Command `"`$t = Get-CimInstance -Namespace root\cimv2\Security\MicrosoftTpm -ClassName Win32_Tpm -ErrorAction SilentlyContinue; if (`$t) { `$t | Format-List IsEnabled_InitialValue,IsActivated_InitialValue,IsOwned_InitialValue,SpecVersion } else { Write-Host 'Aucun TPM detecte (absent, desactive dans le BIOS/UEFI, ou pilote non charge).' }`""
         "echo."
         "echo TpmPresent=True et TpmEnabled=True est necessaire pour Windows 11 (TPM active dans le"
         "echo BIOS/UEFI si absent). La version du firmware TPM doit etre 2.0 (verifiable aussi dans"

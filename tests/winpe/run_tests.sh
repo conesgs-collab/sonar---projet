@@ -54,6 +54,11 @@ check "WinPE build : outils 32 bits sans alternative 64 bits (h2testw/bleachbit/
 check "WinPE build : image systeme DISM (option 20) capture ET restaure, confirmation avant ecrasement" 'grep -q "if \`\"%choix%\`\"==\`\"20\`\" goto clone_menu" "$PS1" && grep -q "Dism /Capture-Image" "$PS1" && grep -q "Dism /Apply-Image" "$PS1" && grep -q "sera REMPLACE" "$PS1" && grep -q "Clonezilla" "$PS1"'
 check "WinPE build : verification disque (option 21) demande une lettre et lance chkdsk /f /r" 'grep -q "if \`\"%choix%\`\"==\`\"21\`\" goto chkdsk_menu" "$PS1" && grep -q "\":chkdsk_menu\"" "$PS1" && grep -q "chkdsk %lettre%: /f /r" "$PS1"'
 check "WinPE build : verification TPM (option 22) garde l'absence de powershell.exe et interroge Win32_Tpm par WMI (pas Get-Tpm, module absent de WinPE)" 'grep -q "if \`\"%choix%\`\"==\`\"22\`\" goto tpm_check" "$PS1" && grep -q "\":tpm_check\"" "$PS1" && grep -q "Win32_Tpm" "$PS1" && grep -q "root.cimv2.Security.MicrosoftTpm" "$PS1" && ! grep -q "Get-Tpm | Format-List" "$PS1" && grep -q "WindowsPowerShell\\\\v1.0\\\\powershell.exe" "$PS1"'
+# `$t` doit etre ECHAPPE (backtick-dollar) dans la source PS1, sinon PowerShell l'interpole au moment
+# de CONSTRUIRE startnet.cmd (variable $t non definie dans le script de build -> chaine vide) et
+# "if ($t)" devient "if ()" dans le menu genere - trouve en VM, 2026-09-23 (PowerShell ParserError
+# "Missing condition in if statement after 'if ('").
+check "WinPE build : la variable \$t du controle TPM est echappee dans la source (pas interpolee a la construction du .ps1)" 'grep -q "if (\`\$t)" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
 # doit etre precede d'un "set var=" pour qu'un Entree vide soit bien vu comme vide, sinon une confirmation ou un
