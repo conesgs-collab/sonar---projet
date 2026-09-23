@@ -6,6 +6,93 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [3.56.0-winpe-field-pin-tools] — 2026-09-23
+
+### Contexte
+Suite de session : audit "y a-t-il d'autres bugs / outils manquants ?", puis instruction explicite de l'utilisateur
+de tout implémenter sans s'arrêter à chaque étape pour confirmation. Plus tard dans la session, une liste de
+10 outils candidats "priorité HAUTE" a été soumise (générée par un autre assistant IA, DeepSeek) — vérifiée en
+direct plutôt qu'intégrée telle quelle (voir "Écarté" ci-dessous).
+
+### Ajouté
+- **Option 10 (réseau) : réinitialisation Winsock/TCP-IP native** — `netsh winsock reset`, `netsh int ip reset`,
+  `ipconfig /release /renew /flushdns`, sans dépendance tierce. NetAdapter Repair All In One (candidat initial)
+  écarté : son contact officiel SourceForge pointe vers un domaine associé à un collectif de piratage.
+- **Option 13 : création d'ESP from scratch** — jusqu'ici la réparation UEFI ne savait que RÉPARER une ESP déjà
+  présente. Nouveau choix `C` (aucune ESP visible, en créer une) : partition EFI 100 Mo FAT32 via diskpart puis
+  `bcdboot`. Comble un vrai cas rencontré plus tôt dans le projet (diagnostic HP EliteBook sans partition système
+  EFI).
+- **Grille PIN technicien côté WinPE (`:pin_gate`)** — parité avec SONAR Field côté Linux : même fichier
+  `MANIFEST\FIELD_PINS.tsv`, 3 tentatives puis redémarrage, journal d'accès horodaté
+  (`Field-Logs\winpe_access.log`, `ACCES_ACCORDE`/`VERROUILLAGE`). Écran clairement AVERTI que la saisie reste
+  visible (cmd.exe pur ne sait pas masquer une frappe). Échec fermé si PowerShell absent de l'image.
+  **NON VÉRIFIÉ FONCTIONNEL EN VM À CE JOUR** — voir "Connu cassé" ci-dessous, débogage en cours.
+- **MiniTool Partition Wizard Free (Portable)** et **Bulk Crap Uninstaller** ajoutés au profil `boot-repair`
+  (voir manifeste `--fetch` pour la justification/provenance détaillée de chacun). Geek Uninstaller et NetAdapter
+  Repair évalués et écartés (licence "usage personnel uniquement" pour le premier, provenance douteuse pour le
+  second).
+- **NWinfo** (profil `hardware-diagnostic`) — visionneuse matérielle légère (C pur, domaine public), comble le
+  créneau "vieux systèmes" (XP+) que HWiNFO/CrystalDiskInfo ne visent pas spécifiquement.
+- **androidqf** (profil `peripherals-network`) — acquisition forensique structurée Android (Security Lab
+  d'Amnesty International), complémentaire à Android Platform Tools déjà présent.
+- **Rescuezilla** (profil `disk-clone`) — clonage/restauration disque en interface graphique, alternative
+  accessible à Clonezilla (ligne de commande). Fork de Clonezilla, formats d'image compatibles entre les deux.
+- **Super Grub2 Disk** (profil `boot-repair`) — outil de dernier recours : démarre un système existant malgré un
+  bootloader cassé, quand aucune réparation immédiate n'est possible.
+- Les 4 outils ci-dessus vérifiés en direct cette session (pas de confiance aveugle dans la liste DeepSeek
+  soumise, qui admettait elle-même ne rien avoir vérifié) : dépôt/URL réels, licence lue dans le fichier LICENSE
+  brut (pas seulement affichée par GitHub), SHA-256 recalculé localement après téléchargement HTTPS direct — voir
+  le manifeste `--fetch` pour le détail par outil, y compris le recoupement MD5 via le flux RSS officiel
+  SourceForge pour Super Grub2 Disk (SourceForge sert une page HTML de sélection de miroir plutôt que le fichier
+  binaire direct à un client "navigateur" ; contournable en se présentant comme `curl` plutôt que Chrome/Firefox).
+
+### Écarté (liste DeepSeek, vérifié puis rejeté)
+- **ext4magic** — projet officiellement abandonné, la page SourceForge elle-même déconseille son usage ("will no
+  longer work correctly" avec les versions récentes d'e2fsprogs).
+- **SPECS (System Insight)** — dépôt créé le jour-même de sa découverte, 1 star/0 fork, aucun historique,
+  exécutable non signé : aucune traçabilité communautaire, à réévaluer si le projet mûrit.
+- **Foremost, KicomAV, MX Boot Repair, IPED** — légitimes mais mis en réserve (site amont à l'abandon pour
+  Foremost, pas de binaire portable Windows pour KicomAV [nécessite `pip install`], compatibilité SystemRescue/
+  Arch non confirmée pour MX Boot Repair [conçu pour Debian/`update-grub`], dépendance JVM non confirmée pour
+  IPED) — pas ajoutés tant que ces réserves ne sont pas levées.
+
+### Corrigé
+- **Manifeste `--fetch`, ligne Dr.Web LiveDisk** : colonne `SIG_TYPE` disait à tort `md5` pour une valeur qui est
+  en réalité un SHA-256 (64 caractères hexadécimaux, recalculé cette session : concorde exactement). Erreur
+  d'étiquetage d'une session précédente, jamais le fichier lui-même.
+
+### Connu cassé / en cours
+- **Grille PIN technicien WinPE : toujours NON FONCTIONNELLE après deux corrections successives.**
+  1. Première implémentation (comparaison `for /f` + `if /i` en cmd.exe pur) : un PIN prouvé correct était
+     rejeté. Diagnostic instrumenté a montré deux chaînes de 64 caractères strictement identiques (confirmé par
+     une comparaison PowerShell indépendante `-eq` → `True`) que cmd.exe refusait pourtant de faire matcher —
+     cause jamais identifiée avec certitude.
+  2. Réécrite en confiant hachage ET comparaison à un seul appel PowerShell (cmd.exe ne fait plus que lire des
+     fichiers texte simples écrits par PowerShell). Échouait ENCORE, identiquement. Cause trouvée par extraction
+     directe du `startnet.cmd` réellement déployé dans l'ISO (pas confiance dans la source `.ps1`) : les variables
+     PowerShell `$h`/`$f`/`$_` non échappées dans le script de build s'étaient fait interpoler (donc effacer,
+     n'étant définies nulle part dans ce scope) au moment de CONSTRUIRE `startnet.cmd` — exactement le même bug
+     que `$t` déjà corrigé plus tôt cette session (option 22, TPM). Corrigé en échappant chaque `$` (backtick-
+     dollar), vérifié par simulation de l'interpolation avant chaque reconstruction.
+  3. **Avec ce correctif appliqué et vérifié déployé (tous les `$` confirmés présents dans le `startnet.cmd`
+     extrait), un test VM en direct montre le PIN correct "1234" TOUJOURS rejeté.** Débogage instrumenté (sorties
+     `echo`/`Out-File` ajoutées directement dans le script shippé, pas de supposition) a confirmé : le fichier
+     temporaire contient exactement les 4 octets ASCII attendus (`31 32 33 34`), le hash calculé correspond
+     EXACTEMENT à la valeur attendue et à la valeur stockée dans `FIELD_PINS.tsv` (`03ac674216f3e15c…`, 64
+     caractères des deux côtés), et la ligne du TSV est lue avec les bonnes colonnes (`f0=Technicien-Test`,
+     `f1`=le hash, longueur 64). Un test d'égalité PowerShell explicite (`$f[1] -eq $h`), exécuté avec le même
+     motif exact que le code de production, est en cours de vérification (build `SONAR-SE-WinPE-debug7.iso`,
+     test VM interrompu par ce commit — voir session suivante pour le résultat). **NE PAS DÉPLOYER la grille PIN
+     sur la clé réelle tant que ce test n'a pas confirmé un accès accordé.** La clé réelle (`E:\ISO\WinPE\
+     SONAR-SE-WinPE-amd64.iso`) reste à la version antérieure à cette fonctionnalité, non affectée par ce bug.
+- Rescuezilla et Super Grub2 Disk : SHA-256 vérifié localement, **boot réel NON testé** en VM ou sur matériel à
+  ce jour (contrairement à la discipline habituelle de ce projet — à faire avant tout déploiement sur la clé
+  réelle).
+
+### Non vérifié
+- Tout ce qui précède sous "Connu cassé" reste non fonctionnel sur la clé réelle — aucun déploiement de cette
+  session n'a encore touché `E:\`.
+
 ## [3.55.0-winpe-tools-clone-drweb] — 2026-09-22
 
 ### Contexte
