@@ -89,6 +89,19 @@ for _v in tchoix cchoix clettre cimg cible espvol inf rep go confirm choix lettr
     check "WinPE build : CHAQUE 'set /p ${_v}=' (toutes occurrences) est precede d'un 'set ${_v}=' (Entree vide ne doit pas rejouer l'ancienne valeur)" \
         "_ok=1; for _ln in \$(grep -n \"set /p ${_v}=\" \"\$PS1\" | cut -d: -f1); do _prev=\$(sed -n \"\$((_ln-1))p\" \"\$PS1\"); echo \"\$_prev\" | grep -q \"\\\"set ${_v}=\\\"\" || _ok=0; done; [ \"\$_ok\" = 1 ]"
 done
+# Reinitialisation reseau (option 10) : binaires natifs WinPE uniquement (netsh/ipconfig), pas d'outil
+# tiers (NetAdapter Repair evalue et ecarte cette session pour provenance douteuse).
+check "WinPE build : reinitialisation reseau (option 10) utilise netsh/ipconfig natifs, pas d'outil tiers" \
+    'grep -q "netsh winsock reset" "$PS1" && grep -q "netsh int ip reset" "$PS1" && grep -q "ipconfig /flushdns" "$PS1" && grep -q "set netrst=" "$PS1"'
+# Creation d'ESP depuis zero (option 13) : bootrec/bcdboot supposent tous deux une ESP existante, aucun
+# ne sait en creer une absente (constat sur le HP EliteBook de test, diagnostic intelligent option 12).
+check "WinPE build : reparation UEFI (option 13) propose de CREER une ESP absente (pas seulement en reparer une existante)" \
+    'grep -q "\":uefi_create_esp\"" "$PS1" && grep -q "if /i \`\"%espvol%\`\"==\`\"C\`\" goto uefi_create_esp" "$PS1" && grep -q "create partition efi size=100" "$PS1" && grep -q "format quick fs=fat32" "$PS1"'
+# Journal d'acces de la grille PIN (Field-Logs\winpe_access.log) : symetrie avec audit.log cote Linux,
+# absent avant cette session malgre l'ajout de la grille elle-meme.
+check "WinPE build : la grille PIN journalise chaque acces accorde ET chaque verrouillage sur la cle (Field-Logs\\\\winpe_access.log)" \
+    'grep -q "winpe_access.log" "$PS1" && grep -q "ACCES_ACCORDE" "$PS1" && grep -q "VERROUILLAGE" "$PS1"'
+
 # l'assistant lui-meme (etapes proposees, refus par defaut, cle BitLocker jamais journalisee) : suite dediee
 _ao="$(bash "${DIR}/run_assistant_tests.sh" 2>&1)"; _arc=$?
 printf '%s\n' "$_ao"
