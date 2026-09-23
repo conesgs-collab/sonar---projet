@@ -66,16 +66,24 @@ check "WinPE build : la grille PIN existe, est appelee avant le choix assistant/
     'grep -q "call :pin_gate" "$PS1" && grep -q "\":pin_gate\"" "$PS1" && grep -q "if not exist ..%KEY%.MANIFEST.FIELD_PINS.tsv.. exit /b 0" "$PS1"'
 check "WinPE build : la grille PIN precede bien :start dans le fichier (gate avant l'entree, pas apres)" \
     '_l1=$(grep -n "call :pin_gate" "$PS1" | head -1 | cut -d: -f1); _l2=$(grep -n "\":start\"" "$PS1" | head -1 | cut -d: -f1); [ -n "$_l1" ] && [ -n "$_l2" ] && [ "$_l1" -lt "$_l2" ]'
+# Le matching (hash + recherche de la ligne dans FIELD_PINS.tsv) est fait ENTIEREMENT en PowerShell,
+# pas via for/f + if de cmd.exe : cette derniere approche, bien que syntaxiquement correcte (usebackq,
+# delims=tab), s'est averee ne PAS matcher deux chaines de 64 caracteres pourtant identiques une fois
+# testee reellement en VM (confirme par une comparaison PowerShell -eq independante renvoyant True sur
+# les 2 memes valeurs juste a cote) - cause exacte jamais identifiee, contournee plutot que traquee plus
+# loin. Lecon : meme un mecanisme qui semble correct sur le papier doit etre verifie par execution reelle.
 check "WinPE build : la grille PIN hache le PIN sans retour a la ligne (Get-FileHash PowerShell sur fichier ecrit via set /p), pour matcher sonar_hash_str (printf %s, pas echo)" \
     'grep -q "<nul set /p" "$PS1" && grep -q "Get-FileHash -Algorithm SHA256 -LiteralPath" "$PS1" && ! grep -q "certutil -hashfile X:" "$PS1"'
 check "WinPE build : la grille PIN refuse l'acces (pas d'ouverture silencieuse) si PowerShell est absent pour hacher le PIN" \
     'grep -q "WindowsPowerShell\\\\v1.0\\\\powershell.exe.*grille PIN configuree sur cette cle mais PowerShell absent.*wpeutil reboot" "$PS1"'
-check "WinPE build : la grille PIN refuse l'acces si le hachage echoue (PINHASH vide ne doit jamais matcher une colonne vide de FIELD_PINS.tsv)" \
-    'grep -q "if not defined PINHASH goto pin_bad" "$PS1"'
-check "WinPE build : la grille PIN lit FIELD_PINS.tsv comme un FICHIER (usebackq), pas comme une chaine litterale a parser (bug qui accordait l'acces avec un hash vide, trouve en VM)" \
-    'grep -q "usebackq tokens=1,2,3 delims=.t" "$PS1"'
-check "WinPE build : la grille PIN scinde FIELD_PINS.tsv sur des tabulations (meme format que --field-pin-set) et verrouille apres 3 essais par un redemarrage" \
-    'grep -q "delims=.t" "$PS1" && grep -q "if %PINTRY% LEQ 3 goto pin_try" "$PS1" && grep -q "wpeutil reboot" "$PS1"'
+check "WinPE build : la grille PIN recherche la ligne correspondante EN POWERSHELL (pas via for/f + if de cmd.exe, dont la comparaison s'est averee peu fiable en VM)" \
+    'grep -q "Get-Content -LiteralPath .%KEY%.MANIFEST.FIELD_PINS.tsv" "$PS1" && grep -q "f = ._.Split(\[char\]9)" "$PS1" && grep -q "f\[1\] -eq .h" "$PS1"'
+check "WinPE build : la grille PIN refuse l'acces si aucune ligne ne correspond (fichiers de sortie PowerShell absents => NIVEAU jamais defini => pin_bad)" \
+    'grep -q "if exist X:.sonar_niveau.txt set /p NIVEAU=<X:.sonar_niveau.txt" "$PS1" && grep -q "\"set NIVEAU=\"" "$PS1"'
+check "WinPE build : la grille PIN nettoie ses fichiers temporaires de correspondance AVANT chaque nouvelle tentative (pas de resultat perime d'un essai precedent)" \
+    'grep -q "del /q X:.sonar_niveau.txt X:.sonar_profils.txt" "$PS1"'
+check "WinPE build : la grille PIN verrouille apres 3 essais par un redemarrage" \
+    'grep -q "if %PINTRY% LEQ 3 goto pin_try" "$PS1" && grep -q "wpeutil reboot" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
 # doit etre precede d'un "set var=" pour qu'un Entree vide soit bien vu comme vide, sinon une confirmation ou un
