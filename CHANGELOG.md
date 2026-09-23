@@ -6,6 +6,41 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [1.0.0] — 2026-09-23
+
+### Contexte
+Premier tag stable du projet. Jusqu'ici la numérotation interne 3.x (héritée d'itérations antérieures) montait
+à un rythme quasi quotidien, parfois plusieurs fois par jour — utile pour tracer chaque changement, mais plus
+adaptée à un historique de développement qu'à une version publique. Repart sur `1.0.0` maintenant que trois
+conditions sont réunies le même jour : (1) le dépôt a enfin un remote GitHub distant
+(`github.com/conesgs-collab/sonar---projet`, public), (2) la CI (`.github/workflows/ci.yml`, écrite il y a
+plusieurs sessions mais jamais exécutée faute de remote) tourne réellement et passe au vert, (3) le bug le plus
+ancien et le plus tenace du projet (la grille PIN WinPE, quatre causes racines distinctes) est enfin corrigé et
+vérifié. La numérotation interne 3.x n'est pas reniée — tout son historique reste dans ce fichier — mais elle
+n'est plus la référence publique à partir d'ici.
+
+### Ajouté
+- **Dépôt distant GitHub** : `origin` configuré, push initial effectué (121 commits, historique complet
+  conservé). Public — `Secure/` (Vault, hash de PIN, secrets de rôle/watermark) confirmé absent du dépôt
+  (`.gitignore` déjà correct, aucun fichier sensible n'a jamais été suivi par git).
+- **CI activée et vérifiée verte** : premier run (`#1`, commit `829ae27`) a immédiatement révélé un vrai bug de
+  configuration CI resté invisible jusque-là faute d'exécution — voir "Corrigé".
+
+### Corrigé
+- **`.github/workflows/ci.yml`, étape `--disk --dry-run` sur périphérique loop** : échouait systématiquement
+  (`ERREUR FATALE: Executer avec sudo/root.`) — seuls les appels `losetup` du step étaient préfixés `sudo`, pas
+  l'invocation de `sonar_master.sh` elle-même, qui s'exécutait donc en utilisateur non privilégié du runner et
+  se faisait refuser par son propre contrôle root. Invisible en reproduction locale (testée via `wsl -u root`,
+  déjà root de bout en bout, donc le `sudo` manquant ne changeait rien). Corrigé en préfixant l'appel du script
+  par `sudo env VAR=valeur ...` (forme non ambiguë, indépendante de la configuration `env_reset` du sudoers du
+  runner). Run `#2` (commit `923b891`) : **Success**, 22s, seuls deux avertissements inoffensifs (dépréciation
+  Node.js 20 sur `actions/checkout@v4`, migration future de `ubuntu-latest` vers Ubuntu 26).
+
+### Non vérifié
+- Tout le reste de la session du 2026-09-23 (voir `[3.56.0-winpe-field-pin-tools]` ci-dessous pour le détail
+  complet) reste non testé sur matériel réel — la CI valide la structure/syntaxe/logique du script, pas un boot
+  physique sur l'EliteBook.
+
 ## [3.56.0-winpe-field-pin-tools] — 2026-09-23
 
 ### Contexte
