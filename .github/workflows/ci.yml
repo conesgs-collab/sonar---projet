@@ -32,7 +32,7 @@ jobs:
           mkdir -p "${SONAR_ROOT}/SONAR_SOURCE"/{ISO,Portable,Scripts,Drivers,macOS}
           truncate -s 200M "${RUNNER_TEMP}/disk.img"
           LOOPDEV=$(sudo losetup -f --show "${RUNNER_TEMP}/disk.img")
-          MIN_DISK_GIB=0 SONAR_ROOT="${SONAR_ROOT}" \
+          sudo env MIN_DISK_GIB=0 SONAR_ROOT="${SONAR_ROOT}" \
             ./sonar_master.sh --disk "${LOOPDEV}" --dry-run \
             --source "${SONAR_ROOT}/SONAR_SOURCE" --yes
           sudo losetup -d "${LOOPDEV}"
