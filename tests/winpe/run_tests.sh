@@ -66,8 +66,14 @@ check "WinPE build : la grille PIN existe, est appelee avant le choix assistant/
     'grep -q "call :pin_gate" "$PS1" && grep -q "\":pin_gate\"" "$PS1" && grep -q "if not exist ..%KEY%.MANIFEST.FIELD_PINS.tsv.. exit /b 0" "$PS1"'
 check "WinPE build : la grille PIN precede bien :start dans le fichier (gate avant l'entree, pas apres)" \
     '_l1=$(grep -n "call :pin_gate" "$PS1" | head -1 | cut -d: -f1); _l2=$(grep -n "\":start\"" "$PS1" | head -1 | cut -d: -f1); [ -n "$_l1" ] && [ -n "$_l2" ] && [ "$_l1" -lt "$_l2" ]'
-check "WinPE build : la grille PIN hache le PIN sans retour a la ligne (certutil sur fichier ecrit via set /p), pour matcher sonar_hash_str (printf %s, pas echo)" \
-    'grep -q "<nul set /p" "$PS1" && grep -q "certutil -hashfile X:.sonar_pin.tmp SHA256" "$PS1"'
+check "WinPE build : la grille PIN hache le PIN sans retour a la ligne (Get-FileHash PowerShell sur fichier ecrit via set /p), pour matcher sonar_hash_str (printf %s, pas echo)" \
+    'grep -q "<nul set /p" "$PS1" && grep -q "Get-FileHash -Algorithm SHA256 -LiteralPath" "$PS1" && ! grep -q "certutil -hashfile X:" "$PS1"'
+check "WinPE build : la grille PIN refuse l'acces (pas d'ouverture silencieuse) si PowerShell est absent pour hacher le PIN" \
+    'grep -q "WindowsPowerShell\\\\v1.0\\\\powershell.exe.*grille PIN configuree sur cette cle mais PowerShell absent.*wpeutil reboot" "$PS1"'
+check "WinPE build : la grille PIN refuse l'acces si le hachage echoue (PINHASH vide ne doit jamais matcher une colonne vide de FIELD_PINS.tsv)" \
+    'grep -q "if not defined PINHASH goto pin_bad" "$PS1"'
+check "WinPE build : la grille PIN lit FIELD_PINS.tsv comme un FICHIER (usebackq), pas comme une chaine litterale a parser (bug qui accordait l'acces avec un hash vide, trouve en VM)" \
+    'grep -q "usebackq tokens=1,2,3 delims=.t" "$PS1"'
 check "WinPE build : la grille PIN scinde FIELD_PINS.tsv sur des tabulations (meme format que --field-pin-set) et verrouille apres 3 essais par un redemarrage" \
     'grep -q "delims=.t" "$PS1" && grep -q "if %PINTRY% LEQ 3 goto pin_try" "$PS1" && grep -q "wpeutil reboot" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
