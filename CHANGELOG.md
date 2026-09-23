@@ -26,7 +26,15 @@ direct plutôt qu'intégrée telle quelle (voir "Écarté" ci-dessous).
   `MANIFEST\FIELD_PINS.tsv`, 3 tentatives puis redémarrage, journal d'accès horodaté
   (`Field-Logs\winpe_access.log`, `ACCES_ACCORDE`/`VERROUILLAGE`). Écran clairement AVERTI que la saisie reste
   visible (cmd.exe pur ne sait pas masquer une frappe). Échec fermé si PowerShell absent de l'image.
-  **NON VÉRIFIÉ FONCTIONNEL EN VM À CE JOUR** — voir "Connu cassé" ci-dessous, débogage en cours.
+  **VÉRIFIÉ FONCTIONNEL EN VM cette session** (PIN correct → accès accordé, PIN incorrect → rejeté, 3 tentatives
+  → redémarrage) après un débogage en 4 étapes — voir "Corrigé" ci-dessous pour le détail complet.
+- **IPED** (fetchable via `--fetch`, hors profil — analyse forensique approfondie, en dehors du cadre non-destructif
+  habituel des profils SONAR), **Antivirus Live CD** (profil `malware`, alternative "boot puis scan" rapide),
+  **Ophcrack** (profil `password-reset`, cassage par tables arc-en-ciel, approche différente de chntpw),
+  **WereSync** (fetchable via `--fetch`, hors profil — clone incrémental Linux, nécessite python3 non garanti sur
+  SystemRescue), **Rizin** (fetchable via `--fetch`, hors profil — analyse binaire/reverse engineering, public
+  restreint) : 5 outils supplémentaires de la liste DeepSeek vérifiés en direct et ajoutés (voir manifeste
+  `--fetch` pour le détail de provenance de chacun).
 - **MiniTool Partition Wizard Free (Portable)** et **Bulk Crap Uninstaller** ajoutés au profil `boot-repair`
   (voir manifeste `--fetch` pour la justification/provenance détaillée de chacun). Geek Uninstaller et NetAdapter
   Repair évalués et écartés (licence "usage personnel uniquement" pour le premier, provenance douteuse pour le
@@ -49,49 +57,77 @@ direct plutôt qu'intégrée telle quelle (voir "Écarté" ci-dessous).
 ### Écarté (liste DeepSeek, vérifié puis rejeté)
 - **ext4magic** — projet officiellement abandonné, la page SourceForge elle-même déconseille son usage ("will no
   longer work correctly" avec les versions récentes d'e2fsprogs).
-- **SPECS (System Insight)** — dépôt créé le jour-même de sa découverte, 1 star/0 fork, aucun historique,
-  exécutable non signé : aucune traçabilité communautaire, à réévaluer si le projet mûrit.
-- **Foremost, KicomAV, MX Boot Repair, IPED** — légitimes mais mis en réserve (site amont à l'abandon pour
-  Foremost, pas de binaire portable Windows pour KicomAV [nécessite `pip install`], compatibilité SystemRescue/
-  Arch non confirmée pour MX Boot Repair [conçu pour Debian/`update-grub`], dépendance JVM non confirmée pour
-  IPED) — pas ajoutés tant que ces réserves ne sont pas levées.
+- **SPECS (System Insight), SystemCheck, Boot Bitch** — même profil de risque : dépôt créé le jour-même ou les
+  jours précédant sa découverte, 0-1 star, aucun historique, exécutable non signé — aucune traçabilité
+  communautaire, à réévaluer si ces projets mûrissent.
+- **VanGuard** — URL fournie par la liste DeepSeek répond en 404 : dépôt inexistant (hallucination de la liste
+  source, jamais vérifiée par son auteur).
+- **Foremost, KicomAV, MX Boot Repair, Scalpel, John the Ripper, Blocksync-fast** — légitimes mais mis en
+  réserve, aucun n'a de binaire fetchable compatible avec le modèle `--fetch` (URL HTTP unique vérifiable) :
+  site amont à l'abandon pour Foremost, pas de binaire portable Windows pour KicomAV (nécessite `pip install`),
+  compatibilité SystemRescue/Arch non confirmée pour MX Boot Repair (conçu pour Debian/`update-grub`), aucune
+  release GitHub (code source uniquement) pour Scalpel/John the Ripper/Blocksync-fast — pas ajoutés tant que ces
+  réserves ne sont pas levées.
 
 ### Corrigé
 - **Manifeste `--fetch`, ligne Dr.Web LiveDisk** : colonne `SIG_TYPE` disait à tort `md5` pour une valeur qui est
   en réalité un SHA-256 (64 caractères hexadécimaux, recalculé cette session : concorde exactement). Erreur
   d'étiquetage d'une session précédente, jamais le fichier lui-même.
-
-### Connu cassé / en cours
-- **Grille PIN technicien WinPE : toujours NON FONCTIONNELLE après deux corrections successives.**
-  1. Première implémentation (comparaison `for /f` + `if /i` en cmd.exe pur) : un PIN prouvé correct était
-     rejeté. Diagnostic instrumenté a montré deux chaînes de 64 caractères strictement identiques (confirmé par
-     une comparaison PowerShell indépendante `-eq` → `True`) que cmd.exe refusait pourtant de faire matcher —
-     cause jamais identifiée avec certitude.
-  2. Réécrite en confiant hachage ET comparaison à un seul appel PowerShell (cmd.exe ne fait plus que lire des
-     fichiers texte simples écrits par PowerShell). Échouait ENCORE, identiquement. Cause trouvée par extraction
-     directe du `startnet.cmd` réellement déployé dans l'ISO (pas confiance dans la source `.ps1`) : les variables
-     PowerShell `$h`/`$f`/`$_` non échappées dans le script de build s'étaient fait interpoler (donc effacer,
-     n'étant définies nulle part dans ce scope) au moment de CONSTRUIRE `startnet.cmd` — exactement le même bug
-     que `$t` déjà corrigé plus tôt cette session (option 22, TPM). Corrigé en échappant chaque `$` (backtick-
-     dollar), vérifié par simulation de l'interpolation avant chaque reconstruction.
-  3. **Avec ce correctif appliqué et vérifié déployé (tous les `$` confirmés présents dans le `startnet.cmd`
-     extrait), un test VM en direct montre le PIN correct "1234" TOUJOURS rejeté.** Débogage instrumenté (sorties
-     `echo`/`Out-File` ajoutées directement dans le script shippé, pas de supposition) a confirmé : le fichier
-     temporaire contient exactement les 4 octets ASCII attendus (`31 32 33 34`), le hash calculé correspond
-     EXACTEMENT à la valeur attendue et à la valeur stockée dans `FIELD_PINS.tsv` (`03ac674216f3e15c…`, 64
-     caractères des deux côtés), et la ligne du TSV est lue avec les bonnes colonnes (`f0=Technicien-Test`,
-     `f1`=le hash, longueur 64). Un test d'égalité PowerShell explicite (`$f[1] -eq $h`), exécuté avec le même
-     motif exact que le code de production, est en cours de vérification (build `SONAR-SE-WinPE-debug7.iso`,
-     test VM interrompu par ce commit — voir session suivante pour le résultat). **NE PAS DÉPLOYER la grille PIN
-     sur la clé réelle tant que ce test n'a pas confirmé un accès accordé.** La clé réelle (`E:\ISO\WinPE\
-     SONAR-SE-WinPE-amd64.iso`) reste à la version antérieure à cette fonctionnalité, non affectée par ce bug.
+- **Manifeste `--fetch`, ligne WereSync** : une première version de cette ligne affirmait à tort une signature
+  GPG (.asc) sur le paquet `.deb` — en re-listant les assets de la release GitHub, seuls le tarball source et les
+  paquets Python (`.tar.gz`/`.whl`/`.egg`) ont un `.asc` associé, pas le `.deb`. Corrigé (`SIG_TYPE` → `none`).
+- **Grille PIN technicien WinPE : CORRIGÉE ET VÉRIFIÉE FONCTIONNELLE, après quatre bugs distincts trouvés et
+  corrigés successivement.** Résumé pour référence future (chaque étape a nécessité un rebuild + test VM complet
+  avant de découvrir le bug suivant, cause du temps que cette fonctionnalité a pris) :
+  1. **Comparaison cmd.exe `for /f` + `if /i`** : un PIN prouvé correct était rejeté. Diagnostic instrumenté a
+     montré deux chaînes de 64 caractères strictement identiques (confirmé par une comparaison PowerShell
+     indépendante `-eq` → `True`) que cmd.exe refusait pourtant de faire matcher — cause jamais identifiée avec
+     certitude, contournée en déplaçant hachage ET comparaison dans un seul appel PowerShell.
+  2. **Interpolation `$` au moment du build** : la réécriture PowerShell échouait ENCORE, identiquement. Cause
+     trouvée par extraction directe du `startnet.cmd` réellement déployé dans l'ISO (pas confiance dans la
+     source `.ps1`) : les variables PowerShell `$h`/`$f`/`$_`, non échappées dans le script de build, s'étaient
+     fait interpoler (donc effacer, n'étant définies nulle part dans ce scope) au moment de CONSTRUIRE
+     `startnet.cmd` — exactement le même bug que `$t` déjà corrigé plus tôt cette session (option 22, TPM).
+     Corrigé en échappant chaque `$` (backtick-dollar), vérifié par simulation de l'interpolation avant chaque
+     reconstruction — technique reprise pour chaque édition PowerShell ultérieure du fichier.
+  3. **`-NoNewline` cassait la lecture cmd.exe en aval** : même avec l'interpolation corrigée (tous les `$`
+     confirmés présents dans le `startnet.cmd` extrait), le PIN correct restait rejeté. Débogage instrumenté
+     (sorties `echo`/`Out-File` ajoutées directement dans le script shippé) a prouvé, dans l'ordre : le fichier
+     temporaire contient exactement les 4 octets ASCII attendus, le hash calculé correspond EXACTEMENT à la
+     valeur attendue ET à celle stockée dans `FIELD_PINS.tsv` (confirmé par dump hexadécimal caractère par
+     caractère des deux chaînes), la ligne du TSV est lue avec les bonnes colonnes, et `X:\sonar_niveau.txt` est
+     bien créé par le match — mais `cmd.exe`'s `set /p VAR=<fichier` ne peuplait quand même jamais la variable.
+     Cause : `Out-File -Encoding ascii -NoNewline` (ajouté pour éviter un retour à la ligne parasite dans la
+     valeur) produisait un fichier sans AUCUN terminateur de ligne, et `set /p VAR=<fichier` semble exiger au
+     moins un terminateur pour reconnaître une ligne à lire par redirection — sans lui, la lecture échoue
+     silencieusement (pas d'erreur, `VAR` reste simplement non définie). Corrigé en retirant `-NoNewline` (le
+     CRLF est naturellement consommé comme délimiteur par `set /p`, n'entre jamais dans la valeur de la
+     variable).
+  4. **Bloc `if defined NIVEAU (plusieurs commandes & imbriquées)` en une seule ligne** : dernier bug, le plus
+     surprenant. Avec le fix `-NoNewline` en place, le débogage a montré `NIVEAU=[Technicien-Test]
+     PROFILS=[ALL]` correctement peuplées juste avant le test — et pourtant `PIN incorrect` s'affichait quand
+     même immédiatement après. Cause jamais identifiée avec certitude (la ligne ne contenait pourtant aucune
+     parenthèse non échappée, déjà vérifié). Corrigé en abandonnant le bloc compact `if defined NIVEAU (set X &
+     if ... & echo ... & pause & exit /b 0)` au profit de lignes séparées (`if not defined NIVEAU goto pin_bad`
+     suivi d'une commande par ligne) — même convention qu'utilisée partout ailleurs dans ce fichier. **Testé et
+     confirmé fonctionnel en VM cette session** : PIN correct "1234" → `Acces accorde - niveau : Technicien-Test
+     (profils : ALL)` au premier essai ; PIN incorrect "0000" → `PIN incorrect`, compteur de tentatives
+     correctement incrémenté. Les deux chemins vérifiés sur un boot VM frais, pas de résidu d'un essai précédent.
+  **Leçon générale retenue** : dans ce fichier, préférer systématiquement une commande cmd.exe par ligne à un
+  bloc compact avec `&`/parenthèses imbriquées, même quand la syntaxe compacte semble correcte à la lecture —
+  au moins deux bugs distincts cette session (parenthèses non échappées lors d'une session précédente, ce
+  bloc `if defined` cette session) se sont manifestés dans exactement ce genre de ligne dense, sans qu'aucun
+  outil de diagnostic ne révèle la cause exacte à chaque fois.
 - Rescuezilla et Super Grub2 Disk : SHA-256 vérifié localement, **boot réel NON testé** en VM ou sur matériel à
   ce jour (contrairement à la discipline habituelle de ce projet — à faire avant tout déploiement sur la clé
   réelle).
 
 ### Non vérifié
-- Tout ce qui précède sous "Connu cassé" reste non fonctionnel sur la clé réelle — aucun déploiement de cette
-  session n'a encore touché `E:\`.
+- Rien de cette session (réinitialisation réseau, création ESP, grille PIN, nouveaux outils) n'a été testé sur
+  **matériel réel** — uniquement en VM. À re-confirmer sur l'EliteBook au prochain accès physique.
+- WereSync : SHA-256 vérifié, aucune signature amont disponible pour ce fichier (voir "Corrigé" ci-dessus).
+- IPED : archive déposée sur la clé (`E:\Portable\IPED\`, ~750 Mo) mais jamais extraite ni lancée — à valider
+  avant de la présenter comme utilisable.
 
 ## [3.55.0-winpe-tools-clone-drweb] — 2026-09-22
 
