@@ -59,6 +59,17 @@ check "WinPE build : verification TPM (option 22) garde l'absence de powershell.
 # "if ($t)" devient "if ()" dans le menu genere - trouve en VM, 2026-09-23 (PowerShell ParserError
 # "Missing condition in if statement after 'if ('").
 check "WinPE build : la variable \$t du controle TPM est echappee dans la source (pas interpolee a la construction du .ps1)" 'grep -q "if (\`\$t)" "$PS1"'
+# Grille d'acces PIN optionnelle (MANIFEST\FIELD_PINS.tsv, meme fichier que SONAR Field cote Linux, cree via
+# --field-pin-set) : absente par defaut (aucune regression sur une cle qui n'a jamais defini de PIN), gate
+# appelee AVANT le choix assistant/menu (pas apres, sinon contournable), verrouille apres 3 essais.
+check "WinPE build : la grille PIN existe, est appelee avant le choix assistant/menu, et reste sans effet si FIELD_PINS.tsv est absent" \
+    'grep -q "call :pin_gate" "$PS1" && grep -q "\":pin_gate\"" "$PS1" && grep -q "if not exist ..%KEY%.MANIFEST.FIELD_PINS.tsv.. exit /b 0" "$PS1"'
+check "WinPE build : la grille PIN precede bien :start dans le fichier (gate avant l'entree, pas apres)" \
+    '_l1=$(grep -n "call :pin_gate" "$PS1" | head -1 | cut -d: -f1); _l2=$(grep -n "\":start\"" "$PS1" | head -1 | cut -d: -f1); [ -n "$_l1" ] && [ -n "$_l2" ] && [ "$_l1" -lt "$_l2" ]'
+check "WinPE build : la grille PIN hache le PIN sans retour a la ligne (certutil sur fichier ecrit via set /p), pour matcher sonar_hash_str (printf %s, pas echo)" \
+    'grep -q "<nul set /p" "$PS1" && grep -q "certutil -hashfile X:.sonar_pin.tmp SHA256" "$PS1"'
+check "WinPE build : la grille PIN scinde FIELD_PINS.tsv sur des tabulations (meme format que --field-pin-set) et verrouille apres 3 essais par un redemarrage" \
+    'grep -q "delims=.t" "$PS1" && grep -q "if %PINTRY% LEQ 3 goto pin_try" "$PS1" && grep -q "wpeutil reboot" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
 # doit etre precede d'un "set var=" pour qu'un Entree vide soit bien vu comme vide, sinon une confirmation ou un
