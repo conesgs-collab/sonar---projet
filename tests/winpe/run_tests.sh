@@ -81,9 +81,13 @@ check "WinPE build : la grille PIN scinde FIELD_PINS.tsv sur des tabulations (me
 # doit etre precede d'un "set var=" pour qu'un Entree vide soit bien vu comme vide, sinon une confirmation ou un
 # choix precedents peuvent se rejouer silencieusement (decouvert sur tchoix/cchoix/clettre/cimg cette session,
 # puis retrouve preexistant sur cible/espvol/inf/rep/go/confirm en auditant tout le fichier pour le meme piege).
-for _v in tchoix cchoix clettre cimg cible espvol inf rep go confirm; do
-    check "WinPE build : set /p ${_v} est precede d'un 'set ${_v}=' (Entree vide ne doit pas rejouer l'ancienne valeur)" \
-        "grep -B1 \"set /p ${_v}=\" \"\$PS1\" | grep -q \"\\\"set ${_v}=\\\"\""
+# Verifie CHAQUE occurrence individuellement (pas juste "au moins une sur le fichier") : un grep -B1 +
+# grep -q global donnait un FAUX PASS des qu'UNE SEULE occurrence sur plusieurs avait son clear, meme si
+# d'autres occurrences de la meme variable (menu different) ne l'avaient pas - c'est exactement ce qui a
+# laisse passer une regression sur "cible" avant d'etre retrouvee par audit manuel, 2026-09-23.
+for _v in tchoix cchoix clettre cimg cible espvol inf rep go confirm choix lettre srcpath dstpath bekpath reckey blchoix cname drvpath; do
+    check "WinPE build : CHAQUE 'set /p ${_v}=' (toutes occurrences) est precede d'un 'set ${_v}=' (Entree vide ne doit pas rejouer l'ancienne valeur)" \
+        "_ok=1; for _ln in \$(grep -n \"set /p ${_v}=\" \"\$PS1\" | cut -d: -f1); do _prev=\$(sed -n \"\$((_ln-1))p\" \"\$PS1\"); echo \"\$_prev\" | grep -q \"\\\"set ${_v}=\\\"\" || _ok=0; done; [ \"\$_ok\" = 1 ]"
 done
 # l'assistant lui-meme (etapes proposees, refus par defaut, cle BitLocker jamais journalisee) : suite dediee
 _ao="$(bash "${DIR}/run_assistant_tests.sh" 2>&1)"; _arc=$?
