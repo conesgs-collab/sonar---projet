@@ -52,6 +52,8 @@ check "WinPE build : service WMI demarre explicitement au boot (net start winmgm
 # se lance jamais depuis le menu ("rien ne se passe" sans erreur) - avertir au lieu de laisser deviner.
 check "WinPE build : outils 32 bits sans alternative 64 bits (h2testw/bleachbit/Rapr) avertissent au lieu d'echouer silencieusement" 'grep -q ":tools_no64" "$PS1" && grep -q "h2testw.exe" "$PS1" && grep -q "bleachbit.exe" "$PS1" && grep -q "Rapr.exe" "$PS1" && grep -q "ne peut pas l.executer" "$PS1"'
 check "WinPE build : image systeme DISM (option 20) capture ET restaure, confirmation avant ecrasement" 'grep -q "if \`\"%choix%\`\"==\`\"20\`\" goto clone_menu" "$PS1" && grep -q "Dism /Capture-Image" "$PS1" && grep -q "Dism /Apply-Image" "$PS1" && grep -q "sera REMPLACE" "$PS1" && grep -q "Clonezilla" "$PS1"'
+check "WinPE build : verification disque (option 21) demande une lettre et lance chkdsk /f /r" 'grep -q "if \`\"%choix%\`\"==\`\"21\`\" goto chkdsk_menu" "$PS1" && grep -q "\":chkdsk_menu\"" "$PS1" && grep -q "chkdsk %lettre%: /f /r" "$PS1"'
+check "WinPE build : verification TPM (option 22) garde l'absence de powershell.exe et affiche Get-Tpm" 'grep -q "if \`\"%choix%\`\"==\`\"22\`\" goto tpm_check" "$PS1" && grep -q "\":tpm_check\"" "$PS1" && grep -q "Get-Tpm" "$PS1" && grep -q "WindowsPowerShell\\\\v1.0\\\\powershell.exe" "$PS1"'
 # cmd.exe "set /p var=" ne vide PAS var sur un Entree vide (garde sa valeur precedente si var a deja servi dans
 # CE boot) : tout "set /p" dont la valeur est ensuite comparee (retour menu sur vide, ou confirmation o/n / OUI)
 # doit etre precede d'un "set var=" pour qu'un Entree vide soit bien vu comme vide, sinon une confirmation ou un
