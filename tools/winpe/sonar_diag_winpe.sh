@@ -11,11 +11,26 @@
 # SystemRescue. Lecture seule ; seule une lettre de lecteur temporaire est
 # attribuee a l'ESP (en memoire, retiree ensuite).
 #
-# Usage : busybox sh sonar_diag_winpe.sh FAITS_SORTIE
+# AJOUT 2026-09-27 : les .dmp de Windows (minidumps, C:\Windows\Minidump)
+# RESTENT lisibles hors-ligne malgre l'absence de journaux noyau — ce n'est
+# pas un journal du noyau Linux, c'est un fichier sur le disque. BlueScreenView
+# (NirSoft, deja sur la cle pour inspection manuelle, option 15) le lit en
+# mode silencieux (/LoadFrom + /scomma, sans fenetre) : les 3 crashes les plus
+# recents deviennent des faits bsod.<instance>.d{1,2,3}.{driver,bugcheck,time},
+# exploitables par le meme moteur de regles que le reste du diagnostic — sans
+# quoi un technicien qui ne pense pas a ouvrir l'outil lui-meme ne voit jamais
+# cette information. Degrade silencieusement (aucun fait bsod.* emis) si
+# l'outil ou le dossier Minidump est absent : une regle ne doit jamais
+# conclure sur une preuve qu'on n'a pas reellement.
+#
+# Usage : busybox sh sonar_diag_winpe.sh FAITS_SORTIE [RACINE_CLE]
 OUT="${1:-facts.txt}"
 : > "$OUT"
 TMP="${TEMP:-${TMP:-.}}"
 DP="$TMP/sonar_dp_$$.txt"
+KEYROOT="${2:-}"
+BSV=""
+[ -n "$KEYROOT" ] && [ -f "$KEYROOT/Portable/BlueScreenView/BlueScreenView.exe" ] && BSV="$KEYROOT/Portable/BlueScreenView/BlueScreenView.exe"
 
 emit() { printf '%s=%s\n' "$1" "$2" >> "$OUT"; }
 clean() { tr -d '\r'; }
@@ -181,6 +196,34 @@ while IFS='|' read -r vn ltr lbl fs size stat info; do
                 [ "$hs" = "hibr" ] && st=hibernated
             fi
             [ -n "$st" ] && emit "part.$inst.fs_state" "$st"
+
+            # Minidumps (BlueScreenView, silencieux) : voir commentaire d'en-tete.
+            # Degrade sans rien emettre si l'outil ou le dossier Minidump est absent.
+            if [ -n "$BSV" ] && [ -d "$ltr:/Windows/Minidump" ]; then
+                BCSV="$TMP/sonar_bsod_$$.csv"
+                "$BSV" /LoadFrom "$ltr:\Windows\Minidump" /scomma "$BCSV" >/dev/null 2>&1
+                if [ -s "$BCSV" ]; then
+                    awk -F',' -v inst="$inst" '
+                        NR==1 {
+                            for (i=1;i<=NF;i++) { h=$i; gsub(/^"|"$/,"",h); if (h=="Crash Time") ct=i; if (h=="Bug Check String") bc=i; if (h=="Caused By Driver") cd=i }
+                            next
+                        }
+                        {
+                            n++
+                            if (n<=3) {
+                                t=$(ct); gsub(/^"|"$/,"",t)
+                                b=$(bc); gsub(/^"|"$/,"",b)
+                                d=$(cd); gsub(/^"|"$/,"",d)
+                                printf "bsod.%s.d%d.time=%s\n", inst, n, t
+                                printf "bsod.%s.d%d.bugcheck=%s\n", inst, n, b
+                                printf "bsod.%s.d%d.driver=%s\n", inst, n, d
+                            }
+                        }
+                        END { printf "bsod.%s.count=%d\n", inst, n+0 }
+                    ' "$BCSV" >> "$OUT" 2>/dev/null
+                fi
+                rm -f "$BCSV"
+            fi
         else
             emit "part.$inst.has_windows" no
         fi
