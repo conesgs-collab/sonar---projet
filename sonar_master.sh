@@ -1800,22 +1800,37 @@ sonar_prepare_ventoy_theme() {
        && convert -size 8x8 xc:'rgba(0,10,4,0.80)' PNG32:"${out_dir}/menu_c.png" 2>/dev/null; then
         pixmap_line='    menu_pixmap_style = "menu_*"'
     fi
+    # CORRIGE 2026-09-27 (test reel utilisateur : "la taille de la police
+    # demeure toujours petite" malgre le passage a "Unifont Regular 20" fait
+    # plus tot) : Ventoy ne charge par defaut QU'UNE seule police (l'Unifont
+    # 16px embarquee dans son propre bootloader). Nommer une police dans
+    # theme.txt ne l'agrandit pas magiquement — GRUB ne trouve aucune police
+    # "Unifont Regular 20" reellement chargee et retombe silencieusement sur
+    # la police par defaut (16px), donc le reglage precedent n'avait AUCUN
+    # effet visuel. Confirme via ventoy.net/en/plugin_theme.html : Ventoy
+    # expose une cle "fonts" (tableau de chemins .pf2) dans ventoy.json pour
+    # charger une police additionnelle — sans elle, aucune taille custom
+    # n'est possible. SonarMono-26.pf2 (genere via grub-mkfont a partir de
+    # DejaVu Sans Mono Bold, ~26px reels, cf Branding/) est copie ci-dessous
+    # et cable dans generate_ventoy_json_final() via cette cle "fonts".
+    local font_src="${SONAR_ROOT}/Branding/SonarMono-26.pf2"
+    [[ -s "$font_src" ]] && cp -f "$font_src" "${out_dir}/SonarMono-26.pf2"
     cat > "${out_dir}/theme.txt" <<THEME_TXT_EOF
 desktop-image: "background.png"
 title-text: ""
-terminal-font: "Unifont Regular 20"
+terminal-font: "SonarMono Bold 26"
 
 + boot_menu {
     left = 6%
     top = 10%
     width = 50%
     height = 58%
-    item_font = "Unifont Regular 20"
+    item_font = "SonarMono Bold 26"
     item_color = "#7dff7d"
     selected_item_color = "#ffffff"
-    item_height = 34
+    item_height = 40
     item_padding = 6
-    item_spacing = 5
+    item_spacing = 6
     scrollbar = false
 ${pixmap_line}
 }
@@ -1867,6 +1882,13 @@ if os.path.isfile(theme_txt):
         "ventoy_top": "96%",
         "ventoy_color": "#7dff7d",
     }
+    font_pf2 = os.path.join(mp, "ventoy", "theme", "SonarMono-26.pf2")
+    if os.path.isfile(font_pf2):
+        # Cle documentee ventoy.net/en/plugin_theme.html : sans elle, Ventoy
+        # ne charge que sa police 16px integree et theme.txt ne peut
+        # reference AUCUNE autre taille (voir commentaire dans
+        # sonar_prepare_ventoy_theme, qui depose ce .pf2).
+        cfg["theme"]["fonts"] = ["/ventoy/theme/SonarMono-26.pf2"]
 # menu_alias : renomme l'affichage dans le menu Ventoy sans renommer le
 # fichier (cle "image" documentee par Ventoy, chemin relatif a la racine
 # de la partition de donnees, meme convention que les chemins ISO ci-dessus).
