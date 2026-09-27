@@ -1908,6 +1908,7 @@ copy_payload_final() {
     fi
     [[ -f "${ai_results}" ]] && cp -f "${ai_results}" "${mp}/AI-Downloads/MANIFEST_AI_RESULTS.tsv"
     generate_tool_index_final "${mp}"
+    generate_portable_tools_index_final "${mp}"
     sonar_prepare_ventoy_theme "${mp}"
     generate_ventoy_json_final "${mp}"
     [[ "${INCLUDE_VERACRYPT}" == "true" ]] && sonar_generate_vault_helper "${mp}/Scripts"
@@ -2403,6 +2404,58 @@ Write-Host "=== Entrées catalogue correspondantes (nom/domaine) ==="
 $manifest = Join-Path $Root "AI-Downloads\MANIFEST_AI_RESULTS.tsv"
 if (Test-Path $manifest) { Select-String -Path $manifest -Pattern $Keyword }
 FINDTOOLPS1
+}
+
+# generate_portable_tools_index_final MOUNT_POINT: écrit
+# MANIFEST/PORTABLE_TOOLS.tsv (NOM<tab>chemin relatif sous Portable\), catalogue
+# choisi à la main d'UN exécutable principal par outil. Consommé par le menu
+# WinPE (option 15) à la place d'un "dir /s /b Portable\*.exe" — ce dernier
+# remontait aussi tout exécutable interne (désinstalleurs, services, aides,
+# doublons 32/64 bits) trouvé sous chaque dossier d'outil, gonflant la liste
+# à 101 entrées dont la majorité ne se lance pas directement (fenêtre qui se
+# referme aussitôt, rien ne se passe, ou erreur) — confirmé par test réel
+# utilisateur 2026-09-27 (>80% des entrées en échec). Ne référence QUE des
+# fichiers réellement présents sous Portable/ sur cette clé précise : une
+# entrée dont le fichier manque est simplement omise (silencieux, pas un
+# blocage) plutôt que de figurer dans le menu pour échouer au lancement.
+generate_portable_tools_index_final() {
+    local mp="$1" name rel
+    local -a catalog=(
+        "Android Platform Tools (ADB)|AndroidPlatformTools/platform-tools/adb.exe"
+        "Android Platform Tools (Fastboot)|AndroidPlatformTools/platform-tools/fastboot.exe"
+        "Autoruns|Autoruns/Autoruns64.exe"
+        "BCUninstaller|BCUninstaller/BCUninstaller.exe"
+        "BatteryInfoView|BatteryInfoView/BatteryInfoView.exe"
+        "BleachBit|BleachBit/BleachBit-Portable/bleachbit.exe"
+        "BlueScreenView|BlueScreenView/BlueScreenView.exe"
+        "ClamAV (Windows)|ClamAV-Windows/clamscan.exe"
+        "CrystalDiskInfo|CrystalDiskInfo/DiskInfo64.exe"
+        "CrystalDiskMark|CrystalDiskMark/DiskMark64.exe"
+        "Dism++|Dism++/Dism++x64.exe"
+        "DriverStoreExplorer|DriverStoreExplorer/Rapr.exe"
+        "H2testw|H2testw/h2testw.exe"
+        "HWiNFO|HWiNFO/HWiNFO64.exe"
+        "IsMyLcdOK|IsMyLcdOK/IsMyLcdOK_x64.exe"
+        "KVC File Recovery Tool|KVC_File_Recovery_Tool/FRT_x64.exe"
+        "Keyboard Tester|Keyboard_Tester/keytest.exe"
+        "MiniTool Partition Wizard|MiniTool Partition Wizard/partitionwizard.exe"
+        "NETworkManager|NETworkManager/NETworkManager.exe"
+        "NWinfo|NWinfo/gnwinfo.exe"
+        "Ophcrack|Ophcrack/x64/ophcrack.exe"
+        "Prime95|Prime95/prime95.exe"
+        "Process Explorer|ProcessExplorer/procexp64.exe"
+        "Rizin|Rizin/rizin-win-installer-vs2019_static-64/bin/rizin.exe"
+        "Snappy Driver Installer Origin|Snappy_Driver_Installer_Origin/SDIO_x64_R887.exe"
+        "androidqf|androidqf/androidqf.exe"
+        "Rufus|rufus-4.15.exe"
+        "windows-mtr|windows-mtr/mtr.exe"
+    )
+    : > "${mp}/MANIFEST/PORTABLE_TOOLS.tsv"
+    for entry in "${catalog[@]}"; do
+        name="${entry%%|*}"
+        rel="${entry#*|}"
+        [[ -f "${mp}/Portable/${rel}" ]] && printf '%s\t%s\n' "$name" "$rel" >> "${mp}/MANIFEST/PORTABLE_TOOLS.tsv"
+    done
 }
 
 generate_macos_support_final() {
