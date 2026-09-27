@@ -1867,6 +1867,20 @@ if os.path.isfile(theme_txt):
         "ventoy_top": "96%",
         "ventoy_color": "#7dff7d",
     }
+# menu_alias : renomme l'affichage dans le menu Ventoy sans renommer le
+# fichier (cle "image" documentee par Ventoy, chemin relatif a la racine
+# de la partition de donnees, meme convention que les chemins ISO ci-dessus).
+# Demande utilisateur 2026-09-27 : CAINE (nom de fichier brut peu parlant,
+# "caine14.0.iso") — etendre cette liste au besoin pour d'autres ISO.
+menu_alias=[]
+for img in isos:
+    base = os.path.basename(img).lower()
+    if base.startswith("caine"):
+        menu_alias.append({"image": img, "alias": "CAINE - Analyse forensique"})
+    elif base.startswith("systemrescue"):
+        menu_alias.append({"image": img, "alias": "SONAR-Linux SE"})
+if menu_alias:
+    cfg["menu_alias"] = menu_alias
 os.makedirs(os.path.join(mp,"ventoy"),exist_ok=True)
 with open(os.path.join(mp,"ventoy","ventoy.json"),"w",encoding="utf-8") as f:
     json.dump(cfg,f,indent=2)
@@ -4113,7 +4127,7 @@ general-os	Alpine Linux	Distribution Linux minimaliste (musl/busybox) — utile 
 general-os	Arch Linux	Environnement Linux "rolling release" avec les outils/pilotes les plus recents — utile quand SystemRescue (base plus ancienne) ne reconnait pas un peripherique tres recent. Open source, archlinux.org.
 general-os	Debian (DVD complet)	Distribution Linux stable de reference, hors ligne (DVD complet, pas besoin de reseau pour l'installation) — choix pertinent pour une reinstallation complete plutot qu'un depannage. Open source, debian.org.
 general-os	Debian (netinst)	Meme distribution que ci-dessus, image d'installation reseau minimale (~700 Mo au lieu de ~3,7 Go) — pour une reinstallation quand la bande passante ou l'espace sur la cle est limite. Open source, debian.org.
-general-os	Ubuntu Server	Distribution Linux orientee serveur, tres repandue en entreprise — pertinent pour reinstaller ou depanner un serveur Linux specifiquement (par opposition a un poste de travail). Open source, ubuntu.com.
+general-os	Ubuntu Server	RETIRE DE LA CLE 2026-09-27 (test reel utilisateur) : l'image live-server demarre en mode installation automatique (autoinstall/subiquity) sans confirmation explicite claire avant d'ecrire sur le disque — risque reel d'effacer accidentellement le disque d'un client sur une cle de depannage de terrain. Entree conservee ici pour memoire (pourquoi elle a disparu), pas comme recommandation. A ne re-ajouter que si une image netboot/manuelle sans autoinstall par defaut est identifiee.
 general-os	Linux Mint	Distribution Linux orientee utilisateur final (bureau Cinnamon), interface familiere pour un utilisateur venant de Windows — pertinent si le choix final est de migrer un poste vers Linux plutot que de le reparer. Open source, linuxmint.com.
 general-os	Fedora Workstation	Distribution Linux de bureau, cycle de developpement rapide, proche de l'amont (upstream) — alternative a Linux Mint pour un profil plus technique. Open source, fedoraproject.org.
 general-os	Fedora KDE	Meme distribution que Fedora Workstation, environnement de bureau KDE Plasma au lieu de GNOME — au choix selon la preference de l'utilisateur final. Open source, fedoraproject.org.
@@ -4266,7 +4280,7 @@ Alpine Linux	https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64
 Arch Linux	https://geo.mirror.pkgbuild.com/iso/latest/archlinux-2026.09.01-x86_64.iso	be8458032f8105e60ee2a3067f950b6e3c007ee51b38dac50e8b48e765561c91		none	SHA-256 publie sur le miroir officiel geo.mirror.pkgbuild.com (redirection vers un miroir proche gere par le projet Arch, sha256sums.txt) et recoupe localement.
 Debian (DVD complet)	https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd/debian-13.7.0-amd64-DVD-1.iso	347b6c67a3cc0b7ddb60b178f683470c4e2b7ac426c996d9337a2ff36c1a32d2		none	SHA-256 publie sur le domaine officiel (cdimage.debian.org, SHA256SUMS) et recoupe localement.
 Debian (netinst)	https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.7.0-amd64-netinst.iso	a7ef94ac2fb9a7fec454552abd629b7cc9d5155c886165a45649f5ce6167e355		none	Meme source/verification que Debian DVD complet.
-Ubuntu Server	https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-live-server-amd64.iso	cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927		none	SHA-256 publie sur le domaine officiel (releases.ubuntu.com, SHA256SUMS) et recoupe localement.
+Ubuntu Server	https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-live-server-amd64.iso	cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927		none	DANGER CONFIRME 2026-09-27 (test reel) : demarre en mode autoinstall (subiquity) sans confirmation claire avant ecriture disque — retire de la cle physique par l'utilisateur apres l'avoir constate. SHA-256 publie sur le domaine officiel (releases.ubuntu.com, SHA256SUMS) et recoupe localement, mais ne pas redeployer tel quel sur une cle de terrain.
 Linux Mint	https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso	a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4		none	ISO et sha256sum.txt recuperes sur mirrors.kernel.org (miroir officiel liste sur linuxmint.com/edition.php, kernel.org est une infrastructure de confiance etablie) et recoupe localement. Linux Mint lui-meme ne publie pas de checksum sur son propre domaine, seulement sur ses miroirs officiels.
 Fedora Workstation	https://download.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/x86_64/iso/Fedora-Workstation-Live-44-1.7.x86_64.iso	1620295f6a00c27c3208f0c00b8ece4eab1ec69b9002152d97488bf26a426ddf		none	SHA-256 publie sur le domaine officiel (download.fedoraproject.org, fichier CHECKSUM signe PGP) et recoupe localement.
 Fedora KDE	https://download.fedoraproject.org/pub/fedora/linux/releases/44/KDE/x86_64/iso/Fedora-KDE-Desktop-Live-44-1.7.x86_64.iso	c8295961d4c41adbf785a31a17c21a971d3b7415fda72dcad0c11c49577bf03a		none	Meme source/verification que Fedora Workstation.
