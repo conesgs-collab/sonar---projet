@@ -1751,10 +1751,13 @@ sonar_prepare_ventoy_theme() {
         # canvas narrower than the box itself once a large image shrinks.
         if convert "$src" -resize '800x600>' "${resized}" 2>/dev/null; then
             w="$(identify -format '%w' "${resized}" 2>/dev/null || echo 800)"
+            # CORRIGE 2026-09-27 (demande utilisateur) : bandeau titre retire —
+            # redondant des lors que l'image de fond porte deja son propre
+            # texte "SONAR-SE" incruste. Le credit (auteur) reste seul,
+            # bandeau reduit en consequence (une seule ligne au lieu de deux).
             if ! convert "${resized}" \
-                    \( -size "${w}x110" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
-                    -gravity south -fill white -pointsize 34 -annotate +0+58 "${SONAR_VENTOY_TITLE}" \
-                    -gravity south -fill '#cccccc' -pointsize 18 -annotate +0+20 "${SONAR_VENTOY_CREDIT}" \
+                    \( -size "${w}x50" xc:'rgba(0,0,0,0.55)' \) -gravity south -compose over -composite \
+                    -gravity south -fill '#cccccc' -pointsize 18 -annotate +0+16 "${SONAR_VENTOY_CREDIT}" \
                     -colors 256 "PNG8:${out}" 2>/dev/null; then
                 log "[SONAR] Filigrane du fond Ventoy : échec ImageMagick, copie de l'image redimensionnée telle quelle."
                 cp -f "${resized}" "${out}"
@@ -1800,19 +1803,19 @@ sonar_prepare_ventoy_theme() {
     cat > "${out_dir}/theme.txt" <<THEME_TXT_EOF
 desktop-image: "background.png"
 title-text: ""
-terminal-font: "Unifont Regular 16"
+terminal-font: "Unifont Regular 20"
 
 + boot_menu {
     left = 6%
     top = 10%
     width = 50%
     height = 58%
-    item_font = "Unifont Regular 16"
+    item_font = "Unifont Regular 20"
     item_color = "#7dff7d"
     selected_item_color = "#ffffff"
-    item_height = 28
+    item_height = 34
     item_padding = 6
-    item_spacing = 4
+    item_spacing = 5
     scrollbar = false
 ${pixmap_line}
 }
