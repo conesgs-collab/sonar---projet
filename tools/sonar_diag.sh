@@ -394,6 +394,38 @@ except Exception:
     printf '%s\n' "$text"
 }
 
+# ai_verify TEXTE_IA RAPPORT_SOURCE : le prompt d'ai_narrative DEMANDE deja de
+# ne pas inventer de fait, ne pas aggraver un constat et rester sous 8 lignes
+# - mais jusqu'ici on se contentait de l'esperer, sans jamais verifier que le
+# modele a effectivement obei. Controle mecanique, bon marche (pas besoin
+# d'un second LLM pour surveiller le premier) : un profil SONAR-SE cite par
+# l'IA doit deja apparaitre dans le rapport source (sinon outil invente ou
+# hors-sujet) ; un mot d'aggravation absent du rapport ne doit pas apparaitre
+# cote IA (le rapport dit "sale", l'IA ne doit pas dire "corrompu") ; la
+# reponse ne doit pas deraper largement au-dela des 8 lignes demandees. Ne
+# bloque jamais l'affichage du commentaire IA - il reste consultatif comme
+# documente en tete de fichier - mais rend une derive VISIBLE au technicien
+# au lieu de la laisser passer silencieusement.
+ai_verify() {
+    local ai_text="$1" source_report="$2" issue="" p w nlines
+    local -a profiles=(boot-repair data-recovery malware disk-clone password-reset hardware-diagnostic peripherals-network general-os)
+    for p in "${profiles[@]}"; do
+        if grep -qi -- "$p" <<<"$ai_text" && ! grep -qi -- "$p" <<<"$source_report"; then
+            issue="${issue}profil '${p}' cite par l'IA mais absent du rapport ; "
+        fi
+    done
+    local -a escalate=(corrompu detruit irrecuperable "hors service" irreversible "perte definitive")
+    for w in "${escalate[@]}"; do
+        if grep -qi -- "$w" <<<"$ai_text" && ! grep -qi -- "$w" <<<"$source_report"; then
+            issue="${issue}mot '${w}' utilise par l'IA sans figurer dans le rapport ; "
+        fi
+    done
+    nlines="$(grep -c . <<<"$ai_text")"
+    (( nlines > 15 )) && issue="${issue}reponse anormalement longue (${nlines} lignes, 8 demandees) ; "
+    [[ -n "$issue" ]] && { echo "$issue"; return 1; }
+    return 0
+}
+
 # ============================================================================
 # ORCHESTRATION
 # ============================================================================
@@ -677,7 +709,15 @@ main() {
         if $USE_AI; then
             echo; echo "ANALYSE ASSISTEE (IA locale, consultative - le rapport ci-dessus fait foi)"
             echo "--------------------------------------------------------------"
-            ai_narrative "$rep" || echo "(commentaire IA indisponible)"
+            local ai_txt vissue
+            if ai_txt="$(ai_narrative "$rep")" && [[ -n "$ai_txt" ]]; then
+                printf '%s\n' "$ai_txt"
+                if ! vissue="$(ai_verify "$ai_txt" "$rep")"; then
+                    echo; echo "[SONAR-DIAG] VERIFICATION AUTOMATIQUE : ${vissue}Le rapport deterministe ci-dessus fait foi, pas ce commentaire."
+                fi
+            else
+                echo "(commentaire IA indisponible)"
+            fi
         fi
         exit 0
     fi
@@ -695,8 +735,14 @@ main() {
     if $USE_AI; then
         local ai
         if ai="$(ai_narrative "$rep")" && [[ -n "$ai" ]]; then
+            local vissue vrc=0
+            vissue="$(ai_verify "$ai" "$rep")" || vrc=$?
             { echo; echo "ANALYSE ASSISTEE (IA locale, consultative - le rapport ci-dessus fait foi)"
-              echo "--------------------------------------------------------------"; echo "$ai"; } | tee -a "$out/report.txt"
+              echo "--------------------------------------------------------------"; echo "$ai"
+              if [[ $vrc -ne 0 ]]; then
+                  echo; echo "[SONAR-DIAG] VERIFICATION AUTOMATIQUE : ${vissue}Le rapport deterministe ci-dessus fait foi, pas ce commentaire."
+              fi
+            } | tee -a "$out/report.txt"
         fi
     fi
     echo
