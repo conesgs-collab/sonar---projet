@@ -1114,6 +1114,10 @@ Commandes indépendantes (à la place de --disk):
                                 Optionnel : sans aucun PIN défini, SONAR
                                 Field prévient explicitement que l'accès
                                 n'est pas verrouillé.
+  --field-pin-remove <NIVEAU>  [rôle VAULT] Retire la ligne d'un NIVEAU
+                                (ex. un niveau partagé remplacé par des
+                                PIN individuels). Refuse si le niveau
+                                est introuvable.
   --field-export <MONTAGE>     Met à jour SONAR Field (MANIFEST/PROFILES*.
                                 tsv, Scripts/sonar_field.sh, MANIFEST/
                                 FIELD_PINS.tsv si défini) sur une clé déjà
@@ -4837,6 +4841,32 @@ sonar_field_pin_set() {
     echo "[SONAR] PIN de terrain défini pour le niveau '${niveau}' (profils: ${profils}) — sera copié sur la clé au prochain --disk (MANIFEST/FIELD_PINS.tsv)."
 }
 
+# sonar_field_pin_remove NIVEAU: retire (rôle VAULT) la ligne d'un niveau
+# d'accréditation de terrain — pendant du set ci-dessus, qui ne sait
+# qu'ajouter/mettre à jour. Sans elle, un niveau qu'on ne veut plus (ex:
+# un "Technicien" partagé remplacé par des PIN individuels) reste
+# indéfiniment valide : il n'y a aucun moyen propre de le désactiver.
+sonar_field_pin_remove() {
+    local niveau tmp before after
+    niveau="$(sonar_sanitize_value "${1:-}")"
+    sonar_require_role VAULT || return 1
+    [[ -n "$niveau" ]] || { echo "[SONAR][ERROR] Niveau vide refusé." >&2; return 2; }
+    [[ -s "${SONAR_FIELD_PINS_FILE}" ]] || { echo "[SONAR][ERROR] Aucun PIN de terrain défini." >&2; return 1; }
+    before=$(wc -l < "${SONAR_FIELD_PINS_FILE}")
+    tmp="$(mktemp)"
+    awk -F'\t' -v n="$niveau" 'BEGIN{OFS="\t"} $1!=n' "${SONAR_FIELD_PINS_FILE}" > "$tmp"
+    after=$(wc -l < "$tmp")
+    if [[ "$after" -eq "$before" ]]; then
+        rm -f "$tmp"
+        echo "[SONAR][ERROR] Niveau '${niveau}' introuvable — rien retiré." >&2
+        return 1
+    fi
+    mv "$tmp" "${SONAR_FIELD_PINS_FILE}"
+    chmod 600 "${SONAR_FIELD_PINS_FILE}" 2>/dev/null || true
+    sonar_audit "FIELD_PIN_REMOVED" "niveau=${niveau}"
+    echo "[SONAR] Niveau '${niveau}' retiré — sera reflete sur la cle au prochain --field-export ou --disk."
+}
+
 # === SONAR AI DRY-RUN REPORT ENGINE V1 ===
 SONAR_AI_REPORT_DIR="${SONAR_AI_REPORT_DIR:-${SONAR_ROOT:-$(pwd)}/SONAR_SOURCE/AI_REPORT}"
 SONAR_AI_REPORT="${SONAR_AI_REPORT:-${SONAR_AI_REPORT_DIR}/ai_dry_run_report.tsv}"
@@ -6958,6 +6988,7 @@ case "${1:-}" in
     --fetch-manifest-verify-seal) if sonar_fetch_manifest_verify_seal; then exit 0; else exit $?; fi ;;
     --fetch) shift; if sonar_fetch_profile "${1:-}"; then exit 0; else exit $?; fi ;;
     --field-pin-set) shift; if sonar_field_pin_set "${1:-}" "${2:-}" "${3:-ALL}"; then exit 0; else exit $?; fi ;;
+    --field-pin-remove) shift; if sonar_field_pin_remove "${1:-}"; then exit 0; else exit $?; fi ;;
     --field-export) shift; if sonar_field_export "${1:-}"; then exit 0; else exit $?; fi ;;
     --diag-analyze) shift; sonar_diag_analyze "$@"; exit $? ;;
     --catalog-install) if sonar_embedded_catalog_install; then exit 0; else exit $?; fi ;;
