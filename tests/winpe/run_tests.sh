@@ -28,7 +28,7 @@ for body in 'BEGIN { system("calc.exe") }' 'BEGIN { "whoami" | getline u }' 'BEG
 done
 
 # --- garanties statiques du build (le menu genere est teste sur cmd.exe par le script .ps1)
-check "WinPE build : le menu cherche la cle sur D: a Z: (C: et X: exclus)"          '_fk="$(grep -A6 "\":findkey\"" "$PS1")"; grep -q "for %%d in (D E F G H I J K L M N O P Q R S T U V W Y Z)" <<<"$_fk" && ! grep -q "for %%d in (C D E" <<<"$_fk"'
+check "WinPE build : le menu cherche la cle sur D: a Z: (C: et X: exclus)"          '_fk="$(grep -A20 "\":findkey\"" "$PS1")"; grep -q "for %%d in (D E F G H I J K L M N O P Q R S T U V W Y Z)" <<<"$_fk" && ! grep -q "for %%d in (C D E" <<<"$_fk"'
 check "WinPE build : la copie integree reste le repli (les 3 fichiers sont toujours embarques)" 'grep -q "\"sonar_diag_winpe.sh\"" "$PS1" && grep -q "\"diag_engine.awk\"" "$PS1" && grep -q "\"diag_rules.txt\"" "$PS1" && grep -q "\"sonar_check_awk.sh\"" "$PS1"'
 check "WinPE build : le moteur pris sur la cle passe par le garde-fou"              'grep -q "sonar_check_awk.sh" "$PS1" && grep -q "goto diagsrc_refused" "$PS1"'
 check "WinPE build : l'origine est affichee ET consignee dans le rapport"           'grep -q "echo    regles : %RULSRC%" "$PS1" && grep -q "Sources : regles = %RULSRC%" "$PS1"'
