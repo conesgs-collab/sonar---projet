@@ -1876,7 +1876,7 @@ menu_alias=[]
 for img in isos:
     base = os.path.basename(img).lower()
     if base.startswith("caine"):
-        menu_alias.append({"image": img, "alias": "CAINE - Analyse forensique"})
+        menu_alias.append({"image": img, "alias": "SonarSyst-SE"})
     elif base.startswith("systemrescue"):
         menu_alias.append({"image": img, "alias": "SONAR-Linux SE"})
 if menu_alias:
