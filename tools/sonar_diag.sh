@@ -335,6 +335,17 @@ analyze() {
 # ============================================================================
 # 3. IA LOCALE (optionnelle, consultative)
 # ============================================================================
+# SONAR_AI_MODEL : "gemma3" par defaut, choisi pour la qualite de reformulation
+# (respecte la structure demandee : cause / ordre des actions / risque). Compare
+# le 2026-09-27 a deux modeles plus petits (gemma3:1b, qwen2.5:1.5b) sur un cas
+# reel (SSD SMART FAILED) : gemma3:1b reste correctement ancre sur les faits
+# mais reste verbeux/repetitif (n'atteint pas la structure en 3 points) ;
+# qwen2.5:1.5b confond carrement les CONSIGNES du prompt avec du contenu a
+# analyser (les recopie comme si c'etait un constat) et depasse la longueur
+# demandee. Aucun des deux n'egale la qualite du defaut. gemma3:1b reste une
+# option DELIBEREMENT plus rapide (~50s vs 217s mesures sur un i7-6600U reel,
+# soit ~4x) pour un technicien qui prefere la vitesse a la prose soignee —
+# a activer explicitement (SONAR_AI_MODEL=gemma3:1b), jamais le defaut.
 ai_narrative() {
     local report="$1"
     local url="${SONAR_AI_URL:-http://127.0.0.1:11434/api/generate}" model="${SONAR_AI_MODEL:-gemma3}"
