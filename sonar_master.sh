@@ -125,6 +125,34 @@ set -euo pipefail
 shopt -s extglob
 umask 077
 
+# Contournement Git Bash / Windows (trouvé 2026-09-28) : l'alias "App
+# Execution Alias" du Microsoft Store pour python3.exe (chemin typique
+# .../AppData/Local/Microsoft/WindowsApps/python3) satisfait `command -v
+# python3` — donc tout preflight basé sur ça seul est trompé — mais ne
+# fait qu'imprimer une invite d'installation Store et quitter en erreur,
+# sans jamais exécuter de vrai code Python. Symptôme observé : tout ce
+# qui dépend de sonar_hmac_sha256_file() (jetons de rôle, --field-pin-set,
+# --fetch-manifest-seal, filigrane de build, chaîne de custody) échoue
+# silencieusement sous Git Bash natif alors que la même commande, sous
+# WSL, passe sans erreur (python3 y est le vrai interpréteur). Sous WSL/
+# Linux ce bloc ne fait rien (le premier test réussit déjà). Sous Git
+# Bash avec l'alias cassé, on masque `python3` par une fonction shell
+# qui pointe vers un interpréteur réellement fonctionnel — `python`
+# (souvent le vrai Python de python.org sous Git Bash) ou le lanceur
+# `py -3` — sans toucher aux ~20 appels `python3 ...` déjà présents dans
+# ce script.
+if ! python3 -c '' >/dev/null 2>&1; then
+    if command -v python >/dev/null 2>&1 && python -c '' >/dev/null 2>&1; then
+        python3() { command python "$@"; }
+    elif command -v py >/dev/null 2>&1 && py -3 -c '' >/dev/null 2>&1; then
+        python3() { command py -3 "$@"; }
+    fi
+    # Sinon : aucun interpréteur fonctionnel trouvé, `python3` reste tel
+    # quel et échouera de façon visible au premier usage — comportement
+    # correct, ce script ne doit jamais avancer avec un HMAC silencieusement
+    # vide.
+fi
+
 # Racine d'exécution stable : indépendante du répertoire courant de l'appelant.
 # (Stable runtime root: does not depend on the caller's current directory.)
 SONAR_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
