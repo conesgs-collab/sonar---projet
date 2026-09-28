@@ -6,6 +6,35 @@ est la version lisible de l'historique qui vivait jusqu'ici dans l'en-tête de
 ici ET dans un commit Git séparé — le script n'a plus besoin de porter tout
 son propre historique en commentaire.
 
+## [Non versionné] — 2026-09-28
+
+### Retiré
+**SystemRescue (SONAR-Linux SE) retiré du catalogue et de la clé physique.** Root cause confirmée en
+conditions réelles : l'ISO échoue systématiquement au démarrage via Ventoy 1.1.17 dès que Secure Boot est
+actif côté machine cible ("No bootfile found for UEFI!"), reproduit à l'identique sur plusieurs machines
+différentes (donc pas un problème de firmware d'une machine précise) — le fichier ISO lui-même est intact
+(SHA-256 recalculé sur la clé, identique à la valeur vérifiée à la source), et sa structure UEFI interne
+(`EFI/BOOT/BOOTX64.EFI`) est standard. C'est un bug/limite de compatibilité connu de Ventoy face à cette ISO
+précise (plusieurs tickets similaires sur github.com/ventoy/Ventoy, dont un spécifique à SystemRescue),
+sans correctif côté `sonar_master.sh`. CAINE (SonarSyst-SE) et Linux Mint démarrent normalement dans les
+mêmes conditions (Secure Boot actif, même machine) — confirmé en test réel — donc ce n'est pas un problème
+Secure Boot général de la clé.
+
+**Impact et migration** : le protocole d'accréditation PIN et les scripts SONAR Field (`sonar_field.sh`,
+`sonar_diag.sh`, etc.) ne sont PAS perdus — ils vivent dans `Scripts/` sur la partition de données de la clé,
+indépendamment de tout ISO, et restent utilisables depuis n'importe quel environnement Linux qui peut monter
+la clé, CAINE inclus. **CAINE devient le point d'entrée Linux par défaut** pour ce protocole. Point d'attention
+non encore vérifié en test réel : CAINE monte les disques en LECTURE SEULE par défaut (protection forensique,
+utilitaire "Mounter" sur le bureau pour basculer en écriture) — à confirmer que le protocole PIN peut bien
+écrire ses journaux/rapports une fois le mode écriture activé pour la clé SONAR spécifiquement.
+
+Fichier ISO conservé (pas supprimé) : `E:\_Archive\systemrescue-13.02-amd64.iso.retired-20260928`, hors de
+l'arborescence `ISO/` donc plus jamais proposé par Ventoy. `SONAR_PROFILES_TSV`, `SONAR_FETCH_MANIFEST_TSV`
+et `ventoy.json` (menu_alias) mis à jour en conséquence ; descriptions d'outils auparavant "inclus dans
+SystemRescue" (GParted, TestDisk, ddrescue) repointées vers CAINE/SonarSyst-SE. `nwipe` retiré du catalogue
+(dépendait exclusivement de SystemRescue, non confirmé présent dans CAINE — pas d'alternative vérifiée pour
+l'instant plutôt que d'affirmer une couverture non prouvée).
+
 ## [1.0.0] — 2026-09-23
 
 ### Contexte
