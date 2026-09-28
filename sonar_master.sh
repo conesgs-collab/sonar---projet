@@ -847,7 +847,7 @@ GENERATE_README="${GENERATE_README:-true}"
 # its git history — same reasoning as Ventoy's own archive being
 # downloaded/locally-supplied rather than embedded). Silently skipped if
 # absent; never blocks a deploy.
-INCLUDE_VENTOY_THEME="${INCLUDE_VENTOY_THEME:-false}"
+INCLUDE_VENTOY_THEME="${INCLUDE_VENTOY_THEME:-true}"
 SONAR_VENTOY_TITLE="${SONAR_VENTOY_TITLE:-SONAR - SE}"
 SONAR_VENTOY_CREDIT="${SONAR_VENTOY_CREDIT:-Sekou SANOU - Burkina Faso}"
 # Protection anti-reproduction anarchique (2026-09-18) : un clone dd brut de
@@ -1028,21 +1028,33 @@ Autres:
                                 persistance Ventoy, jamais chiffrée par SONAR)
   --no-logging               Désactiver la journalisation principale
   --no-readme                Ne pas générer README
-  --ventoy-theme             Active le fond d'écran Ventoy personnalisé
-                                (voir SOURCE_DIR/Branding/) — DÉSACTIVÉ PAR
-                                DÉFAUT depuis le 2026-09-15. Trois tailles
-                                d'image radicalement différentes (6 Mo,
-                                2,25 Mo, 480 Ko décodés) ont produit le
-                                MÊME crash GRUB ("alloc magic is broken")
-                                sur un HP EliteBook 840 G3 réel — ce n'est
-                                probablement pas une question de taille
-                                d'image mais d'incompatibilité du module
-                                thème de Ventoy avec ce firmware. Réduire
-                                l'image ne corrigera vraisemblablement rien
-                                — voir CHANGELOG.md. N'activez qu'après
-                                avoir testé sur le matériel cible précis.
-  --no-ventoy-theme          Conservé pour compatibilité — sans effet,
-                                c'est déjà le comportement par défaut.
+  --ventoy-theme             Active le fond d'écran/police/menu Ventoy
+                                personnalisé (voir SOURCE_DIR/Branding/) —
+                                ACTIVÉ PAR DÉFAUT depuis le 2026-09-28.
+                                Historique : le crash GRUB "alloc magic is
+                                broken" rencontré sur le HP EliteBook 840 G3
+                                (2026-09-15) n'était PAS une question de
+                                taille d'image (trois tailles radicalement
+                                différentes ont produit le même crash) mais
+                                un bug SONAR — ventoy.json pointait "file"
+                                directement sur le PNG au lieu d'un script
+                                theme.txt (corrigé v3.35.0), puis un second
+                                bug (theme.txt sans le composant "+
+                                boot_menu", menu invisible bien que le fond
+                                s'affichait, corrigé v3.40.1). Les deux
+                                corrections ont été confirmées par un boot
+                                réel sans crash sur le HP EliteBook 840 G3
+                                (2026-09-20) et la clé physique du projet
+                                tourne avec ce thème actif depuis. Voir
+                                CHANGELOG.md pour le détail. Sur un NOUVEAU
+                                matériel cible jamais testé, gardez un œil
+                                sur le premier boot ; --no-ventoy-theme
+                                reste l'échappatoire immédiate en cas de
+                                souci.
+  --no-ventoy-theme          Désactive le thème Ventoy personnalisé (fond
+                                d'écran, police, bandeau crédit, alias de
+                                menu SonarSyst-SE/SONAR-Linux SE) et revient
+                                au menu Ventoy strictement par défaut.
   --protect-catalog          Chiffre MANIFEST/MANIFEST.tsv (gpg AES-256) sur
                                 la clé — protège la curation (quel outil,
                                 pourquoi, SHA-256) contre une reproduction
@@ -1745,10 +1757,14 @@ sonar_prepare_ventoy_theme() {
         # produced the IDENTICAL "alloc magic is broken" crash. A 12x
         # reduction in decoded image size made no observable difference,
         # which is strong evidence the decoded-image-size theory is WRONG
-        # (or at best incomplete): the actual crash is more likely in
-        # Ventoy's gfxmenu theme module itself on this firmware, not in
-        # how large the PNG is. `--ventoy-theme` stays opt-in and
-        # documented as unreliable rather than "fixed by a smaller image".
+        # (or at best incomplete). The real root cause (found later, see
+        # CHANGELOG v3.35.0/v3.40.1) was `ventoy.json`'s "file" key pointing
+        # directly at the PNG instead of a theme.txt script, and a missing
+        # "+ boot_menu" component — both fixed and confirmed crash-free on
+        # a real boot (HP EliteBook 840 G3, 2026-09-20), which is why
+        # `--ventoy-theme` is enabled by default since 2026-09-28. This
+        # resize pipeline is kept regardless since it's strictly cheaper,
+        # never because image size was ever the actual cause.
         local resized="${out_dir}/.resized.png"
         # Resize first, to a temp file, then measure THAT — sizing the
         # banner box from the pre-resize width would composite it onto a
